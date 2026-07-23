@@ -26,7 +26,6 @@ extern "C" {
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
@@ -84,6 +83,7 @@ PCF8574_StatusTypeDef PCF8574_ClearPort (PCF8574_HandleTypeDef* Device);
 PCF8574_StatusTypeDef PCF8574_WriteBit  (PCF8574_HandleTypeDef* Device, uint8_t Bit);
 PCF8574_StatusTypeDef PCF8574_ReadBit   (PCF8574_HandleTypeDef* Device, uint8_t Bit, uint8_t* Buffer);
 PCF8574_StatusTypeDef PCF8574_ClearBit  (PCF8574_HandleTypeDef* Device, uint8_t Bit);
+PCF8574_StatusTypeDef PCF8574_ToggleBit (PCF8574_HandleTypeDef* Device, uint8_t Bit);
 
 #ifdef __cplusplus
 }
