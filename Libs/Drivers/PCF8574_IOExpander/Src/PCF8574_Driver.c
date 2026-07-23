@@ -59,7 +59,8 @@ bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device)
  *
  * @note    This function must be called before using any other driver operation.
  *
- * @return  void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_Init(PCF8574_HandleTypeDef* Device, uint8_t Address, void* I2C_Context)
 {
@@ -90,7 +91,8 @@ PCF8574_StatusTypeDef PCF8574_Init(PCF8574_HandleTypeDef* Device, uint8_t Addres
  *
  * @note   	None.
  *
- * @return 	void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_Deinit(PCF8574_HandleTypeDef* Device)
 {
@@ -128,7 +130,8 @@ PCF8574_StatusTypeDef PCF8574_Deinit(PCF8574_HandleTypeDef* Device)
  * @note   	The internal port shadow is updated only after a succesful I2C transmission,
  *          preventing corrupted port data.
  *
- * @return 	void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t Mask)
 {
@@ -163,7 +166,8 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
  *
  * @note   	Relevant implementation note, constraint or side effect.
  *
- * @return 	8-bit value representing the current logic state of the I/O port.
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* Buffer)
 {
@@ -193,7 +197,8 @@ PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* B
  *
  * @note   	None.
  *
- * @return 	void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ClearPort(PCF8574_HandleTypeDef* Device)
 {
@@ -219,7 +224,8 @@ PCF8574_StatusTypeDef PCF8574_ClearPort(PCF8574_HandleTypeDef* Device)
  *
  * @note   	Valid bit positions range from 0 to 7.
  *
- * @return 	void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_WriteBit(PCF8574_HandleTypeDef* Device, uint8_t Bit)
 {
@@ -246,7 +252,8 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(PCF8574_HandleTypeDef* Device, uint8_t Bi
  *
  * @note   	Valid bit positions range from 0 to 7.
  *
- * @return 	Bit mask representing the state of the selected I/O bit.
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ReadBit(PCF8574_HandleTypeDef* Device, uint8_t Bit, uint8_t* Buffer)
 {
@@ -281,7 +288,8 @@ PCF8574_StatusTypeDef PCF8574_ReadBit(PCF8574_HandleTypeDef* Device, uint8_t Bit
  *
  * @note   	Valid bit positions range from 0 to 7.
  *
- * @return 	void
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ClearBit(PCF8574_HandleTypeDef* Device, uint8_t Bit)
 {
@@ -295,6 +303,51 @@ PCF8574_StatusTypeDef PCF8574_ClearBit(PCF8574_HandleTypeDef* Device, uint8_t Bi
     data_buffer = Device->_port_shadow &=  ~(1 << Bit);
 
     return PCF8574_WritePort(Device, data_buffer);
+}
+
+/**********************************************************************************************************************************
+ * @brief  	Toggles a specific PCF8574 I/O port bit.
+ *
+ * @details	Toggles the selected I/O bit while preserving the state of the
+ *          remaining port bits using the internal port shadow.
+ *
+ * @param   Device  - Device pointer to the PCF8574 device handle.
+ * @param   Bit     - Port bit position to be toggled.
+ *
+ * @note   	Valid bit positions range from 0 to 7.
+ *
+ * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
+ * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
+ **********************************************************************************************************************************/
+PCF8574_StatusTypeDef PCF8574_ToggleBit(PCF8574_HandleTypeDef* Device, uint8_t Bit)
+{
+    uint8_t data_buffer = 0x00;
+
+    if(Device == NULL)
+    {
+        return PCF8574_OPERATION_FAIL;
+    }
+
+    if(PCF8574_ReadBit(Device, Bit, &data_buffer) == PCF8574_OPERATION_OK)
+    {
+        if(data_buffer == 0x00)
+        {
+            PCF8574_WriteBit(Device, Bit);
+        }
+
+        else
+        {
+            PCF8574_ClearBit(Device, Bit);
+        }
+
+        return PCF8574_OPERATION_OK;
+    }
+
+    else
+    {
+        return PCF8574_OPERATION_FAIL;
+    }
+
 }
 
 
