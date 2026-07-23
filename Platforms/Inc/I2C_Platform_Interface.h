@@ -3,7 +3,7 @@
  *
  * @brief   This module defines the public interface for platform-independent I2C communication.
  *
- *          It provides generic I2C read and write operations that allow higher-level modules and device drivers to perform
+ * @details It provides generic I2C read and write operations that allow higher-level modules and device drivers to perform
  *          I2C communication without directly depending on platform-specific peripheral types or communication APIs.
  *
  *          Platform-specific resources are provided through a generic context pointer and interpreted by the corresponding
