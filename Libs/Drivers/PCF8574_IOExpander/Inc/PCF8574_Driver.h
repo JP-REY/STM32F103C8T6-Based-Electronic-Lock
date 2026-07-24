@@ -43,12 +43,11 @@ extern "C" {
  **********************************************************************************************************************************/
 typedef struct
 {
-    void*   I2C_ContextHandler; /* Platform-specific I2C communication context. */
-    uint8_t Device_Address;     /* PCF8574 I2C device address.                  */
-
-    /* Private Data */
-    uint8_t _port_shadow;       /* Software shadow of the current port state.   */
-    bool    _initialized;       /* Internal initialization state. Do not access directly. */
+    //Private data           /* Do not read or modify! */
+    void*   _i2c_context;    /* Platform-specific I2C communication context. */
+    uint8_t _device_address; /* PCF8574 I2C device address.                  */
+    uint8_t _port_shadow;    /* Software shadow of the current port state.   */
+    bool    _initialized;    /* Internal initialization state. Do not access directly. */
 
 }PCF8574_HandleTypeDef;
 
