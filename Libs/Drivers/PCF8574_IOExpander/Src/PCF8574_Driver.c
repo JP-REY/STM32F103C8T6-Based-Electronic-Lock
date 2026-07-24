@@ -68,17 +68,23 @@ PCF8574_StatusTypeDef PCF8574_Init(PCF8574_HandleTypeDef* Device, uint8_t Addres
     {
         return PCF8574_OPERATION_FAIL;
     }
+    /* If PCF8754 instace has been already initialized return */
+    if(Device->_initialized)
+    {
+        return PCF8574_OPERATION_OK;
+    }
 
-    Device->I2C_ContextHandler = I2C_Context;
-    Device->Device_Address     = Address;
-    Device->_port_shadow       = 0x00;
-    Device->_initialized       = true;
+    Device->_i2c_context    = I2C_Context;
+    Device->_device_address = Address;
+    Device->_port_shadow    = 0x00;
+    Device->_initialized    = true;
 
-    PCF8574_ClearPort(Device);
+    if(PCF8574_ClearPort(Device) != PCF8574_OPERATION_OK)
+    {
+        return PCF8574_OPERATION_FAIL;
+    }
 
     return PCF8574_OPERATION_OK;
-
-
 }
 
 /**********************************************************************************************************************************
@@ -98,24 +104,21 @@ PCF8574_StatusTypeDef PCF8574_Deinit(PCF8574_HandleTypeDef* Device)
 {
     if(Device == NULL || Device->_initialized != true)
     {
-            return PCF8574_OPERATION_FAIL;
+      return PCF8574_OPERATION_FAIL;
     }
 
-    if(PCF8574_ClearPort(Device) == PCF8574_OPERATION_OK)
-    {
-        /* Deinitialize device instance */
-        Device->I2C_ContextHandler = NULL;
-        Device->Device_Address     = 0x00;
-        Device->_port_shadow       = 0x00;
-        Device->_initialized       = false;
-
-        return PCF8574_OPERATION_OK;
-    }
-
-    else
+    if(PCF8574_ClearPort(Device) != PCF8574_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
+
+    /* Deinitialize device instance */
+    Device->_i2c_context    = NULL;
+    Device->_device_address = 0x00;
+    Device->_port_shadow    = 0x00;
+    Device->_initialized    = false;
+
+    return PCF8574_OPERATION_OK;
 }
 
 /**********************************************************************************************************************************
@@ -142,19 +145,16 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
         return PCF8574_OPERATION_FAIL;
     }
 
-    PI2C_BOpStatusTypeDef PCF8574_WriteStatus = PI2C_WriteBlocking(Device->I2C_ContextHandler,Device->Device_Address,&data_buffer,1,10);
+    PI2C_BOpStatusTypeDef PCF8574_WriteStatus = PI2C_WriteBlocking(Device->_i2c_context,Device->_device_address,&data_buffer,1,10);
 
     if(PCF8574_WriteStatus != I2C_BLOCKING_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
 
-    else
-    {
-        Device->_port_shadow = data_buffer;
+    Device->_port_shadow = data_buffer;
 
-        return PCF8574_OPERATION_OK;
-    }
+    return PCF8574_OPERATION_OK;
 }
 
 /**********************************************************************************************************************************
@@ -176,16 +176,14 @@ PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* B
         return PCF8574_OPERATION_FAIL;
     }
 
-    PI2C_BOpStatusTypeDef PCF8574_ReadStatus =  PI2C_ReadBlocking(Device->I2C_ContextHandler,Device->Device_Address,Buffer,1,10);
+    PI2C_BOpStatusTypeDef PCF8574_ReadStatus =  PI2C_ReadBlocking(Device->_i2c_context,Device->_device_address,Buffer,1,10);
 
     if(PCF8574_ReadStatus != I2C_BLOCKING_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
-    else
-    {
-        return PCF8574_OPERATION_OK;
-    }
+
+    return PCF8574_OPERATION_OK;
 }
 
 /**********************************************************************************************************************************
@@ -207,10 +205,7 @@ PCF8574_StatusTypeDef PCF8574_ClearPort(PCF8574_HandleTypeDef* Device)
         return PCF8574_OPERATION_FAIL;
     }
 
-    else
-    {
-        return PCF8574_WritePort(Device, 0x00);
-    }
+    return PCF8574_WritePort(Device, 0x00);
 }
 
 /**********************************************************************************************************************************
@@ -264,17 +259,14 @@ PCF8574_StatusTypeDef PCF8574_ReadBit(PCF8574_HandleTypeDef* Device, uint8_t Bit
         return PCF8574_OPERATION_FAIL;
     }
 
-    if(PCF8574_ReadPort(Device, &data_buffer) == PCF8574_OPERATION_OK)
-    {
-        *Buffer = (data_buffer) & (1 << Bit);
-
-        return PCF8574_OPERATION_OK;
-    }
-
-    else
+    if(PCF8574_ReadPort(Device, &data_buffer) != PCF8574_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
+
+    *Buffer = (data_buffer) & (1 << Bit);
+
+    return PCF8574_OPERATION_OK;
 }
 
 /**********************************************************************************************************************************
@@ -328,26 +320,21 @@ PCF8574_StatusTypeDef PCF8574_ToggleBit(PCF8574_HandleTypeDef* Device, uint8_t B
         return PCF8574_OPERATION_FAIL;
     }
 
-    if(PCF8574_ReadBit(Device, Bit, &data_buffer) == PCF8574_OPERATION_OK)
-    {
-        if(data_buffer == 0x00)
-        {
-            PCF8574_WriteBit(Device, Bit);
-        }
-
-        else
-        {
-            PCF8574_ClearBit(Device, Bit);
-        }
-
-        return PCF8574_OPERATION_OK;
-    }
-
-    else
+    if(PCF8574_ReadBit(Device, Bit, &data_buffer) != PCF8574_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
-
+    else
+    {
+        if(data_buffer == 0x00)
+        {
+            return PCF8574_WriteBit(Device, Bit);
+        }
+        else
+        {
+            return PCF8574_ClearBit(Device, Bit);
+        }
+    }
 }
 
 
