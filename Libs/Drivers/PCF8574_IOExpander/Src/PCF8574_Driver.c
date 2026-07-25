@@ -26,7 +26,7 @@
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device);
+static bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -39,7 +39,7 @@ bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device);
  * @return true   - The device instance is initialized.
  * @return false  - The device instance is not initialized.
  **********************************************************************************************************************************/
-bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device)
+static bool PCF8754_IsInit(PCF8574_HandleTypeDef* Device)
 {
     return Device->_initialized;
 }
