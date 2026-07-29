@@ -23,6 +23,8 @@ extern "C" {
  Includes
  **********************************************************************************************************************************/
 #include "HD44780_BusInterface.h"
+#include "stdint.h"
+#include "stdbool.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -111,6 +113,7 @@ typedef struct
     /* Number of display columns.                      */ uint8_t                      _cols;
     /* Selected HD44780 data interface mode.           */ HD44780_InterfaceModeTypeDef _interface_mode;
     /* Selected character font configuration.          */ HD44780_CharacterFontTypeDef _font_dot_size;
+    /* Indicates if HD44780 instance has initialized   */ bool                         _initialized;
 
 }HD44780_HandleTypeDef;
 
@@ -134,6 +137,11 @@ HD44780_OpStatusTypeDef HD44780_DecrementCursor (HD44780_HandleTypeDef* Device);
 HD44780_OpStatusTypeDef HD44780_EnableShift     (HD44780_HandleTypeDef* Device);
 HD44780_OpStatusTypeDef HD44780_DisableShift    (HD44780_HandleTypeDef* Device);
 HD44780_OpStatusTypeDef HD44780_SetCursor       (HD44780_HandleTypeDef* Device, uint8_t Row, uint8_t Col);
+HD44780_OpStatusTypeDef HD44780_WriteChar       (HD44780_HandleTypeDef* Device, uint8_t Char);
+HD44780_OpStatusTypeDef HD44780_WriteString     (HD44780_HandleTypeDef* Device, const char* String);
+HD44780_OpStatusTypeDef HD44780_PrintLine       (HD44780_HandleTypeDef* Device, uint8_t Row, const char* Text);
+HD44780_OpStatusTypeDef HD44780_ClearLine       (HD44780_HandleTypeDef* Device, uint8_t Row);
+
 
 #ifdef __cplusplus
 }

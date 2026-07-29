@@ -221,40 +221,10 @@ static volatile uint8_t g_cursor_shift_flag = 0x00;
 static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command);
 static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, uint8_t Data);
 
-/* << Helper functions >> */
-/**********************************************************************************************************************************
- * @brief   Builds the Display Control instruction configuration bits.
- *
- * @return  Packed Display Control configuration bits.
- **********************************************************************************************************************************/
-static inline uint8_t HD44780_GetDisplayControlFlags(void);
-
-/**********************************************************************************************************************************
- * @brief   Builds the Entry Mode Set instruction configuration bits.
- *
- * @return  Packed Entry Mode Set configuration bits.
- **********************************************************************************************************************************/
-static inline uint8_t HD44780_GetEntryModeFlags(void);
-
-/**********************************************************************************************************************************
- * @brief   Waits for the default HD44780 instruction execution time.
- *
- * @return  None.
- **********************************************************************************************************************************/
-static inline void HD44780_WaitInstructionDefault(void);
-
-/**********************************************************************************************************************************
- * @brief   Waits for the execution of an HD44780 instruction.
- *
- * @param   Command - HD44780 instruction whose execution time shall be waited.
- *
- * @return  None.
- **********************************************************************************************************************************/
-static void HD44780_WaitInstruction(HD44780_CmdTypeDef Command);
-
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
+/* << Helper functions >> */
 /**********************************************************************************************************************************
  * @brief   Builds the Display Control instruction configuration bits.
  *
@@ -343,6 +313,25 @@ static void HD44780_WaitInstruction(HD44780_CmdTypeDef Command)
         default:
         break;
     }
+}
+
+/**********************************************************************************************************************************
+ * @brief   Checks whether the HD44780 driver has been initialized.
+ *
+ * @details Verifies that the supplied device handle is valid and that the
+ *          driver has completed its initialization sequence.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ *
+ * @note    This helper is intended for internal driver validation before
+ *          performing operations that require an initialized device.
+ *
+ * @return  true  - The device handle is valid and the driver is initialized.
+ *          false - The device handle is NULL or the driver is not initialized.
+ **********************************************************************************************************************************/
+static bool inline HD44780_IsInit(HD44780_HandleTypeDef* Device)
+{
+    return Device == NULL ? false : Device->_initialized;
 }
 
 /**********************************************************************************************************************************
@@ -451,6 +440,17 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
+    /* << Prevents repeated initialization >> */
+    if(Device->_initialized)
+    {
+        return HD44780_OPERATION_OK;
+    }
+
+    if(Device == NULL)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     Platform_DelayMs(50);
 
     Device->_bus.TransferNibble(Device->_bus.Context, 0x03, HD44780_BUS_COMMAND);
@@ -474,6 +474,8 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
 
             if(Device->_bus.TransferNibble(Device->_bus.Context, 0x02, HD44780_BUS_COMMAND) != HD44780_BUS_OPERATION_OK)
             {
+                Device->_initialized = false;
+
                 return HD44780_OPERATION_FAIL;
             }
 
@@ -500,6 +502,8 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
 
             if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
             {
+                Device->_initialized = false;
+
                 return HD44780_OPERATION_FAIL;
             }
 
@@ -524,11 +528,15 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
 
             if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
             {
+                Device->_initialized = false;
+
                 return HD44780_OPERATION_FAIL;
             }
 
         break;
     }
+
+    Device->_initialized = true;
 
     /* << Clear display before initialization >> */
     HD44780_Clear(Device);
@@ -563,6 +571,12 @@ HD44780_OpStatusTypeDef HD44780_Clear(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command = HD44780_CMD_CLEAR_DISPLAY;
 
     if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
@@ -595,6 +609,12 @@ HD44780_OpStatusTypeDef HD44780_Home(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command = HD44780_CMD_RETURN_HOME;
 
     if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
@@ -626,6 +646,12 @@ HD44780_OpStatusTypeDef HD44780_DisplayOn(HD44780_HandleTypeDef* Device)
     uint8_t command = 0x00;
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
@@ -667,6 +693,12 @@ HD44780_OpStatusTypeDef HD44780_DisplayOff(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
     command &= ~(1 << HD44780_D_DISPLAY_ON_OFF);
@@ -707,6 +739,12 @@ HD44780_OpStatusTypeDef HD44780_CursorOn(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
     command |= (1 << HD44780_C_CURSOR_ON_OFF);
@@ -745,6 +783,12 @@ HD44780_OpStatusTypeDef HD44780_CursorOff(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
     command &= ~(1 << HD44780_C_CURSOR_ON_OFF);
@@ -781,6 +825,12 @@ HD44780_OpStatusTypeDef HD44780_BlinkOn(HD44780_HandleTypeDef* Device)
     uint8_t command = 0x00;
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
@@ -819,6 +869,12 @@ HD44780_OpStatusTypeDef HD44780_BlinkOff(HD44780_HandleTypeDef* Device)
     uint8_t command = 0x00;
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
     command  = HD44780_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
@@ -859,6 +915,12 @@ HD44780_OpStatusTypeDef HD44780_IncrementCursor(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command  = HD44780_CMD_ENTRYMODESET;
     command |= display_seted_flags;
     command |= (1 << HD44780_ID_INC_DEC_CURSOR);
@@ -894,6 +956,12 @@ HD44780_OpStatusTypeDef HD44780_DecrementCursor(HD44780_HandleTypeDef* Device)
     uint8_t command = 0x00;
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
     command  = HD44780_CMD_ENTRYMODESET;
     command |= display_seted_flags;
@@ -931,6 +999,12 @@ HD44780_OpStatusTypeDef HD44780_EnableShift(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     command  = HD44780_CMD_ENTRYMODESET;
     command |= display_seted_flags;
     command |= (1 << HD44780_S_ENABLE_SHIFT);
@@ -965,6 +1039,12 @@ HD44780_OpStatusTypeDef HD44780_DisableShift(HD44780_HandleTypeDef* Device)
     uint8_t command = 0x00;
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
     command  = HD44780_CMD_ENTRYMODESET;
     command |= display_seted_flags;
@@ -1006,6 +1086,12 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t
 
     uint8_t command = 0x00;
 
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
     Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
 
     Col = Col > (Device->_cols) ? Device->_cols : Col;
@@ -1034,7 +1120,176 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t
     return HD44780_OPERATION_OK;
 }
 
+/**********************************************************************************************************************************
+ * @brief   Writes a single character to the display.
+ *
+ * @details Transmits a single data byte to the HD44780 controller at the
+ *          current cursor position. The cursor behavior after the write is
+ *          determined by the current Entry Mode Set configuration.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Char   - Character code to be written to the display.
+ *
+ * @note    The device must be successfully initialized before calling this
+ *          function.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the character was successfully transmitted.
+ *          HD44780_OPERATION_FAIL - Indicates that the character transmission has failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_WriteChar(HD44780_HandleTypeDef* Device, uint8_t Char)
+{
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
 
+    if(HD44780_SendData(Device, Char) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Writes a null-terminated string to the display.
+ *
+ * @details Sequentially transmits each character from the supplied
+ *          null-terminated string starting at the current cursor position.
+ *          The cursor behavior after each character write is determined by
+ *          the current Entry Mode Set configuration.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ * @param   String - Pointer to a null-terminated string to be written.
+ *
+ * @note    The device must be successfully initialized before calling this
+ *          function.
+ *
+ * @note    This function does not reposition the cursor or limit the number
+ *          of transmitted characters. Data is written until the terminating
+ *          null character is reached.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
+ *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_WriteString(HD44780_HandleTypeDef* Device, const char* String)
+{
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)) || String == NULL)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    while(*String != '\0')
+    {
+       if(HD44780_WriteChar(Device, *String) != HD44780_OPERATION_OK)
+       {
+           return HD44780_OPERATION_FAIL;
+       }
+
+       String++;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Writes a null-terminated string to a display row.
+ *
+ * @details Positions the cursor at the beginning of the specified row and
+ *          sequentially writes each character from the supplied string until
+ *          the null terminator is reached.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Row    - Zero-based display row.
+ * @param   Text   - Pointer to a null-terminated string.
+ *
+ * @note    If the specified row exceeds the configured display size, it is
+ *          clamped to the last valid row.
+ *
+ * @note    If the supplied string exceeds the configured display width,
+ *          only the characters that fit on the selected row are written.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
+ *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_PrintLine(HD44780_HandleTypeDef* Device, uint8_t Row, const char* Text)
+{
+    uint8_t col = 0;
+
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)) || Text == NULL)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
+
+    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    while((*Text != '\0') && (col < Device->_cols))
+    {
+        if(HD44780_WriteChar(Device, *Text) != HD44780_OPERATION_OK)
+        {
+            return HD44780_OPERATION_FAIL;
+        }
+
+        Text++;
+        col++;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Clears a display row.
+ *
+ * @details Positions the cursor at the beginning of the specified row and
+ *          overwrites all display columns with space characters.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Row    - Zero-based display row.
+ *
+ * @note    If the specified row exceeds the configured display size, it is
+ *          clamped to the last valid row.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the row was successfully cleared.
+ *          HD44780_OPERATION_FAIL - Indicates that the clear operation has failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t Row)
+{
+    /* << Validate input parameters >> */
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
+
+    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    for(uint8_t i = 0; i < Device->_cols; i++)
+    {
+      if(HD44780_WriteChar(Device, ' ') != HD44780_OPERATION_OK)
+      {
+          return HD44780_OPERATION_FAIL;
+      }
+    }
+
+    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
 
 
 
