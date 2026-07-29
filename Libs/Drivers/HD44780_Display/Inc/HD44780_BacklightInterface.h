@@ -1,0 +1,141 @@
+/**********************************************************************************************************************************
+ * @file    HD44780_BacklightInterface.h
+ * @brief   Abstract backlight control interface for the HD44780 LCD driver.
+ *
+ * @details Defines the abstraction layer used by the HD44780 driver to control the
+ *          LCD module backlight independently of the underlying hardware implementation.
+ *
+ *          Although the backlight is not controlled by the HD44780 controller itself,
+ *          this interface is provided as a convenience abstraction for complete LCD
+ *          module management.
+ *
+ *          Different hardware implementations (GPIO, PWM, I/O expanders, etc.) can
+ *          expose a common API through this interface.
+ *
+ * @author  Joao Pedro Rey
+ * @version 1.0.0
+ * @date    Jul 29, 2026
+ **********************************************************************************************************************************/
+
+#ifndef DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_
+#define DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**********************************************************************************************************************************
+ Includes
+ **********************************************************************************************************************************/
+#include "stm32f4xx.h"
+#include "stdint.h"
+#include "stdbool.h"
+
+/**********************************************************************************************************************************
+ Macros
+ **********************************************************************************************************************************/
+
+/**********************************************************************************************************************************
+ Types
+ **********************************************************************************************************************************/
+/**********************************************************************************************************************************
+ * @brief   Status returned by a backlight control operation.
+ *
+ * @details Indicates whether a backlight operation completed successfully.
+ **********************************************************************************************************************************/
+typedef enum
+{
+    HD44780_BACKLIGHT_OP_OK,
+    HD44780_BACKLIGHT_OP_FAIL
+
+}HD44780_BacklightOpStatusTypeDef;
+
+/**********************************************************************************************************************************
+ * @brief   Generic backlight control interface.
+ *
+ * @details Provides a hardware-independent interface used by the HD44780 driver
+ *          to control the LCD module backlight.
+ *
+ *          Each function pointer represents a backlight operation that may be
+ *          implemented by different hardware adapters such as GPIO outputs,
+ *          PWM peripherals, I/O expanders, etc.
+ *
+ *          The Context member stores an opaque pointer to the implementation-
+ *          specific context. This pointer is forwarded unchanged to every
+ *          interface callback, allowing each adapter to access the resources
+ *          required to perform the requested operation.
+ *
+ * @note    The HD44780 driver interacts exclusively through this interface and
+ *          remains completely independent of the underlying hardware implementation.
+ **********************************************************************************************************************************/
+typedef struct
+{
+   /**********************************************************************************************************************************
+     * @brief   Turns the LCD module backlight on.
+     *
+     * @details Requests the underlying hardware implementation to enable the
+     *          backlight.
+     *
+     * @param   Context - Pointer to the implementation-specific context required
+     *                    by the backlight adapter.
+     *
+     * @return  Status indicating whether the operation completed successfully.
+    **********************************************************************************************************************************/
+    HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
+
+    /**********************************************************************************************************************************
+     * @brief   Turns the LCD module backlight off.
+     *
+     * @details Requests the underlying hardware implementation to disable the
+     *          backlight.
+     *
+     * @param   Context - Pointer to the implementation-specific context required
+     *                    by the backlight adapter.
+     *
+     * @return  Status indicating whether the operation completed successfully.
+     **********************************************************************************************************************************/
+    HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
+
+    /**********************************************************************************************************************************
+     * @brief   Sets the LCD module backlight brightness.
+     *
+     * @details Requests the underlying hardware implementation to adjust the
+     *          backlight brightness to the specified percentage.
+     *
+     *          Implementations that do not support variable brightness may treat
+     *          any non-zero percentage as fully enabled.
+     *
+     * @param   Context         - Pointer to the implementation-specific context required
+     *                            by the backlight adapter.
+     * @param   PercentageLevel - Desired brightness level expressed as a
+     *                            percentage in the range from 0 to 100.
+     *
+     * @return  Status indicating whether the operation completed successfully.A
+     **********************************************************************************************************************************/
+    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(void* Context, uint8_t PercentageLevel);
+
+    /**********************************************************************************************************************************
+     * @brief   Implementation-specific backlight context.
+     *
+     * @details Opaque pointer forwarded unchanged to every interface callback.
+     *          The concrete implementation defines the type and contents of this
+     *          context, which may contain peripheral handles, GPIO information,
+     *          timer configuration, or any other resources required to control the
+     *          LCD module backlight.
+     **********************************************************************************************************************************/
+    void* Context;
+
+}HD44780_BacklightInterfaceTypeDef;
+
+/**********************************************************************************************************************************
+ Data
+ **********************************************************************************************************************************/
+/**********************************************************************************************************************************
+ Function Prototypes
+ **********************************************************************************************************************************/
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_ */

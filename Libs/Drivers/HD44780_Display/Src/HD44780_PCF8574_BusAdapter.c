@@ -1,6 +1,6 @@
 /**********************************************************************************************************************************
- * @file    HD44780_PCF8574Adapter.c
- * @brief   HD44780_PCF8574.h module implementation.
+ * @file    HD44780_PCF8574_BusAdapter.c
+ * @brief   HD44780_PCF8574_BusAdapter.h module implementation.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -9,7 +9,7 @@
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "HD44780_PCF8574Adapter.h"
+#include "HD44780_PCF8574_BusAdapter.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -159,7 +159,7 @@ static HD44780_BusOpStatusTypeDef PulseEnable(void* Context)
  * @note    The caller is responsible for ensuring that the PCF8574 driver has
  *          been properly initialized before this function is called.
  **********************************************************************************************************************************/
-void HD44780_PCF8574AdapterInit(HD44780_BusInterfaceTypeDef* Bus, PCF8574_HandleTypeDef* PCF8574_Instance)
+void HD44780_PCF8574_BusAdapterInit(HD44780_BusInterfaceTypeDef* Bus, PCF8574_HandleTypeDef* PCF8574_Instance)
 {
     if ((Bus == NULL) || (PCF8574_Instance == NULL))
     {
