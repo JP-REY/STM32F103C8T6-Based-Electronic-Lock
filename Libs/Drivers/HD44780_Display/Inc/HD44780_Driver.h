@@ -25,6 +25,7 @@ extern "C" {
 #include "HD44780_BusInterface.h"
 #include "stdint.h"
 #include "stdbool.h"
+#include "stddef.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -141,7 +142,8 @@ HD44780_OpStatusTypeDef HD44780_WriteChar       (HD44780_HandleTypeDef* Device, 
 HD44780_OpStatusTypeDef HD44780_WriteString     (HD44780_HandleTypeDef* Device, const char* String);
 HD44780_OpStatusTypeDef HD44780_PrintLine       (HD44780_HandleTypeDef* Device, uint8_t Row, const char* Text);
 HD44780_OpStatusTypeDef HD44780_ClearLine       (HD44780_HandleTypeDef* Device, uint8_t Row);
-
+HD44780_OpStatusTypeDef HD44780_CreateChar      (HD44780_HandleTypeDef* Device, uint8_t Position, const uint8_t* PatternBitMap);
+HD44780_OpStatusTypeDef HD44780_WriteCustomChar (HD44780_HandleTypeDef* Device, uint8_t CharPosition);
 
 #ifdef __cplusplus
 }

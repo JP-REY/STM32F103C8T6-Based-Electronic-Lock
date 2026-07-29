@@ -213,13 +213,23 @@ static volatile uint8_t g_blink_on_off_flag   = 0x00;
 
 /* << Flags to store current Entry Mode Set command state >> */
 static volatile uint8_t g_cursor_inc_dec_flag = 0x00;
-static volatile uint8_t g_cursor_shift_flag = 0x00;
+static volatile uint8_t g_cursor_shift_flag   = 0x00;
+
+/* << Flags to store current loaded custom characters >> */
+static volatile uint8_t g_custom_char0_loaded = 0x00;
+static volatile uint8_t g_custom_char1_loaded = 0x00;
+static volatile uint8_t g_custom_char2_loaded = 0x00;
+static volatile uint8_t g_custom_char3_loaded = 0x00;
+static volatile uint8_t g_custom_char4_loaded = 0x00;
+static volatile uint8_t g_custom_char5_loaded = 0x00;
+static volatile uint8_t g_custom_char6_loaded = 0x00;
+static volatile uint8_t g_custom_char7_loaded = 0x00;
 
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command);
-static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, uint8_t Data);
+static HD44780_OpStatusTypeDef HD44780_SendCommand (HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command);
+static HD44780_OpStatusTypeDef HD44780_SendData    (HD44780_HandleTypeDef* Device, uint8_t Data);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -239,7 +249,7 @@ static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, u
 static inline uint8_t HD44780_GetDisplayControlFlags(void)
 {
     return  g_cursor_inc_dec_flag       |
-           (g_cursor_shift_flag << 1)   |
+           (g_cursor_shift_flag   << 1) |
            (g_display_on_off_flag << 2) ;
 }
 
@@ -335,6 +345,95 @@ static bool inline HD44780_IsInit(HD44780_HandleTypeDef* Device)
 }
 
 /**********************************************************************************************************************************
+ * @brief   Returns the maximum valid CGRAM character position.
+ *
+ * @details Determines the highest valid CGRAM character index according to the
+ *          font size configured for the display.
+ *
+ *          - 5x8 font  : returns 7 (8 custom characters).
+ *          - 5x10 font : returns 3 (4 custom characters).
+ *
+ * @param   Device  Pointer to the HD44780 device handle.
+ *
+ * @note    This helper is used internally to validate or clamp CGRAM character
+ *          positions before accessing the display CGRAM.
+ *
+ * @return  Maximum valid CGRAM character position.
+ **********************************************************************************************************************************/
+static inline uint8_t HD44780_GetCGRAMLimit(HD44780_HandleTypeDef* Device)
+{
+    return Device->_font_dot_size == HD44780_5X8_FONT ? 0x07 : 0x03;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Marks a CGRAM character position as programmed.
+ *
+ * @details Sets the internal flag corresponding to the specified CGRAM position,
+ *          indicating that a valid custom character has been programmed into
+ *          that location.
+ *
+ * @param   CharPosition  CGRAM character position to mark as programmed.
+ *
+ * @note    This helper only updates the driver's internal state. It does not
+ *          modify the HD44780 CGRAM contents.
+ *
+ * @return  None.
+ **********************************************************************************************************************************/
+static inline void HD44780_SetCustomCharFlag(uint8_t CharPosition)
+{
+    switch(CharPosition)
+    {
+        case 0: g_custom_char0_loaded = 1; break;
+        case 1: g_custom_char1_loaded = 1; break;
+        case 2: g_custom_char2_loaded = 1; break;
+        case 3: g_custom_char3_loaded = 1; break;
+        case 4: g_custom_char4_loaded = 1; break;
+        case 5: g_custom_char5_loaded = 1; break;
+        case 6: g_custom_char6_loaded = 1; break;
+        case 7: g_custom_char7_loaded = 1; break;
+    }
+}
+
+/**********************************************************************************************************************************
+ * @brief   Returns a bitmask indicating which custom characters are available.
+ *
+ * @details Builds and returns a bitmask representing the CGRAM positions that have
+ *          been successfully programmed with custom characters.
+ *
+ *          Each bit corresponds to one CGRAM character position:
+ *          - Bit 0 -> Character 0
+ *          - Bit 1 -> Character 1
+ *          - ...
+ *          - Bit 7 -> Character 7 (5x8 font only)
+ *
+ *          For displays configured in 5x10 font mode, only bits 0 through 3 are
+ *          valid because the HD44780 supports a maximum of four custom characters.
+ *
+ * @param   Device  Pointer to the HD44780 device handle.
+ *
+ * @note    This helper only reports the driver's internal tracking state. It does
+ *          not read the CGRAM contents from the HD44780 controller.
+ *
+ * @return  Bitmask containing the programmed custom character positions.
+ **********************************************************************************************************************************/
+static inline uint8_t HD44780_GetCustomChars(HD44780_HandleTypeDef* Device)
+{
+    if(Device->_font_dot_size == HD44780_5X8_FONT)
+    {
+        return  g_custom_char0_loaded       | (g_custom_char1_loaded << 1) |
+               (g_custom_char2_loaded << 2) | (g_custom_char3_loaded << 3) |
+               (g_custom_char4_loaded << 3) | (g_custom_char5_loaded << 5) |
+               (g_custom_char6_loaded << 4) | (g_custom_char7_loaded << 7) ;
+    }
+
+    else
+    {
+        return  g_custom_char0_loaded       | (g_custom_char1_loaded << 1) |
+               (g_custom_char2_loaded << 2) | (g_custom_char3_loaded << 3) ;
+    }
+}
+
+/**********************************************************************************************************************************
  * @brief   Sends a command to the HD44780 controller.
  *
  * @details Splits the command byte into its higher and lower nibbles and
@@ -351,7 +450,7 @@ static bool inline HD44780_IsInit(HD44780_HandleTypeDef* Device)
 static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command)
 {
     uint8_t high_nibble = 0x00;
-    uint8_t low_nibble = 0x00;
+    uint8_t low_nibble  = 0x00;
 
     HD44780_EXTRACT_LOWER_NIBBLE(Command, low_nibble);
     HD44780_EXTRACT_HIGHER_NIBBLE(Command, high_nibble);
@@ -389,7 +488,7 @@ static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device
 static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, uint8_t Data)
 {
     uint8_t high_nibble = 0x00;
-    uint8_t low_nibble = 0x00;
+    uint8_t low_nibble  = 0x00;
 
     HD44780_EXTRACT_LOWER_NIBBLE(Data, low_nibble);
     HD44780_EXTRACT_HIGHER_NIBBLE(Data, high_nibble);
@@ -440,7 +539,7 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
-    /* << Prevents repeated initialization >> */
+    /* << Prevents repeat initialization >> */
     if(Device->_initialized)
     {
         return HD44780_OPERATION_OK;
@@ -571,7 +670,6 @@ HD44780_OpStatusTypeDef HD44780_Clear(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -609,7 +707,6 @@ HD44780_OpStatusTypeDef HD44780_Home(HD44780_HandleTypeDef* Device)
 {
     uint8_t command = 0x00;
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -647,7 +744,6 @@ HD44780_OpStatusTypeDef HD44780_DisplayOn(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -693,7 +789,6 @@ HD44780_OpStatusTypeDef HD44780_DisplayOff(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -739,7 +834,6 @@ HD44780_OpStatusTypeDef HD44780_CursorOn(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -783,7 +877,6 @@ HD44780_OpStatusTypeDef HD44780_CursorOff(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -826,7 +919,6 @@ HD44780_OpStatusTypeDef HD44780_BlinkOn(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -870,7 +962,6 @@ HD44780_OpStatusTypeDef HD44780_BlinkOff(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -915,7 +1006,6 @@ HD44780_OpStatusTypeDef HD44780_IncrementCursor(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -957,7 +1047,6 @@ HD44780_OpStatusTypeDef HD44780_DecrementCursor(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -999,7 +1088,6 @@ HD44780_OpStatusTypeDef HD44780_EnableShift(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -1040,7 +1128,6 @@ HD44780_OpStatusTypeDef HD44780_DisableShift(HD44780_HandleTypeDef* Device)
 
     uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -1069,8 +1156,8 @@ HD44780_OpStatusTypeDef HD44780_DisableShift(HD44780_HandleTypeDef* Device)
  *          instruction.
  *
  * @param   Device - Pointer to the HD44780 device instance.
- * @param   row    - Zero-based display row.
- * @param   col    - Zero-based display column.
+ * @param   Row    - Zero-based display row.
+ * @param   Col    - Zero-based display column.
  *
  * @note    Row and column values outside the configured display dimensions are
  *          clamped to the nearest valid position.
@@ -1086,7 +1173,6 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t
 
     uint8_t command = 0x00;
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -1138,7 +1224,6 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t
  **********************************************************************************************************************************/
 HD44780_OpStatusTypeDef HD44780_WriteChar(HD44780_HandleTypeDef* Device, uint8_t Char)
 {
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -1175,7 +1260,6 @@ HD44780_OpStatusTypeDef HD44780_WriteChar(HD44780_HandleTypeDef* Device, uint8_t
  **********************************************************************************************************************************/
 HD44780_OpStatusTypeDef HD44780_WriteString(HD44780_HandleTypeDef* Device, const char* String)
 {
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)) || String == NULL)
     {
         return HD44780_OPERATION_FAIL;
@@ -1218,7 +1302,6 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(HD44780_HandleTypeDef* Device, uint8_t
 {
     uint8_t col = 0;
 
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)) || Text == NULL)
     {
         return HD44780_OPERATION_FAIL;
@@ -1262,7 +1345,6 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(HD44780_HandleTypeDef* Device, uint8_t
  **********************************************************************************************************************************/
 HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t Row)
 {
-    /* << Validate input parameters >> */
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
         return HD44780_OPERATION_FAIL;
@@ -1291,7 +1373,125 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t
     return HD44780_OPERATION_OK;
 }
 
+/**********************************************************************************************************************************
+ * @brief   Creates or updates a custom character in the LCD CGRAM.
+ *
+ * @details Programs a custom character bitmap into the Character Generator RAM (CGRAM).
+ *          The character is stored at the specified CGRAM position and becomes available
+ *          for display using HD44780_WriteCustomChar().
+ *
+ *          The bitmap size depends on the configured font:
+ *          - 5x8 font  : 8 bytes.
+ *          - 5x10 font : 4 bytes.
+ *
+ *          After programming the character, the function marks the CGRAM position as
+ *          containing a valid custom character and restores the cursor position to
+ *          the first column of the first display line.
+ *
+ * @param   Device         - Pointer to the HD44780 device handle.
+ * @param   Position       - CGRAM character position. Valid range is 0-7 for 5x8 font
+ *                           and 0-3 for 5x10 font. Values outside the supported range
+                             cause the function to return HD44780_OPERATION_FAIL.
+ * @param   PatternBitMap  - Pointer to the character bitmap data. The buffer must
+                             contain 8 bytes for 5x8 font mode or 4 bytes for
+                             5x10 font mode.
+ *
+ * @note    This function temporarily switches the HD44780 Address Counter to the
+ *          CGRAM address space while programming the custom character. After the
+ *          programming sequence is complete, the DDRAM Address Counter is restored
+ *          to the initial DDRAM address (row 0, column 0) using the Set DDRAM Address
+ *          command.
+ *
+ * @warning The bitmap buffer must contain 8 bytes for 5x8 font mode or 4 bytes for
+ *          5x10 font mode.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates if the character was successfully programmed.
+ * @return  HD44780_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
+ *                                   initialized, the bitmap pointer is NULL, or a communication
+ *                                   error occurs.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_CreateChar(HD44780_HandleTypeDef* Device, uint8_t Position, const uint8_t* PatternBitMap)
+{
+    uint8_t pattern_size = 0x00;
+    uint8_t address_counter = 0x00;
 
+    uint8_t command = HD44780_CMD_SETCGRAMADDR;
+
+    if(Device == NULL || !(HD44780_IsInit(Device)) || PatternBitMap == NULL || Position > HD44780_GetCGRAMLimit(Device))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    pattern_size = Device->_font_dot_size == HD44780_5X8_FONT ? 8 : 4;
+
+    address_counter = HD44780_SET_CGRAM_ADDRESS_MASK((Position << 3));
+
+    command |= address_counter;
+
+    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    for(uint8_t i = 0; i < pattern_size; i++)
+    {
+        if(HD44780_SendData(Device, *PatternBitMap) != HD44780_OPERATION_OK)
+        {
+            return HD44780_OPERATION_FAIL;
+        }
+
+        PatternBitMap++;
+    }
+
+    HD44780_SetCustomCharFlag(Position);
+
+    HD44780_SetCursor(Device, 0, 0);
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Writes a previously created custom character to the display.
+ *
+ * @details Sends the custom character code corresponding to the specified CGRAM
+ *          position to the display DDRAM. The character must have been previously
+ *          created using HD44780_CreateChar().
+ *
+ * @param   Device        - Pointer to the HD44780 device handle.
+ * @param   CharPosition  - CGRAM character position to display.
+                            Valid range is 0-7 for 5x8 font and
+                            0-3 for 5x10 font.
+ *
+ * @note    This function only writes the custom character code to DDRAM. It does not
+ *          modify the contents of CGRAM.
+ *
+ * @warning The function fails if the specified CGRAM position has not been previously
+ *          programmed using HD44780_CreateChar().
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates if the character was successfully written.
+ * @return  HD44780_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
+ *                                   initialized, the specified character does not exist in CGRAM, or a
+ *                                   communication error occurs.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_WriteCustomChar(HD44780_HandleTypeDef* Device, uint8_t CharPosition)
+{
+    if(Device == NULL || !(HD44780_IsInit(Device)) || CharPosition > HD44780_GetCGRAMLimit(Device))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    if(!(HD44780_GetCustomChars(Device) & (1 << CharPosition)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    if(HD44780_SendData(Device, CharPosition) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
 
 
 
