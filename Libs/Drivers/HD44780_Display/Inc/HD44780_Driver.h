@@ -23,6 +23,7 @@ extern "C" {
  Includes
  **********************************************************************************************************************************/
 #include "HD44780_BusInterface.h"
+#include "HD44780_BacklightInterface.h"
 #include "stdint.h"
 #include "stdbool.h"
 #include "stddef.h"
@@ -109,12 +110,13 @@ typedef enum
 typedef struct
 {
     // << Private data. Do not read or modify ! >>
-    /* Communication bus interface used by the driver. */ HD44780_BusInterfaceTypeDef  _bus;
-    /* Number of display lines configure for HD44780.  */ HD44780_LineNumberTypeDef    _rows;
-    /* Number of display columns.                      */ uint8_t                      _cols;
-    /* Selected HD44780 data interface mode.           */ HD44780_InterfaceModeTypeDef _interface_mode;
-    /* Selected character font configuration.          */ HD44780_CharacterFontTypeDef _font_dot_size;
-    /* Indicates if HD44780 instance has initialized   */ bool                         _initialized;
+    /* Communication bus interface used by the driver. */ HD44780_BusInterfaceTypeDef       _bus;
+    /* Backlight control interface used by the driver. */ HD44780_BacklightInterfaceTypeDef _backlight;
+    /* Number of display lines configure for HD44780.  */ HD44780_LineNumberTypeDef         _rows;
+    /* Number of display columns.                      */ uint8_t                           _cols;
+    /* Selected HD44780 data interface mode.           */ HD44780_InterfaceModeTypeDef      _interface_mode;
+    /* Selected character font configuration.          */ HD44780_CharacterFontTypeDef      _font_dot_size;
+    /* Indicates if HD44780 instance has initialized   */ bool                              _initialized;
 
 }HD44780_HandleTypeDef;
 
@@ -144,6 +146,9 @@ HD44780_OpStatusTypeDef HD44780_PrintLine       (HD44780_HandleTypeDef* Device, 
 HD44780_OpStatusTypeDef HD44780_ClearLine       (HD44780_HandleTypeDef* Device, uint8_t Row);
 HD44780_OpStatusTypeDef HD44780_CreateChar      (HD44780_HandleTypeDef* Device, uint8_t Position, const uint8_t* PatternBitMap);
 HD44780_OpStatusTypeDef HD44780_WriteCustomChar (HD44780_HandleTypeDef* Device, uint8_t CharPosition);
+HD44780_OpStatusTypeDef HD44780_BacklightOn     (HD44780_HandleTypeDef* Device);
+HD44780_OpStatusTypeDef HD44780_BacklightOff    (HD44780_HandleTypeDef* Device);
+HD44780_OpStatusTypeDef HD44780_SetBrightness   (HD44780_HandleTypeDef* Device, uint16_t BrightPercent);
 
 #ifdef __cplusplus
 }

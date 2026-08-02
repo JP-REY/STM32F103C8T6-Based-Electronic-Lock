@@ -513,7 +513,7 @@ static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, u
  Functions
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
- * @brief   Initializes the HD44780 LCD controller.
+ * @brief   Initializes the HD44780 HD44780 controller.
  *
  * @details Performs the complete initialization sequence required by the
  *          HD44780 controller, including power-up timing, interface
@@ -1374,7 +1374,7 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t
 }
 
 /**********************************************************************************************************************************
- * @brief   Creates or updates a custom character in the LCD CGRAM.
+ * @brief   Creates or updates a custom character in the HD44780 CGRAM.
  *
  * @details Programs a custom character bitmap into the Character Generator RAM (CGRAM).
  *          The character is stored at the specified CGRAM position and becomes available
@@ -1486,6 +1486,130 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(HD44780_HandleTypeDef* Device, u
     }
 
     if(HD44780_SendData(Device, CharPosition) != HD44780_OPERATION_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Turns the HD44780 module backlight on.
+ *
+ * @details Enables the HD44780 backlight by invoking the TurnOn operation provided
+ *          by the configured backlight interface.
+ *
+ *          The behavior after enabling the backlight depends on the underlying
+ *          adapter implementation. Implementations that maintain a previous
+ *          brightness configuration may restore the last configured value when
+ *          the backlight is enabled again.
+ *
+ *          If the selected backlight implementation requires an initial
+ *          brightness configuration, the adapter may apply its default
+ *          brightness level when no valid brightness value has been configured.
+ *
+ *          The HD44780 controller does not provide native backlight control.
+ *          This function acts as a hardware-independent wrapper that delegates
+ *          the operation to the registered backlight adapter.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ *
+ * @note    The backlight implementation is defined externally through the
+ *          HD44780_BacklightInterfaceTypeDef interface.
+ *
+ * @note    The resulting backlight behavior depends on the capabilities and
+ *          internal state management of the selected adapter implementation.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the backlight was successfully enabled.
+ *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the
+ *                                   backlight enable operation failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_BacklightOn(HD44780_HandleTypeDef* Device)
+{
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    if(Device->_backlight.GetBrightness(Device->_backlight.Context) == 0)
+    {
+        if(Device->_backlight.SetBrightness(Device->_backlight.Context, 100) != HD44780_BACKLIGHT_OP_OK)
+        {
+            return HD44780_OPERATION_FAIL;
+        }
+    }
+
+    if(Device->_backlight.TurnOn(Device->_backlight.Context) != HD44780_BACKLIGHT_OP_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Turns the HD44780 module backlight off.
+ *
+ * @details Disables the HD44780 backlight by invoking the TurnOff operation provided
+ *          by the configured backlight interface.
+ *
+ *          The HD44780 controller does not provide native backlight control.
+ *          This function acts as a hardware-independent wrapper that delegates
+ *          the operation to the registered backlight adapter.
+ *
+ * @param   Device - Pointer to the HD44780 device instance.
+ *
+ * @note    Turning the backlight off does not affect the display contents,
+ *          DDRAM data, cursor position or HD44780 internal state.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the backlight was successfully disabled.
+ *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_BacklightOff(HD44780_HandleTypeDef* Device)
+{
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    if(Device->_backlight.TurnOff(Device->_backlight.Context) != HD44780_BACKLIGHT_OP_OK)
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    return HD44780_OPERATION_OK;
+}
+
+/**********************************************************************************************************************************
+ * @brief   Sets the HD44780 module backlight brightness level.
+ *
+ * @details Adjusts the backlight brightness by invoking the SetBrightness
+ *          operation provided by the configured backlight interface.
+ *
+ *          The actual brightness control mechanism depends on the selected
+ *          backlight adapter implementation. For example, PWM-based adapters
+ *          may provide continuous brightness control, while GPIO-based adapters
+ *          may only support enabled or disabled states.
+ *
+ * @param   Device        - Pointer to the HD44780 device instance.
+ * @param   BrightPercent - Desired brightness level expressed as a percentage
+ *                          from 0 to 100.
+ *
+ * @note    The HD44780 controller does not control the backlight directly.
+ *          This function only forwards the brightness request to the configured
+ *          backlight interface.
+ *
+ * @return  HD44780_OPERATION_OK   - Indicates that the brightness level was successfully updated.
+ *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
+ **********************************************************************************************************************************/
+HD44780_OpStatusTypeDef HD44780_SetBrightness(HD44780_HandleTypeDef* Device, uint16_t BrightPercent)
+{
+    if(Device == NULL || !(HD44780_IsInit(Device)))
+    {
+        return HD44780_OPERATION_FAIL;
+    }
+
+    if(Device->_backlight.SetBrightness(Device->_backlight.Context, BrightPercent) != HD44780_BACKLIGHT_OP_OK)
     {
         return HD44780_OPERATION_FAIL;
     }

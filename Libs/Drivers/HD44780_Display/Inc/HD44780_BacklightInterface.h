@@ -1,12 +1,12 @@
 /**********************************************************************************************************************************
  * @file    HD44780_BacklightInterface.h
- * @brief   Abstract backlight control interface for the HD44780 LCD driver.
+ * @brief   Abstract backlight control interface for the HD44780 HD44780 driver.
  *
  * @details Defines the abstraction layer used by the HD44780 driver to control the
- *          LCD module backlight independently of the underlying hardware implementation.
+ *          HD44780 module backlight independently of the underlying hardware implementation.
  *
  *          Although the backlight is not controlled by the HD44780 controller itself,
- *          this interface is provided as a convenience abstraction for complete LCD
+ *          this interface is provided as a convenience abstraction for complete HD44780
  *          module management.
  *
  *          Different hardware implementations (GPIO, PWM, I/O expanders, etc.) can
@@ -54,7 +54,7 @@ typedef enum
  * @brief   Generic backlight control interface.
  *
  * @details Provides a hardware-independent interface used by the HD44780 driver
- *          to control the LCD module backlight.
+ *          to control the HD44780 module backlight.
  *
  *          Each function pointer represents a backlight operation that may be
  *          implemented by different hardware adapters such as GPIO outputs,
@@ -71,7 +71,7 @@ typedef enum
 typedef struct
 {
    /**********************************************************************************************************************************
-     * @brief   Turns the LCD module backlight on.
+     * @brief   Turns the HD44780 module backlight on.
      *
      * @details Requests the underlying hardware implementation to enable the
      *          backlight.
@@ -84,7 +84,7 @@ typedef struct
     HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
 
     /**********************************************************************************************************************************
-     * @brief   Turns the LCD module backlight off.
+     * @brief   Turns the HD44780 module backlight off.
      *
      * @details Requests the underlying hardware implementation to disable the
      *          backlight.
@@ -97,7 +97,7 @@ typedef struct
     HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
 
     /**********************************************************************************************************************************
-     * @brief   Sets the LCD module backlight brightness.
+     * @brief   Sets the HD44780 module backlight brightness.
      *
      * @details Requests the underlying hardware implementation to adjust the
      *          backlight brightness to the specified percentage.
@@ -107,12 +107,36 @@ typedef struct
      *
      * @param   Context         - Pointer to the implementation-specific context required
      *                            by the backlight adapter.
-     * @param   PercentageLevel - Desired brightness level expressed as a
+     * @param   Level           - Desired brightness level expressed as a
      *                            percentage in the range from 0 to 100.
      *
-     * @return  Status indicating whether the operation completed successfully.A
+     * @return  Status indicating whether the operation completed successfully.
      **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(void* Context, uint8_t PercentageLevel);
+    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(void* Context, uint16_t Level);
+
+    /**********************************************************************************************************************************
+     * @brief   Gets the HD44780 module backlight brightness level.
+     *
+     * @details Requests the underlying hardware implementation to return the
+     *          current backlight brightness level configured in the adapter.
+     *
+     *          The returned value represents the brightness setting maintained by
+     *          the backlight implementation. It does not necessarily represent the
+     *          actual optical brightness of the HD44780 module, since the perceived
+     *          brightness depends on hardware characteristics such as the LED
+     *          driver circuit, supply voltage and environmental conditions.
+     *
+     * @param   Context - Pointer to the implementation-specific context required
+     *                    by the backlight adapter.
+     *
+     * @note    Implementations without variable brightness control may return a
+     *          binary state representation, such as 0 for disabled and 100 for
+     *          enabled.
+     *
+     * @return  Current backlight brightness level expressed as a percentage from
+     *          0 to 100.
+     **********************************************************************************************************************************/
+    uint16_t (*GetBrightness)(void* Context);
 
     /**********************************************************************************************************************************
      * @brief   Implementation-specific backlight context.
@@ -121,7 +145,7 @@ typedef struct
      *          The concrete implementation defines the type and contents of this
      *          context, which may contain peripheral handles, GPIO information,
      *          timer configuration, or any other resources required to control the
-     *          LCD module backlight.
+     *          HD44780 module backlight.
      **********************************************************************************************************************************/
     void* Context;
 
