@@ -673,7 +673,7 @@ PWM_OpStatusTypeDef PPWM_SetDutyPercent(PWM_HandleTypeDef* Instance, uint16_t Du
 
     uint16_t max_duty = PPWM_GetMaxDuty(Instance);
 
-    uint16_t duty_val = PPWM_MapDutyPercentToValue(Duty_Percent, PPWM_MAX_DUTY_PERCENT, 0U, PPWM_MIN_DUTY_PERCENT, max_duty);
+    uint16_t duty_val = PPWM_MapDutyPercentToValue(Duty_Percent, PPWM_MIN_DUTY_PERCENT, 0U, PPWM_MAX_DUTY_PERCENT, max_duty);
 
     *ccrx_reg = duty_val;
 
