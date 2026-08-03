@@ -17,8 +17,8 @@
  * @date    Jul 29, 2026
  **********************************************************************************************************************************/
 
-#ifndef DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_
-#define DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_
+#ifndef COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_
+#define COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -162,4 +162,4 @@ typedef struct
 }
 #endif
 
-#endif /* DRIVERS_HD44780_DISPLAY_INC_HD44780_BACKLIGHTINTERFACE_H_ */
+#endif /* COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_ */

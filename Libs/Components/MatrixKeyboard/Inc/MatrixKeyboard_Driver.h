@@ -1,5 +1,5 @@
 /**********************************************************************************************************************************
- * @file    4x4Keyboard_Driver.h
+ * @file    MatrixKeyboard_Driver.h
  * @brief   Describe this module public interface.
  *
  * @author  Joao Pedro Rey
