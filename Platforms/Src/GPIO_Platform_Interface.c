@@ -69,7 +69,7 @@ static inline bool PGPIO_IsInit(GPIO_HandleTypeDef* Instance)
  * @return  GPIO_OPERATION_OK   - if the instance was successfully created.
  * @return  GPIO_OPERATION_FAIL - if any parameter is invalid.
  **********************************************************************************************************************************/
-GPIO_OpStatusTypeDef PGPIO_Create(GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin)
+GPIO_OpStatusTypeDef PGPIO_Init(GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin)
 {
     if(Instance == NULL || GPIO_Port == NULL)
     {
@@ -80,36 +80,6 @@ GPIO_OpStatusTypeDef PGPIO_Create(GPIO_HandleTypeDef* Instance, void* GPIO_Port,
     Instance->_gpio_config._gpio_pin  = (uint16_t)(1 << GPIO_Pin);
 
     Instance->_initialized = false;
-
-    return GPIO_OPERATION_OK;
-}
-
-/**********************************************************************************************************************************
- * @brief   Initializes a Platform GPIO instance.
- *
- * @details Marks the GPIO instance as initialized and ready for use.
- *
- *          Platform-specific implementations may also perform additional
- *          hardware initialization if required.
- *
- * @param   Instance Pointer to the Platform GPIO instance.
- *
- * @return  GPIO_OPERATION_OK   - on success.
- * @return  GPIO_OPERATION_FAIL - if the supplied instance is NULL.
- **********************************************************************************************************************************/
-GPIO_OpStatusTypeDef PGPIO_Init(GPIO_HandleTypeDef* Instance)
-{
-    if(Instance == NULL)
-    {
-        return GPIO_OPERATION_FAIL;
-    }
-
-    if(PGPIO_IsInit(Instance))
-    {
-        return GPIO_OPERATION_OK;
-    }
-
-    Instance->_initialized = true;
 
     return GPIO_OPERATION_OK;
 }
