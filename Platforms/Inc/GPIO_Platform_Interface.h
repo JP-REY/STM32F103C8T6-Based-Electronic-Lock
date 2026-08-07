@@ -132,8 +132,7 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-GPIO_OpStatusTypeDef PGPIO_Create   (GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
-GPIO_OpStatusTypeDef PGPIO_Init     (GPIO_HandleTypeDef* Instance);
+GPIO_OpStatusTypeDef PGPIO_Init     (GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
 GPIO_OpStatusTypeDef PGPIO_Set      (GPIO_HandleTypeDef* Instance);
 GPIO_OpStatusTypeDef PGPIO_Reset    (GPIO_HandleTypeDef* Instance);
 GPIO_OpStatusTypeDef PGPIO_Toggle   (GPIO_HandleTypeDef* Instance);
