@@ -35,21 +35,6 @@ extern "C" {
  Types
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
- * @brief   Platform I2C Status type.
- *
- * @details Indicates the status of platform I2C interface operation.
- *
- * @note    I2C_OK/I2C_ERROR indicates whether I2C operation was succeed or not.
- *
- **********************************************************************************************************************************/
-typedef enum
-{
-    I2C_OK = 0,
-    I2C_ERROR,
-
-}PI2C_StatusTypeDef;
-
-/**********************************************************************************************************************************
  * @brief  	Platform I2C Blocking Operation Status type.
  *
  * @details	Translates platform-specific HAL status into platform I2C interface.
@@ -59,12 +44,12 @@ typedef enum
  **********************************************************************************************************************************/
 typedef enum
 {
-    I2C_BLOCKING_OPERATION_OK = 0,
-    I2C_BLOCKING_OPERATION_ERROR,
-    I2C_BLOCKING_OPERATION_BUSY,
-    I2C_BLOCKING_OPERATION_TIMEOUT
+    I2C_OPERATION_OK = 0,
+    I2C_OPERATION_ERROR,
+    I2C_OPERATION_BUSY,
+    I2C_OPERATION_TIMEOUT
 
-}PI2C_BOpStatusTypeDef;
+}PI2C_OpStatusTypeDef;
 
 /**********************************************************************************************************************************
  Data
@@ -72,9 +57,8 @@ typedef enum
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-PI2C_StatusTypeDef    PI2C_Init          (void);
-PI2C_BOpStatusTypeDef PI2C_WriteBlocking (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
-PI2C_BOpStatusTypeDef PI2C_ReadBlocking  (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
+PI2C_OpStatusTypeDef PI2C_Write (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
+PI2C_OpStatusTypeDef PI2C_Read  (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
 
 #ifdef __cplusplus
 }
