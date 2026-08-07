@@ -102,7 +102,7 @@ PCF8574_StatusTypeDef PCF8574_Init(PCF8574_HandleTypeDef* Device, uint8_t Addres
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_Deinit(PCF8574_HandleTypeDef* Device)
 {
-    if(Device == NULL || Device->_initialized != true)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
       return PCF8574_OPERATION_FAIL;
     }
@@ -140,14 +140,14 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
 {
     uint8_t data_buffer = Mask;
 
-    if(!(PCF8754_IsInit(Device)) || Device == NULL)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
 
     PI2C_OpStatusTypeDef PCF8574_WriteStatus = PI2C_Write(Device->_i2c_context,Device->_device_address,&data_buffer,1,10);
 
-    if(PCF8574_WriteStatus != I2C_BLOCKING_OPERATION_OK)
+    if(PCF8574_WriteStatus != I2C_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -171,14 +171,14 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* Buffer)
 {
-    if(!(PCF8754_IsInit(Device)) || Device == NULL || Buffer == NULL)
+    if(Device == NULL || Buffer == NULL || !(PCF8754_IsInit(Device)) )
     {
         return PCF8574_OPERATION_FAIL;
     }
 
     PI2C_OpStatusTypeDef PCF8574_ReadStatus =  PI2C_Read(Device->_i2c_context,Device->_device_address,Buffer,1,10);
 
-    if(PCF8574_ReadStatus != I2C_BLOCKING_OPERATION_OK)
+    if(PCF8574_ReadStatus != I2C_OPERATION_OK)
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -200,7 +200,7 @@ PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* B
  **********************************************************************************************************************************/
 PCF8574_StatusTypeDef PCF8574_ClearPort(PCF8574_HandleTypeDef* Device)
 {
-    if(Device == NULL)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -226,7 +226,7 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(PCF8574_HandleTypeDef* Device, uint8_t Bi
 {
     uint8_t data_buffer = 0x00;
 
-    if(Device == NULL)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -254,7 +254,7 @@ PCF8574_StatusTypeDef PCF8574_ReadBit(PCF8574_HandleTypeDef* Device, uint8_t Bit
 {
     uint8_t data_buffer = 0x00;
 
-    if(Device == NULL || Buffer == NULL)
+    if(Device == NULL || Buffer == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -287,7 +287,7 @@ PCF8574_StatusTypeDef PCF8574_ClearBit(PCF8574_HandleTypeDef* Device, uint8_t Bi
 {
     uint8_t data_buffer = 0x00;
 
-    if(Device == NULL)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
@@ -315,7 +315,7 @@ PCF8574_StatusTypeDef PCF8574_ToggleBit(PCF8574_HandleTypeDef* Device, uint8_t B
 {
     uint8_t data_buffer = 0x00;
 
-    if(Device == NULL)
+    if(Device == NULL || !(PCF8754_IsInit(Device)))
     {
         return PCF8574_OPERATION_FAIL;
     }
