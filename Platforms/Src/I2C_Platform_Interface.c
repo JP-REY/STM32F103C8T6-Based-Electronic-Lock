@@ -3,16 +3,22 @@
  *
  * @brief   This module implements the platform-specific I2C communication interface using the STM32 HAL library.
  *
- * @details It provides generic read and write operations that abstract the underlying STM32 HAL I2C functions, allowing
- *          higher-level drivers to perform I2C communication without directly depending on HAL-specific types and return codes.
+ * @details It provides generic I2C read and write operations that abstract the underlying platform-specific communication
+ *          mechanism, allowing higher-level drivers to perform I2C communication without directly depending on platform-specific
+ *          types or APIs.
  *
- *          The platform interface receives the peripheral context through a generic void pointer, which is internally cast to
- *          an STM32 I2C_HandleTypeDef pointer before accessing the hardware peripheral.
+ *          The platform interface defines only the I2C communication operations required by higher-level drivers. The execution
+ *          model used to perform these operations, such as blocking, interrupt-driven, DMA-based, or RTOS-synchronized
+ *          communication, is determined by the concrete platform implementation.
+ *
+ *          The platform interface receives the peripheral context through a generic void pointer, which is internally interpreted
+ *          according to the target platform implementation.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 20, 2026
+ * @date    Ago 07, 2026
  **********************************************************************************************************************************/
+
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
@@ -41,28 +47,31 @@
  Functions
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
- * @brief  	Transmits a sequence of bytes to an I2C slave device in blocking mode.
+ * @brief   Transmits a sequence of bytes to an I2C slave device.
  *
- * @details	This function provides a platform abstraction for I2C master transmission in blocking mode. The generic context pointer
- *          is interpreted as an STM32 HAL I2C handle and used to perform the transmission through HAL_I2C_Master_Transmit().
+ * @details This function provides the platform-independent I2C write operation required by higher-level drivers.
  *
- *          The STM32 HAL return status is translated into the corresponding platform-independent I2C status.
+ *          The interface does not define how the transmission is performed. The concrete platform implementation is responsible
+ *          for selecting the appropriate communication mechanism, such as blocking, interrupt-driven, DMA-based, or
+ *          RTOS-synchronized communication.
  *
- * @param   Context - Pointer to the platform-specific I2C peripheral context. For STM32 platforms, this shall
- *                    point to a valid I2C_HandleTypeDef instance.
+ *          The platform-specific result is translated into a platform-independent I2C operation status.
+ *
+ * @param   Context - Pointer to the platform-specific I2C peripheral context.
  * @param   Address - I2C slave address in the 7-bit format.
  * @param   Data    - Pointer to the data buffer containing the bytes to be transmitted.
  * @param   Size    - Number of bytes to transmit.
- * @param   Timeout - Maximum transmission timeout, in milliseconds.
+ * @param   Timeout - Implementation-defined timeout parameter. Its behavior and applicability depend on the concrete platform
+ *                    implementation.
  *
- * @note   	The Context pointer must reference a valid and initialized STM32 I2C_HandleTypeDef instance.
+ * @note    The Context pointer must reference a valid and properly initialized platform-specific I2C context.
  *
- * @return  PLATFORM_I2C_OK       Transmission completed successfully.
- * @return  PLATFORM_I2C_ERROR    An I2C communication error occurred.
- * @return  PLATFORM_I2C_BUSY     The I2C peripheral is currently busy.
- * @return  PLATFORM_I2C_TIMEOUT  The transmission did not complete within the specified timeout.
+ * @return  I2C_OPERATION_OK       - The write operation completed successfully.
+ * @return  I2C_OPERATION_ERROR    - An I2C communication error occurred.
+ * @return  I2C_OPERATION_BUSY     - The I2C resource is currently unavailable.
+ * @return  I2C_OPERATION_TIMEOUT  - The operation did not complete within the implementation-defined timeout.
  ********** ************************************************************************************************************************/
-PI2C_BOpStatusTypeDef PI2C_WriteBlocking(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
+PI2C_OpStatusTypeDef PI2C_Write(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
 {
     HAL_StatusTypeDef HAL_I2C_Status = HAL_I2C_Master_Transmit((I2C_HandleTypeDef*)(Context), (Address << 1), Data, Size, Timeout);
 
@@ -70,50 +79,53 @@ PI2C_BOpStatusTypeDef PI2C_WriteBlocking(void* Context, uint8_t Address, uint8_t
     {
         case HAL_OK:
         {
-            return I2C_BLOCKING_OPERATION_OK;
+            return I2C_OPERATION_OK;
         }
         case HAL_ERROR:
         {
-            return I2C_BLOCKING_OPERATION_ERROR;
+            return I2C_OPERATION_ERROR;
         }
         case HAL_BUSY:
         {
-            return I2C_BLOCKING_OPERATION_BUSY;
+            return I2C_OPERATION_BUSY;
         }
         case HAL_TIMEOUT:
         {
-            return I2C_BLOCKING_OPERATION_TIMEOUT;
+            return I2C_OPERATION_TIMEOUT;
         }
         default:
         {
-            return I2C_BLOCKING_OPERATION_ERROR;
+            return I2C_OPERATION_ERROR;
         }
     }
 }
 
 /**********************************************************************************************************************************
- * @brief   Receives a sequence of bytes from an I2C slave device in blocking mode.
+ * @brief   Receives a sequence of bytes from an I2C slave device.
  *
- * @details This function provides a platform abstraction for I2C master reception in blocking mode. The generic context pointer
- *          is interpreted as an STM32 HAL I2C handle and used to perform the transmission through HAL_I2C_Master_Receive().
+ * @details This function provides the platform-independent I2C read operation required by higher-level drivers.
  *
- *          The STM32 HAL return status is translated into the corresponding platform-independent I2C status.
+ *          The interface does not define how the reception is performed. The concrete platform implementation is responsible
+ *          for selecting the appropriate communication mechanism, such as blocking, interrupt-driven, DMA-based, or
+ *          RTOS-synchronized communication.
  *
- * @param   Context - Pointer to the platform-specific I2C peripheral context. For STM32 platforms, this shall
- *                    point to a valid I2C_HandleTypeDef instance.
+ *          The platform-specific result is translated into a platform-independent I2C operation status.
+ *
+ * @param   Context - Pointer to the platform-specific I2C peripheral context.
  * @param   Address - I2C slave address in the 7-bit format.
  * @param   Data    - Pointer to the buffer where the received data will be stored.
  * @param   Size    - Number of bytes to receive.
- * @param   Timeout - Maximum transmission timeout, in milliseconds.
+ * @param   Timeout - Implementation-defined timeout parameter. Its behavior and applicability depend on the concrete platform
+ *                    implementation.
  *
- * @note    The Context pointer must reference a valid and initialized STM32 I2C_HandleTypeDef instance.
+ * @note    The Context pointer must reference a valid and properly initialized platform-specific I2C context.
  *
- * @return  PLATFORM_I2C_OK       Transmission completed successfully.
- * @return  PLATFORM_I2C_ERROR    An I2C communication error occurred.
- * @return  PLATFORM_I2C_BUSY     The I2C peripheral is currently busy.
- * @return  PLATFORM_I2C_TIMEOUT  The transmission did not complete within the specified timeout.
+ * @return  I2C_OPERATION_OK       - The read operation completed successfully.
+ * @return  I2C_OPERATION_ERROR    - An I2C communication error occurred.
+ * @return  I2C_OPERATION_BUSY     - The I2C resource is currently unavailable.
+ * @return  I2C_OPERATION_TIMEOUT  - The operation did not complete within the implementation-defined timeout.
  ********** ************************************************************************************************************************/
-PI2C_BOpStatusTypeDef PI2C_ReadBlocking(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
+PI2C_OpStatusTypeDef PI2C_Read(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
 {
     HAL_StatusTypeDef HAL_I2C_Status = HAL_I2C_Master_Receive((I2C_HandleTypeDef*)(Context), (Address << 1), Data, Size, Timeout);
 
@@ -121,41 +133,25 @@ PI2C_BOpStatusTypeDef PI2C_ReadBlocking(void* Context, uint8_t Address, uint8_t 
     {
         case HAL_OK:
         {
-            return I2C_BLOCKING_OPERATION_OK;
+            return I2C_OPERATION_OK;
         }
         case HAL_ERROR:
         {
-            return I2C_BLOCKING_OPERATION_ERROR;
+            return I2C_OPERATION_ERROR;
         }
         case HAL_BUSY:
         {
-            return I2C_BLOCKING_OPERATION_BUSY;
+            return I2C_OPERATION_BUSY;
         }
         case HAL_TIMEOUT:
         {
-            return I2C_BLOCKING_OPERATION_TIMEOUT;
+            return I2C_OPERATION_TIMEOUT;
         }
         default:
         {
-            return I2C_BLOCKING_OPERATION_ERROR;
+            return I2C_OPERATION_ERROR;
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

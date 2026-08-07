@@ -145,7 +145,7 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
         return PCF8574_OPERATION_FAIL;
     }
 
-    PI2C_BOpStatusTypeDef PCF8574_WriteStatus = PI2C_WriteBlocking(Device->_i2c_context,Device->_device_address,&data_buffer,1,10);
+    PI2C_OpStatusTypeDef PCF8574_WriteStatus = PI2C_Write(Device->_i2c_context,Device->_device_address,&data_buffer,1,10);
 
     if(PCF8574_WriteStatus != I2C_BLOCKING_OPERATION_OK)
     {
@@ -176,7 +176,7 @@ PCF8574_StatusTypeDef PCF8574_ReadPort(PCF8574_HandleTypeDef* Device, uint8_t* B
         return PCF8574_OPERATION_FAIL;
     }
 
-    PI2C_BOpStatusTypeDef PCF8574_ReadStatus =  PI2C_ReadBlocking(Device->_i2c_context,Device->_device_address,Buffer,1,10);
+    PI2C_OpStatusTypeDef PCF8574_ReadStatus =  PI2C_Read(Device->_i2c_context,Device->_device_address,Buffer,1,10);
 
     if(PCF8574_ReadStatus != I2C_BLOCKING_OPERATION_OK)
     {
