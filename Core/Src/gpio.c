@@ -70,8 +70,8 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_ON_BOARD_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : MKB_ROW0_Pin MKB_ROW1_Pin MKB_ROW2_Pin MKB_ROW3_Pin */
-  GPIO_InitStruct.Pin = MKB_ROW0_Pin|MKB_ROW1_Pin|MKB_ROW2_Pin|MKB_ROW3_Pin;
+  /*Configure GPIO pins : MKB_ROW3_Pin MKB_ROW2_Pin MKB_ROW1_Pin MKB_ROW0_Pin */
+  GPIO_InitStruct.Pin = MKB_ROW3_Pin|MKB_ROW2_Pin|MKB_ROW1_Pin|MKB_ROW0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
