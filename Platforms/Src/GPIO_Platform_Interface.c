@@ -79,7 +79,7 @@ GPIO_OpStatusTypeDef PGPIO_Init(GPIO_HandleTypeDef* Instance, void* GPIO_Port, u
     Instance->_gpio_config._gpio_port = (GPIO_TypeDef*)GPIO_Port;
     Instance->_gpio_config._gpio_pin  = (uint16_t)(1 << GPIO_Pin);
 
-    Instance->_initialized = false;
+    Instance->_initialized = true;
 
     return GPIO_OPERATION_OK;
 }
