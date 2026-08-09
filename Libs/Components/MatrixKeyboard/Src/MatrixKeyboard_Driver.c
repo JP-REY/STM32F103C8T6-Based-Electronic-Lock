@@ -450,27 +450,39 @@ MK_OpStatusTypeDef MK_Init(MK_HandleTypeDef* Device, const MK_ConfigTypeDef* Con
 }
 
 /**********************************************************************************************************************************
- * @brief   Reads the current state of the matrix keyboard.
+ * @brief   Reads and processes the matrix keyboard.
  *
  * @details Executes a complete keyboard acquisition cycle by scanning the
  *          matrix, processing the sampled key states and retrieving the
  *          next pending user action, if available.
  *
- *          If a key action is available, the corresponding key identifier
- *          and action type are written to the output structure. Once
- *          reported, the action is cleared to prevent it from being
- *          returned again in subsequent calls.
+ *          At the beginning of each call, the output action is initialized
+ *          to MK_KEY_ACTION_NONE. If a pending key action is available, the
+ *          corresponding key identifier and action type are written to the
+ *          output structure.
+ *
+ *          Once a pending action is reported through the output structure,
+ *          it is consumed internally and will not be returned again by
+ *          subsequent calls.
  *
  * @param   Device - Pointer to the matrix keyboard instance.
- * @param   Output - Pointer to the structure that receives the detected key
- *                   and associated action.
+ * @param   Output - Pointer to the structure that receives the key identifier
+ *                   and action detected during the current read operation.
+ *
+ * @note    The Output structure is provided by the caller and represents
+ *          the result of the current MK_Read() call. The caller is not
+ *          responsible for clearing the internal pending action.
+ *
+ * @note    If no key action is pending, Output->OutputAction is set to
+ *          MK_KEY_ACTION_NONE and Output->OutputKey is set to zero,
  *
  * @note    This function should be called periodically to ensure proper
  *          keyboard scanning and event processing.
  *
  * @note    If multiple key actions are pending, only the first pending
- *          action found during the scan order is returned. Remaining
- *          pending actions are preserved for subsequent calls.
+ *          action found according to the configured key scan order is
+ *          returned. Remaining pending actions are preserved for
+ *          subsequent calls.
  *
  * @return  MK_OPERATION_OK   - Keyboard successfully processed.
  * @return  MK_OPERATION_FAIL - Invalid parameters or an internal processing
@@ -492,6 +504,9 @@ MK_OpStatusTypeDef MK_Read(MK_HandleTypeDef* Device, MK_OutputTypeDef* Output)
     {
         return MK_OPERATION_FAIL;
     }
+
+    Output->OutputAction = MK_KEY_ACTION_NONE;
+    Output->OutputKey    = 0x00;
 
     const MK_RowsQtyTypeDef rows = Device->_config->_rows_number;
     const MK_ColsQtyTypeDef cols = Device->_config->_cols_number;
