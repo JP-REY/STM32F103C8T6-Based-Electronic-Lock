@@ -18,8 +18,8 @@
  * @date    Jul 29, 2026
  **********************************************************************************************************************************/
 
-#ifndef COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_
-#define COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_
+#ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_
+#define LIBS_COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,4 +49,4 @@ HD44780_BacklightOpStatusTypeDef HD44780_PWM_BacklightAdapterInit(HD44780_Backli
 }
 #endif
 
-#endif /* COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_ */
+#endif /* LIBS_COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_ */

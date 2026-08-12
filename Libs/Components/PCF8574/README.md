@@ -1,14 +1,73 @@
-# Hardware-Independent Driver for the PCF8574 8-bit I/O Expander Designed for Embedded Systems.
+<h1 align="left">PCF8574 I/O Expander Driver</h1>
+
+<p align="left">
+  <big>
+    Hardware-independent driver for the PCF8574 8-bit I/O expander,<br>
+    designed for portable embedded systems.
+  </big>
+</p>
 
 ---
-## Overview
+## Table of Contents
+
+* [1. Overview](#1-overview)
+* [2. Features](#2-features)
+* [3. Architecture](#3-architecture)
+* [4. Directory Structure](#4-directory-structure)
+* [5. Device Overview](#5-device-overview)
+* [6. Driver Responsibilities](#6-driver-responsibilities)
+* [7. Dependencies](#7-dependencies)
+* [8. Data Structures](#8-data-structures)
+
+  * [8.1 PCF8574 Handle](#81-pcf8574-handle)
+  * [8.2 Operation Status](#82-operation-status)
+* [9. API Reference](#9-api-reference)
+
+  * [9.1 PCF8574_Init](#91-pcf8574_init)
+  * [9.2 PCF8574_Deinit](#92-pcf8574_deinit)
+  * [9.3 PCF8574_WritePort](#93-pcf8574_writeport)
+  * [9.4 PCF8574_ClearPort](#94-pcf8574_clearport)
+  * [9.5 PCF8574_ReadPort](#95-pcf8574_readport)
+  * [9.6 PCF8574_WriteBit](#96-pcf8574_writebit)
+  * [9.7 PCF8574_ClearBit](#97-pcf8574_clearbit)
+  * [9.8 PCF8574_ReadBit](#98-pcf8574_readbit)
+  * [9.9 PCF8574_ToggleBit](#99-pcf8574_togglebit)
+* [10. Port Shadow Mechanism](#10-port-shadow-mechanism)
+* [11. Operation Flow](#11-operation-flow)
+
+  * [11.1 Initialization Flow](#111-initialization-flow)
+* [12. Usage Example](#12-usage-example)
+* [13. Design Decisions](#13-design-decisions)
+
+  * [13.1 Hardware Independent I2C Communication](#131-hardware-independent-i2c-communication)
+  * [13.2 Handle-Based Driver Architecture](#132-handle-based-driver-architecture)
+  * [13.3 Software Port Shadow](#133-software-port-shadow)
+  * [13.4 Driver Initialization Protection](#134-driver-initialization-protection)
+  * [13.5 Abstraction Over Device Usage](#135-abstraction-over-device-usage)
+* [14. Error Handling](#14-error-handling)
+* [15. Usage Constraints](#15-usage-constraints)
+
+  * [15.1 Initialization Requirements](#151-initialization-requirements)
+  * [15.2 I2C Communication Constraints](#152-i2c-communication-constraints)
+  * [15.3 Port Shadow Mechanism](#153-port-shadow-mechanism)
+  * [15.4 Bit Manipulation Functions](#154-bit-manipulation-functions)
+  * [15.5 Application Responsibilities](#155-application-responsibilities)
+  * [15.6 I2C Device Address](#156-i2c-device-address)
+  * [15.7 Port Write Operations](#157-port-write-operations)
+  * [15.8 Port Read Operations](#158-port-read-operations)
+* [16. Applications](#16-applications)
+* [17. Limitations](#17-limitations)
+* [18. License](#18-license)
+
+---
+## 1. Overview
 - The driver provides an abstraction layer for controlling the PCF8574 device through an I2C interface, allowing applications to read and write the complete 8-bit quasi-bidirectional I/O port.
 
 - The driver abstracts the underlying I2C communication through the platform interface, allowing reuse across different microcontrollers and hardware platforms.
 
 ---
 
-## Features
+## 2. Features
 
 - PCF8574 device initialization and deinitialization.
 - Full 8-bit port write operation.
@@ -26,7 +85,7 @@
 
 ---
 
-## Architecture
+## 3. Architecture
 
 The driver follows a layered architecture where the PCF8574 communication is isolated from the MCU-specific I2C peripheral implementation.
 
@@ -57,7 +116,7 @@ This architecture allows:
 
 ---
 
-## Directory Structure
+## 4. Directory Structure
 
 Example project organization:
 
@@ -73,7 +132,7 @@ PCF8574/
 
 ---
 
-## Device Overview
+## 5. Device Overview
 
 The PCF8574 is an 8-bit I/O expander that communicates through the I2C bus.
 
@@ -93,7 +152,7 @@ depending on the external circuit and application requirements.
 
 ---
 
-## Driver Responsibilities
+## 6. Driver Responsibilities
 
 The PCF8574 driver is responsible for:
 
@@ -113,7 +172,7 @@ The driver is **not responsible** for:
 
 ---
 
-## Dependencies
+## 7. Dependencies
 
 Required dependency:
 
@@ -132,10 +191,9 @@ PI2C_Read()
 This abstraction allows the driver to run on different platforms.
 
 ---
-## Data Structures
+## 8. Data Structures
 
----
-### PCF8574 Handle
+### 8.1 PCF8574 Handle
 
 The driver uses a handle structure to represent a PCF8574 device instance.
 
@@ -159,9 +217,7 @@ typedef struct
 
 Members marked as internal driver data should not be modified directly by the application.
 
----
-
-### Operation Status
+### 8.2 Operation Status
 
 The driver uses the following status type:
 
@@ -181,16 +237,14 @@ typedef enum
 
 ---
 
-## API Reference
----
-### PCF8574_Init
+## 9. API Reference
+### 9.1 PCF8574_Init
 - Initializes a PCF8574 device instance.
 - Stores the I2C context.
 - Stores the device address.
 - Initializes the internal port shadow.
 - Clears the device output port.
 
----
 #### Function Signature
 
 ```c
@@ -200,7 +254,6 @@ PCF8574_StatusTypeDef PCF8574_Init(
     void* I2C_Context
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
@@ -209,14 +262,12 @@ PCF8574_StatusTypeDef PCF8574_Init(
 | `Address` | I2C device address. |
 | `I2C_Context` | Platform-specific I2C context. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 
 ```c
@@ -229,42 +280,33 @@ PCF8574_Init(
 );
 ```
 
----
-
-### PCF8574_Deinit
+### 9.2 PCF8574_Deinit
 - Deinitializes a PCF8574 instance.
 - Clears the output port.
 - Invalidates the device context.
 - Resets initialization state.
 
----
 #### Function Signature
 ```c
 PCF8574_StatusTypeDef PCF8574_Deinit(
     PCF8574_HandleTypeDef* Device
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
 |-|-|
 | `Device` | Pointer to PCF8574 device handle. |
 
-
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
-
----
-### PCF8574_WritePort
+### 9.3 PCF8574_WritePort
 - Writes an 8-bit value to the complete I/O port.
 
----
 #### Function Signature
 
 ```c
@@ -273,7 +315,6 @@ PCF8574_StatusTypeDef PCF8574_WritePort(
     uint8_t Mask
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
@@ -281,14 +322,12 @@ PCF8574_StatusTypeDef PCF8574_WritePort(
 | `Device` | Pointer to PCF8574 device handle. |
 | `Mask` | Mask 8-bit value representing the desired port state. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 
 ```c
@@ -300,11 +339,9 @@ PCF8574_WritePort(
 
 The internal port shadow is updated only after a successful I2C transmission.
 
----
-### PCF8574_ClearPort
+### 9.4 PCF8574_ClearPort
 - Clears all PCF8574 I/O port bits.
 
----
 #### Function Signature
 
 ```c
@@ -312,21 +349,18 @@ PCF8574_StatusTypeDef PCF8574_ClearPort(
     PCF8574_HandleTypeDef* Device,
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
 |-|-|
 | `Device` | Pointer to PCF8574 device handle. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 
 ```c
@@ -338,12 +372,9 @@ PCF8574_WritePort(
 
 The internal port shadow is updated only after a successful I2C transmission.
 
----
-
-### PCF8574_ReadPort
+### 9.5 PCF8574_ReadPort
 - Reads the current state of all eight I/O pins.
 
----
 #### Function Signature
 
 ```c
@@ -352,22 +383,19 @@ PCF8574_StatusTypeDef PCF8574_ReadPort(
     uint8_t* Buffer
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
 |-|-|
 | `Device` | Pointer to PCF8574 device handle. |
-| `Buffer` | Pointer to the buffer to store 8-bit value representing the readed port state. |
+| `Buffer` | Pointer to the output buffer where the data read from the hardware port will be stored. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 
 ```c
@@ -379,15 +407,12 @@ PCF8574_ReadPort(
 );
 ```
 
----
-
-### PCF8574_WriteBit
+### 9.6 PCF8574_WriteBit
 - Sets a specific I/O pin HIGH.
 - Internally: 
 ```text
 New Port State = Current Shadow OR Bit Mask
 ```
----
 #### Function Signature
 ```c
 PCF8574_StatusTypeDef PCF8574_WriteBit(
@@ -396,7 +421,6 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(
 );
 
 ```
----
 #### Parameters
 
 | Parameter | Description |
@@ -404,15 +428,13 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(
 | `Device` | Pointer to PCF8574 device handle. |
 | `Bit` | Port bit position to be set. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
-### Example
+#### Example
 
 ```c
 PCF8574_WriteBit(
@@ -422,15 +444,12 @@ PCF8574_WriteBit(
 
 ```
 
----
-
-### PCF8574_ClearBit
+### 9.7 PCF8574_ClearBit
 - Clears a specific I/O pin LOW.
 - Internally:
 ```text
 New Port State = Current Shadow AND (~Bit Mask)
 ```
----
 #### Function Signature
 ```c
 PCF8574_StatusTypeDef PCF8574_WriteBit(
@@ -439,7 +458,6 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(
 );
 
 ```
----
 #### Parameters
 
 | Parameter | Description |
@@ -447,14 +465,11 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(
 | `Device` | Pointer to PCF8574 device handle. |
 | `Bit` | Port bit position to be cleared. |
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
-
----
 
 #### Example
 ```c
@@ -463,12 +478,10 @@ PCF8574_ClearBit(
     3
 );
 ```
----
 
-### PCF8574_ReadBit
+### 9.8 PCF8574_ReadBit
 - Reads the state of a single pin.
 
----
 #### Function Signature
 ```c
 PCF8574_StatusTypeDef PCF8574_ReadBit(
@@ -477,23 +490,20 @@ PCF8574_StatusTypeDef PCF8574_ReadBit(
     uint8_t* Buffer
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
 |-|-|
 | `Device` | Pointer to PCF8574 device handle. |
 | `Bit` | Port bit position to be readed. |
-| `Buffer` | Pointer to the buffer to store 8-bit value representing the readed port state.|
+| `Buffer` | Pointer to an output buffer that will receive the extracted bit state (represented as 0 or 1).|
 
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 ```c
 uint8_t state;
@@ -505,9 +515,7 @@ PCF8574_ReadBit(
 );
 ```
 
----
-
-### PCF8574_ToggleBit
+### 9.9 PCF8574_ToggleBit
 - Inverts the current state of a pin.
 - Behavior:
 ```text
@@ -515,7 +523,6 @@ LOW  -> HIGH
 
 HIGH -> LOW
 ```
----
 #### Function Signature
 ```c
 PCF8574_StatusTypeDef PCF8574_ToggleBit(
@@ -523,21 +530,18 @@ PCF8574_StatusTypeDef PCF8574_ToggleBit(
     uint8_t Bit
 );
 ```
----
 #### Parameters
 
 | Parameter | Description |
 |-|-|
 | `Device` | Pointer to PCF8574 device handle. |
 | `Bit` | Port bit position to be toggled. |
----
 #### Return
 | Status	| Description |
 |---------------------|-------------|
 | `PCF8574_OPERATION_OK`	|Operation was successfully completed.|
 |`PCF8574_OPERATION_FAIL`|	Operation has failed.|
 
----
 #### Example
 
 ```c
@@ -547,7 +551,7 @@ PCF8574_ToggleBit(
 );
 ```
 ---
-## Port Shadow Mechanism
+## 10. Port Shadow Mechanism
 
 The PCF8574 driver maintains an internal software copy of the last written port state:
 
@@ -586,10 +590,9 @@ Advantages:
 - Preserves unrelated pin states.
 
 ---
-## Operation FLow
+## 11. Operation Flow
 
----
-### Initialization Flow
+### 11.1 Initialization Flow
 
 The typical initialization sequence of the PCF8574 driver is shown below.
 
@@ -628,7 +631,7 @@ After initialization, the device is ready to perform read and write operations.
 
 ---
 
-## Usage Example
+## 12. Usage Example
 
 The following example shows how to initialize and control a PCF8574 device.
 
@@ -687,10 +690,9 @@ int main(void)
 
 ---
 
-## Design Decisions
----
+## 13. Design Decisions
 
-### Hardware Independent I2C Communication
+### 13.1 Hardware Independent I2C Communication
 
 The driver does not directly depend on any MCU vendor library.
 
@@ -712,9 +714,7 @@ Benefits:
 - Easier migration between platforms.
 - Simplified unit testing.
 
----
-
-### Handle-Based Driver Architecture
+### 13.2 Handle-Based Driver Architecture
 
 The driver uses a handle structure:
 
@@ -740,9 +740,7 @@ PCF8574_HandleTypeDef KEYPAD_IO;
 
 Both devices can coexist using independent instances.
 
----
-
-### Software Port Shadow
+### 13.3 Software Port Shadow
 
 The PCF8574 hardware does not support individual bit write commands.
 
@@ -775,9 +773,7 @@ Send complete byte through I2C
 
 This prevents unintended changes on other pins.
 
----
-
-### Driver Initialization Protection
+### 13.4 Driver Initialization Protection
 
 All public operations verify the device initialization state before accessing the hardware.
 
@@ -789,9 +785,7 @@ PCF8574_Init()
 
 has been executed.
 
----
-
-### Abstraction Over Device Usage
+### 13.5 Abstraction Over Device Usage
 
 The PCF8574 driver only provides low-level I/O expansion.
 
@@ -808,7 +802,7 @@ Possible applications:
 
 ---
 
-## Error Handling
+## 14. Error Handling
 
 |Function	|Failure Scenario	|Description|
 |-----------|-------------------|-----------|
@@ -829,25 +823,23 @@ Possible applications:
 - Multiple PCF8574 devices can be used simultaneously by creating separate handles with different I2C addresses.
 
 ---
-## Usage Constraints
+## 15. Usage Constraints
 The following constraints apply when using the PCF8574 driver:
 
-### Initialization Requirements
+### 15.1 Initialization Requirements
 - The `PCF8574_HandleTypeDef` must be initialized by calling `PCF8574_Init()` before using any other driver operation.
 - The I2C context provided to `PCF8574_Init()` must be valid and properly initialized.
 - The I2C device address must be correct for the PCF8574 device.
 - The I2C context must remain valid for the entire lifetime of the driver instance.
 
----
-### I2C Communication Constraints
+### 15.2 I2C Communication Constraints
 
 - The driver uses blocking I2C communication with a timeout of 10 milliseconds.
 - All I2C operations are performed synchronously.
 - The driver does not support DMA or interrupt-based I2C transfers.
 - The I2C peripheral must be properly configured before calling any driver function.
 
----
-### Port Shadow Mechanism
+### 15.3 Port Shadow Mechanism
 
 - The driver maintains an internal software copy of the last successfully written port state (`_port_shadow`).
 - The port shadow is updated only after a successful I2C transmission.
@@ -855,8 +847,7 @@ The following constraints apply when using the PCF8574 driver:
 - Reading the port does not update the port shadow. The shadow represents the last successfully written state, not the current physical state.
 - The port shadow must not be accessed or modified directly by the application.
 
----
-### Bit Manipulation Functions
+### 15.4 Bit Manipulation Functions
 
 |Function	|Description|	Bit Range|
 |-----------|-----------|------------|
@@ -865,15 +856,13 @@ The following constraints apply when using the PCF8574 driver:
 |`PCF8574_ToggleBit()`|	`Inverts the specified bit.`|	`0 to 9`|
 |`PCF8574_ReadBit()`	|`Reads the state of the specified bit.`	|`0 to 10`|
 
----
-### Application Responsibilities
+### 15.5 Application Responsibilities
 - The application is responsible for ensuring the I2C peripheral is initialized before calling `PCF8574_Init()`.
 - The application must not access or modify internal driver state (members prefixed with _).
 - The application must verify the return status of all driver operations.
 - The application must ensure that the I2C bus is not being used by other peripherals simultaneously unless bus arbitration is properly handled.
 
----
-### I2C Device Address
+### 15.6 I2C Device Address
 
 The PCF8574 uses a fixed I2C address determined by the hardware address pins (A0, A1, A2):
 
@@ -887,23 +876,21 @@ Example address configuration:
 - Address pins all connected to GND: `0x20 (PCF8574)` or `0x38 (PCF8574A)`.
 - Address pins A0 HIGH, A1 and A2 LOW: `0x21 (PCF8574)` or `0x39 (PCF8574A)`.
 
----
-### Port Write Operations
+### 15.7 Port Write Operations
 - Writing to the PCF8574 port updates all eight pins simultaneously.
 - When using bit manipulation functions, the driver:
 - Modifies the internal port shadow.
 - Writes the complete 8-bit value to the device.
 - This ensures that unrelated pins are not accidentally modified during bit operations.
 
----
-### Port Read Operations
+### 15.8 Port Read Operations
 
 - Reading the PCF8574 port retrieves the current physical state of the pins.
 - The port shadow is not updated during read operations.
 - The read value may differ from the port shadow if an external device is driving the pins.
 
 ---
-## Applications
+## 16. Applications
 
 The PCF8574 driver can be used as a building block for higher-level drivers:
 
@@ -941,7 +928,7 @@ flowchart TD
 The PCF8574 driver acts as a reusable hardware abstraction layer between application-level modules and the physical I/O expander device.
 
 ---
-## Limitations
+## 17. Limitations
 
 Current implementation limitations:
 
@@ -953,7 +940,7 @@ Current implementation limitations:
 - Bit position validation is not internally enforced.
 
 ---
-## License
+## 18. License
 
 This module is part of the:
 

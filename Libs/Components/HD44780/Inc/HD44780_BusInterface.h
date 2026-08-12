@@ -16,8 +16,8 @@
  * @date    Jul 24, 2026
  **********************************************************************************************************************************/
 
-#ifndef DRIVERS_HD44780_DISPLAY_INC_HD44780_BUSADAPTER_H_
-#define DRIVERS_HD44780_DISPLAY_INC_HD44780_BUSADAPTER_H_
+#ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_BUSINTERFACE_H_
+#define LIBS_COMPONENTS_HD44780_INC_HD44780_BUSINTERFACE_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -115,4 +115,4 @@ typedef struct
 }
 #endif
 
-#endif /* DRIVERS_HD44780_DISPLAY_INC_HD44780_BUSADAPTER_H_ */
+#endif /* LIBS_COMPONENTS_HD44780_INC_HD44780_BUSINTERFACE_H_ */

@@ -1,13 +1,110 @@
-# Hardware-Independent Driver for HD44780 Compatible Character LCD Modules Designed for Embedded Systems.
+<h1 align="left">HD44780 LCD Driver</h1>
+
+<p align="left">
+  <big>
+    Hardware-independent driver for HD44780-compatible character LCD modules,<br>
+    designed for portable embedded systems.
+  </big>
+</p>
 
 ---
-## Overview
+## Table of Contents
+
+* [1. Overview](#1-overview)
+* [2. Features](#2-features)
+* [3. Architecture](#3-architecture)
+
+  * [3.1 Bus Interface](#31-bus-interface)
+  * [3.2 PCF8574 Bus Adapter](#32-pcf8574-bus-adapter)
+  * [3.3 Backlight Interface](#33-backlight-interface)
+  * [3.4 PWM Backlight Adapter](#34-pwm-backlight-adapter)
+* [4. Directory Structure](#4-directory-structure)
+* [5. Driver Responsibilities](#5-driver-responsibilities)
+* [6. Dependencies](#6-dependencies)
+* [7. Data Structures](#7-data-structures)
+
+  * [7.1 HD44780 Handle](#71-hd44780-handle)
+  * [7.2 Operation Status](#72-operation-status)
+  * [7.3 Interface Mode](#73-interface-mode)
+  * [7.4 Character Font](#74-character-font)
+  * [7.5 Display Line Configuration](#75-display-line-configuration)
+  * [7.6 Bus Interface](#76-bus-interface)
+  * [7.7 Backlight Interface](#77-backlight-interface)
+* [8. API Reference](#8-api-reference)
+
+  * [8.1 HD44780_Init](#81-hd44780_init)
+  * [8.2 HD44780_Clear](#82-hd44780_clear)
+  * [8.3 HD44780_Home](#83-hd44780_home)
+  * [8.4 Display Control](#84-display-control)
+  * [8.5 Cursor and Display Shift Control](#85-cursor-and-display-shift-control)
+  * [8.6 HD44780_SetCursor](#86-hd44780_setcursor)
+  * [8.7 HD44780_WriteChar](#87-hd44780_writechar)
+  * [8.8 HD44780_WriteString](#88-hd44780_writestring)
+  * [8.9 HD44780_PrintLine](#89-hd44780_printline)
+  * [8.10 HD44780_ClearLine](#810-hd44780_clearline)
+  * [8.11 HD44780_CreateChar](#811-hd44780_createchar)
+  * [8.12 HD44780_WriteCustomChar](#812-hd44780_writecustomchar)
+  * [8.13 HD44780_BacklightOn](#813-hd44780_backlighton)
+  * [8.14 HD44780_BacklightOff](#814-hd44780_backlightoff)
+  * [8.15 HD44780_SetBrightness](#815-hd44780_setbrightness)
+* [9. Operation Flow](#9-operation-flow)
+
+  * [9.1 Initialization Flow](#91-initialization-flow)
+* [10. Usage Example](#10-usage-example)
+
+  * [10.1 Driver Objects](#101-driver-objects)
+  * [10.2 Initialization](#102-initialization)
+  * [10.3 Write Text](#103-write-text)
+  * [10.4 Write Character](#104-write-character)
+  * [10.5 Clear Display](#105-clear-display)
+  * [10.6 Print Text on Specific Line](#106-print-text-on-specific-line)
+  * [10.7 Clear Specific Line](#107-clear-specific-line)
+  * [10.8 Backlight Control](#108-backlight-control)
+  * [10.9 Custom Characters](#109-custom-characters)
+* [11. Design Decisions](#11-design-decisions)
+
+  * [11.1 Separation Between Driver and Hardware](#111-separation-between-driver-and-hardware)
+  * [11.2 Nibble-Based Bus Interface](#112-nibble-based-bus-interface)
+  * [11.3 Internal State Management](#113-internal-state-management)
+  * [11.4 Custom Character Tracking](#114-custom-character-tracking)
+  * [11.5 Delay-Based Synchronization](#115-delay-based-synchronization)
+  * [11.6 Timing Abstraction](#116-timing-abstraction)
+* [12. Error Handling](#12-error-handling)
+
+  * [12.1 Operation Failure Conditions](#121-operation-failure-conditions)
+  * [12.2 Bus Errors](#122-bus-errors)
+  * [12.3 Backlight Errors](#123-backlight-errors)
+  * [12.4 Error Information](#124-error-information)
+* [13. Usage Constraints](#13-usage-constraints)
+
+  * [13.1 Initialization](#131-initialization)
+  * [13.2 Interface Mode](#132-interface-mode)
+  * [13.3 Timing Dependency](#133-timing-dependency)
+  * [13.4 Display Geometry](#134-display-geometry)
+  * [13.5 String Handling](#135-string-handling)
+  * [13.6 Custom Characters](#136-custom-characters)
+  * [13.7 Backlight Availability](#137-backlight-availability)
+  * [13.8 Multi-Instance Usage](#138-multi-instance-usage)
+  * [13.9 Blocking Behavior](#139-blocking-behavior)
+* [14. Applications](#14-applications)
+* [15. Limitations](#15-limitations)
+
+  * [15.1 Interface Mode](#151-interface-mode)
+  * [15.2 Busy Flag](#152-busy-flag)
+  * [15.3 Display Shift API](#153-display-shift-api)
+  * [15.4 Multi-Instance Support](#154-multi-instance-support)
+  * [15.5 Available Adapters](#155-available-adapters)
+* [16. Future Improvements](#16-future-improvements)
+* [17. License](#17-license)
+
+---
+## 1. Overview
 
 - The driver implements the HD44780 controller communication protocol, abstracting bus communication and backlight control through configurable interfaces. This allows reuse with different hardware implementations such as direct GPIO, I2C expanders, PWM-controlled backlights, and other peripherals.
 
 ---
 
-## Features
+## 2. Features
 
 - Complete HD44780 controller initialization.
 - 4-bit communication mode support.
@@ -38,7 +135,7 @@
 
 ---
 
-## Architecture
+## 3. Architecture
 
 The driver follows a layered architecture where hardware dependencies are isolated through abstraction interfaces.
 
@@ -84,9 +181,7 @@ flowchart TD
     I2C --> LCD
     TIMER --> LCD
 ```
-
----
-### Bus Interface
+### 3.1 Bus Interface
 
 The communication between the HD44780 driver and the physical bus is abstracted through:
 
@@ -121,9 +216,7 @@ The concrete adapter is responsible for:
 
 The driver sends data as nibbles because the HD44780 operates internally with 4-bit transfers when configured in 4-bit mode.
 
----
-
-### PCF8574 Bus Adapter
+### 3.2 PCF8574 Bus Adapter
 
 The PCF8574 adapter implements the Bus Interface using an I2C GPIO expander.
 
@@ -146,8 +239,7 @@ HD44780_PCF8574_BusAdapterInit(
 
 The adapter stores the PCF8574 instance as context and exposes the required bus operations to the HD44780 driver.
 
----
-### Backlight Interface
+### 3.3 Backlight Interface
 
 Backlight control is abstracted through the:
 
@@ -192,9 +284,7 @@ Possible implementations:
 - GPIO controlled backlight.
 - PWM controlled backlight.
 
----
-
-### PWM Backlight Adapter
+### 3.4 PWM Backlight Adapter
 
 The provided PWM adapter controls the LCD backlight intensity using a PWM peripheral.
 
@@ -230,7 +320,7 @@ The adapter is independent from the timer implementation. Any PWM driver impleme
 
 ---
 
-## Directory Structure
+## 4. Directory Structure
 
 Example project organization:
 
@@ -252,7 +342,7 @@ HD44780/
 
 ---
 
-## Driver Responsibilities
+## 5. Driver Responsibilities
 
 The HD44780 driver is responsible for:
 
@@ -277,7 +367,7 @@ The driver is **not responsible** for:
 
 ---
 
-## Dependencies
+## 6. Dependencies
 
 Required dependencies:
 
@@ -303,11 +393,9 @@ These are required only when using the provided adapters.
 
 ---
 
-## Data Structures
+## 7. Data Structures
 
----
-
-### HD44780 Handle
+### 7.1 HD44780 Handle
 
 The driver uses `HD44780_HandleTypeDef` to represent an HD44780 LCD device instance.
 
@@ -339,9 +427,7 @@ The members of `HD44780_HandleTypeDef` are considered private driver data and sh
 
 The application shall interact with the LCD exclusively through the public driver API.
 
----
-
-### Operation Status
+### 7.2 Operation Status
 
 The driver uses `HD44780_OpStatusTypeDef` to report the result of driver operations.
 
@@ -359,9 +445,8 @@ typedef enum
 | `HD44780_OPERATION_OK`   | Operation completed successfully. |
 | `HD44780_OPERATION_FAIL` | Operation could not be completed. |
 
----
 
-### Interface Mode
+### 7.3 Interface Mode
 
 The `HD44780_InterfaceModeTypeDef` enumeration defines the controller data interface mode.
 
@@ -381,9 +466,7 @@ typedef enum
 
 Only `HD44780_4BIT_MODE` is currently implemented by the driver.
 
----
-
-### Character Font
+### 7.4 Character Font
 
 The `HD44780_CharacterFontTypeDef` enumeration defines the character font configuration.
 
@@ -403,9 +486,7 @@ typedef enum
 
 The 5×10 font is supported only with single-line display configuration.
 
----
-
-### Display Line Configuration
+### 7.5 Display Line Configuration
 
 The `HD44780_LineNumberTypeDef` enumeration defines the number of display lines.
 
@@ -423,9 +504,8 @@ typedef enum
 | `HD44780_1LINE` | Single-line display configuration. |
 | `HD44780_2LINE` | Two-line display configuration.    |
 
----
 
-### Bus Interface
+### 7.6 Bus Interface
 
 The HD44780 driver communicates with the physical display through `HD44780_BusInterfaceTypeDef`.
 
@@ -459,9 +539,7 @@ The concrete adapter is responsible for:
 
 The current project provides a PCF8574-based I2C bus adapter.
 
----
-
-### Backlight Interface
+### 7.7 Backlight Interface
 
 The HD44780 driver controls the LCD backlight through `HD44780_BacklightInterfaceTypeDef`.
 
@@ -496,28 +574,23 @@ The brightness level is expressed as a percentage from `0` to `100`. The actual 
 
 ---
 
-## API Reference
+## 8. API Reference
 
----
-
-### HD44780_Init
+### 8.1 HD44780_Init
 
 - Initializes an HD44780 LCD controller according to the configuration stored in the device handle.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_Init(
     HD44780_HandleTypeDef* Device
 );
 ```
----
 #### Parameters
 | Parameter | Description                             |
 | --------- | --------------------------------------- |
 | `Device`  | Pointer to the HD44780 device instance. |
 
----
 #### Return
 | Return Value             | Description                                                         |
 | ------------------------ | ------------------------------------------------------------------- |
@@ -529,13 +602,12 @@ The initialization sequence configures the controller for the selected interface
 **Note:**
 - Repeated initialization of an already initialized device returns successfully without repeating the initialization sequence.
 
----
 
-### HD44780_Clear
+### 8.2 HD44780_Clear
 
 - Clears the complete display.
 
----
+
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_Clear(
@@ -543,52 +615,50 @@ HD44780_OpStatusTypeDef HD44780_Clear(
 );
 ```
 
----
+
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
 | `Device`  | Pointer to the initialized HD44780 device instance. |
 
----
+
 #### Return
 | Return Value             | Description                   |
 | ------------------------ | ----------------------------- |
 | `HD44780_OPERATION_OK`   | Display successfully cleared. |
 | `HD44780_OPERATION_FAIL` | Operation failed.             |
 
----
 
-### HD44780_Home
+### 8.3 HD44780_Home
 
 - Returns the display cursor to the home position.
 
----
+
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_Home(
     HD44780_HandleTypeDef* Device
 );
 ```
----
+
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
 | `Device`  | Pointer to the initialized HD44780 device instance. |
 
----
+
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
 | `HD44780_OPERATION_OK`   | Home operation completed successfully. |
 | `HD44780_OPERATION_FAIL` | Operation failed.                      |
 
----
 
-### Display Control
+### 8.4 Display Control
 
 - The following functions control the display visibility, cursor and cursor blinking:
 
----
+
 #### Function Signatures
 ```c
 HD44780_OpStatusTypeDef HD44780_DisplayOn(
@@ -627,11 +697,10 @@ HD44780_OpStatusTypeDef HD44780_BlinkOff(
 
 Each function returns `HD44780_OPERATION_OK` when the requested command is successfully transmitted and `HD44780_OPERATION_FAIL` otherwise.
 
----
 
-### Cursor and Display Shift Control
+### 8.5 Cursor and Display Shift Control
 - The following functions control the display shift and cursor increment/decrement:
----
+
 #### Function Signatures
 ```c
 HD44780_OpStatusTypeDef HD44780_IncrementCursor(
@@ -660,13 +729,11 @@ HD44780_OpStatusTypeDef HD44780_DisableShift(
 
 Each function returns `HD44780_OPERATION_OK` when the requested command is successfully transmitted and `HD44780_OPERATION_FAIL` otherwise.
 
----
 
-### HD44780_SetCursor
+### 8.6 HD44780_SetCursor
 
 - Positions the cursor at a specified row and column.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_SetCursor(
@@ -675,7 +742,6 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(
     uint8_t Col
 );
 ```
----
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
@@ -683,7 +749,6 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(
 | `Row`     | Zero-based display row.                             |
 | `Col`     | Zero-based display column.                          |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -693,13 +758,11 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(
 **Note:**
 - Values outside the configured display dimensions are clamped to the nearest valid position.
 
----
 
-### HD44780_WriteChar
+### 8.7 HD44780_WriteChar
 
 - Writes a single character at the current cursor position.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_WriteChar(
@@ -708,14 +771,12 @@ HD44780_OpStatusTypeDef HD44780_WriteChar(
 );
 ```
 
----
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
 | `Device`  | Pointer to the initialized HD44780 device instance. |
 | `Char`    | Character code to transmit.                         |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -725,13 +786,11 @@ HD44780_OpStatusTypeDef HD44780_WriteChar(
 **Note:**
 - The cursor movement after the write is determined by the current Entry Mode configuration.
 
----
 
-### HD44780_WriteString
+### 8.8 HD44780_WriteString
 
 - Writes a null-terminated string beginning at the current cursor position.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_WriteString(
@@ -739,15 +798,12 @@ HD44780_OpStatusTypeDef HD44780_WriteString(
     const char* String
 );
 ```
-
----
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
 | `Device`  | Pointer to the initialized HD44780 device instance. |
 | `String`  | Pointer to a null-terminated string.                |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -757,13 +813,11 @@ HD44780_OpStatusTypeDef HD44780_WriteString(
 **Note:**
 - The function does not reposition the cursor and does not limit the number of characters based on display width. Characters are transmitted until the null terminator is reached.
 
----
 
-### HD44780_PrintLine
+### 8.9 HD44780_PrintLine
 
 - Writes text starting at the beginning of a specified display row.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_PrintLine(
@@ -773,7 +827,6 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(
 );
 ```
 
----
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
@@ -781,7 +834,6 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(
 | `Row`     | Zero-based display row.                             |
 | `Text`    | Pointer to a null-terminated string.                |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -792,13 +844,11 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(
 - If the requested row exceeds the configured display size, it is clamped to the last valid row.
 - If the supplied text exceeds the configured display width, only the characters that fit on the selected row are written.
 
----
 
-### HD44780_ClearLine
+### 8.10 HD44780_ClearLine
 
 - Clears a complete display row by writing space characters across all configured columns.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_ClearLine(
@@ -806,15 +856,12 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(
     uint8_t Row
 );
 ```
-
----
 #### Parameters
 | Parameter | Description                                         |
 | --------- | --------------------------------------------------- |
 | `Device`  | Pointer to the initialized HD44780 device instance. |
 | `Row`     | Zero-based display row.                             |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -824,13 +871,11 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(
 **Note:**
 - The cursor is restored to the beginning of the selected row after the operation.
 
----
 
-### HD44780_CreateChar
+### 8.11 HD44780_CreateChar
 
 - Creates or updates a custom character in CGRAM.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_CreateChar(
@@ -839,8 +884,6 @@ HD44780_OpStatusTypeDef HD44780_CreateChar(
     const uint8_t* PatternBitMap
 );
 ```
-
----
 #### Parameters
 | Parameter       | Description                                         |
 | --------------- | --------------------------------------------------- |
@@ -848,7 +891,6 @@ HD44780_OpStatusTypeDef HD44780_CreateChar(
 | `Position`      | CGRAM character position.                           |
 | `PatternBitMap` | Pointer to the custom character bitmap.             |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -864,13 +906,11 @@ Valid character positions depend on the selected font:
 
 The driver tracks programmed CGRAM positions and restores the cursor to row `0`, column `0` after programming the character.
 
----
 
-### HD44780_WriteCustomChar
+### 8.12 HD44780_WriteCustomChar
 
 - Writes a previously created custom character to the display.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_WriteCustomChar(
@@ -878,15 +918,12 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(
     uint8_t CharPosition
 );
 ```
-
----
 #### Parameters
 | Parameter      | Description                                         |
 | -------------- | --------------------------------------------------- |
 | `Device`       | Pointer to the initialized HD44780 device instance. |
 | `CharPosition` | Previously programmed CGRAM character position.     |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -896,26 +933,22 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(
 **Note:**
 - The operation fails if the requested CGRAM position has not previously been programmed using `HD44780_CreateChar()`.
 
----
 
-### HD44780_BacklightOn
+### 8.13 HD44780_BacklightOn
 
 - Enables the LCD backlight through the configured backlight interface.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_BacklightOn(
     HD44780_HandleTypeDef* Device
 );
 ```
----
 #### Parameters
 | Parameter      | Description                                         |
 | -------------- | --------------------------------------------------- |
 | `Device`       | Pointer to the initialized HD44780 device instance. |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -924,27 +957,22 @@ HD44780_OpStatusTypeDef HD44780_BacklightOn(
 
 If the configured brightness is `0`, the driver requests a brightness of `100` before enabling the backlight.
 
----
 
-### HD44780_BacklightOff
+### 8.14 HD44780_BacklightOff
 
 - Disables the LCD backlight.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_BacklightOff(
     HD44780_HandleTypeDef* Device
 );
 ```
-
----
 #### Parameters
 | Parameter      | Description                                         |
 | -------------- | --------------------------------------------------- |
 | `Device`       | Pointer to the initialized HD44780 device instance. |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -954,13 +982,11 @@ HD44780_OpStatusTypeDef HD44780_BacklightOff(
 **Note:**
 - Turning the backlight off does not modify display contents, DDRAM data, cursor position or HD44780 controller state.
 
----
 
-### HD44780_SetBrightness
+### 8.15 HD44780_SetBrightness
 
 - Sets the LCD backlight brightness level.
 
----
 #### Function Signature
 ```c
 HD44780_OpStatusTypeDef HD44780_SetBrightness(
@@ -968,15 +994,12 @@ HD44780_OpStatusTypeDef HD44780_SetBrightness(
     uint16_t BrightPercent
 );
 ```
-
----
 #### Parameters
 | Parameter       | Description                                         |
 | --------------- | --------------------------------------------------- |
 | `Device`        | Pointer to the initialized HD44780 device instance. |
 | `BrightPercent` | Requested brightness percentage from `0` to `100`.  |
 
----
 #### Return
 | Return Value             | Description                            |
 | ------------------------ | -------------------------------------- |
@@ -988,10 +1011,9 @@ HD44780_OpStatusTypeDef HD44780_SetBrightness(
 
 ---
 
-## Operation Flow
----
+## 9. Operation Flow
 
-### Initialization Flow
+### 9.1 Initialization Flow
 
 The typical initialization sequence is shown below.
 
@@ -1046,7 +1068,7 @@ sequenceDiagram
 
 ---
 
-## Usage Example
+## 10. Usage Example
 
 The following example demonstrates the initialization of the LCD driver using:
 
@@ -1067,9 +1089,7 @@ Required includes:
 #include "HD44780_PWM_BacklightAdapter.h"
 ```
 
----
-
-### Driver Objects
+### 10.1 Driver Objects
 
 ```c
 PCF8574_HandleTypeDef LCD_BusAdapter;
@@ -1088,9 +1108,7 @@ HD44780_HandleTypeDef LCD =
 };
 ```
 
----
-
-### Initialization
+### 10.2 Initialization
 
 ```c
 int main(void)
@@ -1172,9 +1190,7 @@ int main(void)
 }
 ```
 
----
-
-### Write Text
+### 10.3 Write Text
 
 ```c
 HD44780_SetCursor(
@@ -1189,9 +1205,7 @@ HD44780_WriteString(
 );
 ```
 
----
-
-### Write Character
+### 10.4 Write Character
 
 ```c
 HD44780_SetCursor(
@@ -1206,9 +1220,7 @@ HD44780_WriteChar(
 );
 ```
 
----
-
-### Clear Display
+### 10.5 Clear Display
 
 ```c
 HD44780_Clear(
@@ -1216,9 +1228,7 @@ HD44780_Clear(
 );
 ```
 
----
-
-### Print Text on Specific Line
+### 10.6 Print Text on Specific Line
 
 ```c
 HD44780_PrintLine(
@@ -1228,9 +1238,7 @@ HD44780_PrintLine(
 );
 ```
 
----
-
-### Clear Specific Line
+### 10.7 Clear Specific Line
 
 ```c
 HD44780_ClearLine(
@@ -1239,9 +1247,7 @@ HD44780_ClearLine(
 );
 ```
 
----
-
-### Backlight Control
+### 10.8 Backlight Control
 
 ```c
 HD44780_BacklightOn(
@@ -1260,8 +1266,7 @@ HD44780_BacklightOff(
 );
 ```
 
----
-### Custom Characters
+### 10.9 Custom Characters
 
 The HD44780 controller provides 64 bytes of CGRAM memory that can be used to store custom characters.
 
@@ -1313,10 +1318,9 @@ This prevents displaying undefined custom characters.
 
 ---
 
-## Design Decisions
+## 11. Design Decisions
 
----
-### Separation Between Driver and Hardware
+### 11.1 Separation Between Driver and Hardware
 
 The HD44780 driver does not access hardware peripherals directly.
 
@@ -1334,9 +1338,7 @@ This allows:
 
 This design follows the **Dependency Inversion Principle**, where the high-level driver depends on abstractions instead of concrete hardware implementations.
 
----
-
-### Nibble-Based Bus Interface
+### 11.2 Nibble-Based Bus Interface
 
 When operating in 4-bit mode, the HD44780 requires each byte to be transferred as:
 
@@ -1372,9 +1374,7 @@ Transfer sequence:
 
 The driver therefore remains independent from the physical transport layer.
 
----
-
-### Internal State Management
+### 11.3 Internal State Management
 
 The driver maintains internal configuration flags to keep track of LCD state.
 
@@ -1406,9 +1406,8 @@ Shift disabled
 
 and only modify the required bit.
 
----
 
-### Custom Character Tracking
+### 11.4 Custom Character Tracking
 
 The driver tracks which CGRAM positions have been initialized.
 
@@ -1420,9 +1419,7 @@ Benefits:
 
 The application only needs to create the character once before using it.
 
----
-
-### Delay-Based Synchronization
+### 11.5 Delay-Based Synchronization
 
 The HD44780 provides a busy flag that can be read to determine when the controller is ready for a new command.
 
@@ -1441,9 +1438,7 @@ Trade-off:
 
 A future implementation could add busy-flag support if required.
 
----
-
-### Timing Abstraction
+### 11.6 Timing Abstraction
 
 The driver does not directly depend on MCU-specific delay functions.
 
@@ -1463,7 +1458,7 @@ This allows portability between:
 
 ---
 
-## Error Handling
+## 12. Error Handling
 
 The HD44780 driver uses a binary operation status model through `HD44780_OpStatusTypeDef`.
 
@@ -1478,7 +1473,7 @@ typedef enum
 
 The application shall verify the returned status of driver operations whenever the result is relevant to subsequent execution.
 
-### Operation Failure Conditions
+### 12.1 Operation Failure Conditions
 
 `HD44780_OPERATION_FAIL` may be returned when:
 
@@ -1493,7 +1488,7 @@ The application shall verify the returned status of driver operations whenever t
 
 For example, `HD44780_CreateChar()` explicitly validates the device, initialization state, bitmap pointer and CGRAM position before programming the character.
 
-### Bus Errors
+### 12.2 Bus Errors
 
 Communication errors originating from the bus adapter are propagated to the HD44780 driver as `HD44780_OPERATION_FAIL`.
 
@@ -1512,7 +1507,7 @@ HD44780_BUS_OPERATION_FAIL
 
 The concrete adapter is responsible for translating hardware communication failures into this status.
 
-### Backlight Errors
+### 12.3 Backlight Errors
 
 Backlight adapter failures are also propagated to the main driver API as:
 
@@ -1522,7 +1517,7 @@ HD44780_OPERATION_FAIL
 
 The application does not need to handle the adapter-specific status directly when using the public HD44780 API.
 
-### Error Information
+### 12.4 Error Information
 
 The current API does not expose detailed error codes or failure reasons.
 
@@ -1530,11 +1525,11 @@ Therefore, `HD44780_OPERATION_FAIL` indicates that the requested operation was n
 
 ---
 
-## Usage Constraints
+## 13. Usage Constraints
 
 The following constraints shall be considered when integrating the HD44780 driver.
 
-### Initialization
+### 13.1 Initialization
 
 The LCD controller must be successfully initialized using:
 
@@ -1546,9 +1541,8 @@ before performing normal display operations.
 
 The driver maintains an internal initialization state and rejects operations performed on an uninitialized device.
 
----
 
-### Interface Mode
+### 13.2 Interface Mode
 
 The current implementation supports only:
 
@@ -1558,9 +1552,8 @@ HD44780_4BIT_MODE
 
 Although `HD44780_8BIT_MODE` exists in the public enumeration, the current driver implementation explicitly rejects 8-bit mode.
 
----
 
-### Timing Dependency
+### 13.3 Timing Dependency
 
 The driver relies on fixed delays rather than reading the HD44780 Busy Flag.
 
@@ -1573,9 +1566,8 @@ Platform_DelayMs()
 
 This makes the driver suitable for write-only interfaces such as the provided PCF8574 adapter, but introduces additional waiting time compared with Busy Flag polling.
 
----
 
-### Display Geometry
+### 13.4 Display Geometry
 
 The configured number of rows and columns must match the physical LCD module.
 
@@ -1583,9 +1575,8 @@ Cursor and line operations use the configured display geometry.
 
 Row and column parameters passed to the cursor-related APIs are clamped when they exceed the configured dimensions.
 
----
 
-### String Handling
+### 13.5 String Handling
 
 `HD44780_WriteString()` requires a null-terminated string.
 
@@ -1593,9 +1584,7 @@ The function does not automatically limit the amount of data written according t
 
 `HD44780_PrintLine()` provides explicit row and display-width handling and is preferable when writing bounded text to a specific display line.
 
----
-
-### Custom Characters
+### 13.6 Custom Characters
 
 Custom character bitmap size depends on the configured font:
 
@@ -1620,17 +1609,13 @@ HD44780_WriteCustomChar()
 
 The driver internally tracks programmed CGRAM positions and rejects attempts to write undefined custom characters.
 
----
-
-### Backlight Availability
+### 13.7 Backlight Availability
 
 Backlight functions require a valid `HD44780_BacklightInterfaceTypeDef` implementation.
 
 The HD44780 controller itself does not provide native backlight control. Backlight behavior is therefore determined by the external adapter implementation.
 
----
-
-### Multi-Instance Usage
+### 13.8 Multi-Instance Usage
 
 The current implementation is primarily intended for single-display applications.
 
@@ -1638,9 +1623,7 @@ Although each LCD is represented through an `HD44780_HandleTypeDef`, some runtim
 
 Complete multi-instance support requires moving all runtime state into the device handle.
 
----
-
-### Blocking Behavior
+### 13.9 Blocking Behavior
 
 Display operations are synchronous and use fixed execution delays to satisfy the HD44780 timing requirements.
 
@@ -1650,7 +1633,7 @@ Applications requiring strict real-time responsiveness should account for these 
 
 ---
 
-## Applications
+## 14. Applications
 
 The HD44780 driver is intended for embedded systems that require a character-based human-machine interface while maintaining separation between application logic and hardware-specific communication.
 
@@ -1724,36 +1707,27 @@ Within the current project, the driver is used as part of the Electronic Lock sy
 
 ---
 
-## Limitations
+## 15. Limitations
 
----
-### Interface Mode
+### 15.1 Interface Mode
 
-Only 4-bit communication mode is currently supported.
+- Only 4-bit communication mode is currently supported.
+- 8-bit mode is not implemented.
 
-8-bit mode is not implemented.
+### 15.2 Busy Flag
 
----
+- The driver does not read the HD44780 busy flag.
+- Synchronization is performed using fixed delays.
 
-### Busy Flag
 
-The driver does not read the HD44780 busy flag.
-
-Synchronization is performed using fixed delays.
-
----
-
-### Display Shift API
+### 15.3 Display Shift API
 
 Entry mode shift configuration is supported, but advanced display shifting operations are not currently exposed through dedicated APIs.
 
----
+### 15.4 Multi-Instance Support
 
-### Multi-Instance Support
-
-The current implementation was designed primarily for single-display applications.
-
-Although the driver uses:
+- The current implementation was designed primarily for single-display applications.
+- Although the driver uses:
 
 ```c
 HD44780_HandleTypeDef
@@ -1761,11 +1735,11 @@ HD44780_HandleTypeDef
 
 to represent an instance, some internal state variables are still maintained at module level.
 
-Using multiple LCD instances simultaneously may cause conflicts.
+- Using multiple LCD instances simultaneously may cause conflicts.
 
-Future improvement:
+- Future improvement:
 
-Move all runtime state variables into:
+    - Move all runtime state variables into:
 
 ```c
 HD44780_HandleTypeDef
@@ -1773,16 +1747,14 @@ HD44780_HandleTypeDef
 
 to achieve complete multi-instance support.
 
----
-
-### Available Adapters
+### 15.5 Available Adapters
 
 Currently provided adapters:
 
 - PCF8574 I2C bus adapter.
 - PWM timer backlight adapter.
 
-Additional adapters can be created by implementing the corresponding interfaces:
+- Additional adapters can be created by implementing the corresponding interfaces:
 
 ```c
 HD44780_BusInterfaceTypeDef
@@ -1799,7 +1771,7 @@ Examples:
 
 ---
 
-## Future Improvements
+## 16. Future Improvements
 
 Possible improvements:
 
@@ -1812,7 +1784,7 @@ Possible improvements:
 
 ---
 
-## License
+## 17. License
 
 This module is part of the:
 

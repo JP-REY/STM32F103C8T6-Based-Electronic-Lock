@@ -1,15 +1,76 @@
-# Hardware-Independent Matrix Keyboard Driver for Embedded Systems.
+<h1 align="left">Matrix Keyboard Driver</h1>
+
+<p align="left">
+  <big>
+    Hardware-independent driver for scanning and processing matrix keyboards,<br>
+    designed for portable embedded systems.
+  </big>
+</p>
 
 ---
+## Table of Contents
 
-## Overview
+* [1. Overview](#1-overview)
+* [2. Features](#2-features)
+* [3. Architecture](#3-architecture)
+
+  * [3.1 Scan Interface](#31-scan-interface)
+  * [3.2 Key State Machine](#32-key-state-machine)
+  * [3.3 Key Processing Model](#33-key-processing-model)
+* [4. Directory Structure](#4-directory-structure)
+* [5. Device Overview](#5-device-overview)
+* [6. Driver Responsibilities](#6-driver-responsibilities)
+* [7. Dependencies](#7-dependencies)
+* [8. Data Structures](#8-data-structures)
+
+  * [8.1 Matrix Keyboard Handle](#81-matrix-keyboard-handle)
+  * [8.2 Keyboard Configuration](#82-keyboard-configuration)
+  * [8.3 Keyboard Output](#83-keyboard-output)
+  * [8.4 Operation Status](#84-operation-status)
+  * [8.5 Additional Enumerations](#85-additional-enumerations)
+* [9. API Reference](#9-api-reference)
+
+  * [9.1 MK_Init](#91-mk_init)
+  * [9.2 MK_Read](#92-mk_read)
+* [10. Operation Flow](#10-operation-flow)
+
+  * [10.1 Initialization Flow](#101-initialization-flow)
+  * [10.2 Processing Pipeline](#102-processing-pipeline)
+  * [10.3 Execution Model](#103-execution-model)
+* [11. Usage Example](#11-usage-example)
+* [12. Design Decisions](#12-design-decisions)
+
+  * [12.1 Hardware Independence](#121-hardware-independence)
+  * [12.2 Single Responsibility](#122-single-responsibility)
+  * [12.3 Extensibility](#123-extensibility)
+  * [12.4 Output](#124-output)
+* [13. Error Handling](#13-error-handling)
+
+  * [13.1 Return Codes](#131-return-codes)
+  * [13.2 Recommended Strategy](#132-recommended-strategy)
+  * [13.3 Error Propagation](#133-error-propagation)
+* [14. Usage Constraints](#14-usage-constraints)
+
+  * [14.1 Initialization Requirements](#141-initialization-requirements)
+  * [14.2 Scan Adapter Requirements](#142-scan-adapter-requirements)
+  * [14.3 Execution Model](#143-execution-model)
+  * [14.4 Pointer Validity](#144-pointer-validity)
+  * [14.5 Hardware Constraints](#145-hardware-constraints)
+  * [14.6 Key Mapping](#146-key-mapping)
+  * [14.7 Application Responsibilities](#147-application-responsibilities)
+* [15. Applications](#15-applications)
+* [16. Limitations](#16-limitations)
+* [17. License](#17-license)
+
+---
+## 1. Overview
 - The driver implements a complete keyboard processing pipeline responsible for scanning the matrix, filtering switch bounce, detecting stable key transitions, processing per-key state machines and generating user actions.
 
 - Hardware-specific access is fully abstracted through a configurable scan interface, allowing the same driver to be reused with different GPIO implementations, I/O expanders or custom hardware interfaces.
 
 ---
 
-## Features
+## 2. Features
 
 Current version provides:
 
@@ -29,7 +90,7 @@ Current version provides:
 
 ---
 
-## Architecture
+## 3. Architecture
 
 The driver is organized into independent layers. Hardware-specific details are isolated from the keyboard processing logic through the scan interface.
 
@@ -59,9 +120,7 @@ The driver never accesses GPIO peripherals directly.
 
 All hardware interaction is performed through the scan interface, making the driver portable across different microcontrollers and hardware implementations.
 
----
-
-### Scan Interface
+### 3.1 Scan Interface
 
 The Matrix Keyboard Driver communicates with the physical keyboard through the scan interface.
 
@@ -86,9 +145,7 @@ This abstraction allows the driver to support different electrical configuration
 - GPIO based implementations.
 - External I/O expanders.
 
----
-
-### Key State Machine
+### 3.2 Key State Machine
 
 After debounce validation, each key is processed by a finite state machine (FSM).
 
@@ -114,10 +171,7 @@ The debounce layer is handled before the state machine processing. Therefore, th
 
 Each key instance maintains its own FSM state, allowing independent processing of every key in the matrix.
 
----
-
-
-### Key Processing Model
+### 3.3 Key Processing Model
 
 Each physical key maintains its own internal state.
 
@@ -161,7 +215,7 @@ Version 1.0 implements the following processing stages:
 
 ---
 
-## Directory Structure
+## 4. Directory Structure
 
 ```text
 MatrixKeyboard/
@@ -178,14 +232,14 @@ MatrixKeyboard/
 
 ---
 
-## Device Overview
+## 5. Device Overview
 The matrix keyboard consists of a grid of switches arranged in rows and columns. A key press is detected by sequentially driving each column to its active level while reading the state of all rows. When a key is pressed, the corresponding row reflects the active level, indicating the closure at the intersection of that row and column.
 
 The column scanning sequence determines which column is currently being evaluated, while the row states indicate which keys (if any) are pressed within that column.
 
 ---
 
-## Driver Responsibilities
+## 6. Driver Responsibilities
 
 The driver is responsible for:
 
@@ -207,7 +261,7 @@ The driver is **not** responsible for:
 
 ---
 
-## Dependencies
+## 7. Dependencies
 
 The driver depends on:
 
@@ -266,10 +320,9 @@ This layered architecture allows:
 
 ---
 
-## Data Structures
+## 8. Data Structures
 
----
-### Matrix Keyboard Handle
+### 8.1 Matrix Keyboard Handle
 The driver uses `MK_HandleTypeDef` to represent a matrix keyboard device instance.
 
 ```c
@@ -295,9 +348,7 @@ The members of `MK_HandleTypeDef` are considered private data and shall not be a
 **Note:** 
 - The application shall interact with the keyboard through the public driver API.
 
---- 
-
-### Keyboard Configuration
+### 8.2 Keyboard Configuration
 The driver uses `MK_ConfigTypeDef` to store all static configuration parameters required to initialize a keyboard instance.
 
 ```c
@@ -321,9 +372,7 @@ typedef struct
 
 The application must provide this configuration during initialization. The driver treats the configuration as read-only after a successful initialization.
 
----
-
-### Keyboard Output
+### 8.3 Keyboard Output
 The driver uses `MK_OutputTypeDef` to report the result of a scan operation.
 
 ```c
@@ -350,7 +399,6 @@ typedef uint8_t MK_KeyCodeTypeDef;
 
 Represents the logical identifier of a physical key. The application provides a key mapping table during initialization, which maps each physical key position to a logical code (e.g., ASCII character 'A', function code, or application-specific identifier).
 
----
 #### Key Action Type
 
 ```c
@@ -367,9 +415,7 @@ typedef enum
 | `MK_KEY_ACTION_NONE`	|No user action detected during this scan cycle.|
 | `MK_KEY_ACTION_CLICK`|	A complete press-and-release sequence was detected.|
 
----
-
-### Operation Status
+### 8.4 Operation Status
 The driver uses `MK_OpStatusTypeDef` to report the result of each operation.
 
 ```c
@@ -386,9 +432,7 @@ typedef enum
 | `MK_OPERATION_OK`      | Operation completed successfully. |
 | `MK_OPERATION_FAIL`      | Operation could not be completed. |
 
----
-
-### Additional Enumerations
+### 8.5 Additional Enumerations
 The driver provides additional enumerations to represent various aspects of keyboard processing:
 
 | Enumeration         | Description |
@@ -405,17 +449,15 @@ The driver provides additional enumerations to represent various aspects of keyb
 
 ---
 
-## API Reference
+## 9. API Reference
 
----
-### MK_Init
+### 9.1 MK_Init
 
 - Initializes a matrix keyboard driver instance.
 - Associates the driver instance with the supplied configuration and key storage, initializes the internal state of every key and prepares the driver for operation.
 - All keys are initialized to the released state, debounce contexts are reset and any pending events or output actions are cleared to ensure a known initial condition.
 - If the driver instance has already been initialized, this function returns successfully without reinitializing it.
 
----
 #### Function Signature
 ```c
 MK_OpStatusTypeDef MK_Init(
@@ -424,7 +466,6 @@ MK_OpStatusTypeDef MK_Init(
     MK_KeyTypeDef*          KeysTable
 );
 ```
----
 #### Parameters
 |Parameter	|Description|
 |-----------|-----------|
@@ -432,7 +473,6 @@ MK_OpStatusTypeDef MK_Init(
 |`Config`	    |Pointer to the driver configuration.|
 |`KeysTable`	|Pointer to the key map table managed by the driver.|
 
----
 #### Return
 |Return Value|	Description|
 |-----------|-----------|
@@ -441,16 +481,13 @@ MK_OpStatusTypeDef MK_Init(
 
 The configuration and key table must remain valid for the entire lifetime of the driver instance.
 
----
-
-### MK_Read
+### 9.2 MK_Read
 - Reads and processes the matrix keyboard.
 - Executes a complete keyboard acquisition cycle by scanning the matrix, processing the sampled key states and retrieving the next pending user action, if available.
 - At the beginning of each call, the output action is initialized to `MK_KEY_ACTION_NONE`. If a pending key action is available, the corresponding key identifier and action type are written to the output structure.
 - Once a pending action is reported through the output structure, it is consumed internally and will not be returned again by subsequent calls.
 - If multiple key actions are pending, only the first pending action found according to the configured key scan order is returned. Remaining pending actions are preserved for subsequent calls.
 
----
 #### Function Signature
 ```c
 MK_OpStatusTypeDef MK_Read(
@@ -458,14 +495,12 @@ MK_OpStatusTypeDef MK_Read(
     MK_OutputTypeDef* Output
 );
 ```
----
 #### Parameters
 |Parameter	|Description|
 |-----------|-----------|
 |`Device`	    |Pointer to the matrix keyboard instance.|
 |`Output`	    |Pointer to the structure that receives the key identifier and action detected during the current read operation.|
 
----
 #### Return
 |Return Value|	Description|
 |-----------|-----------|
@@ -481,10 +516,9 @@ If no key action is pending, `Output->OutputAction`is set to `MK_KEY_ACTION_NONE
 
 ---
 
-## Operation Flow
+## 10. Operation Flow
 
----
-### Initialization Flow
+### 10.1 Initialization Flow
 ```mermaid
 sequenceDiagram
     participant APP as Application
@@ -535,9 +569,8 @@ sequenceDiagram
     Note over APP,DRIVER: Driver ready for operation
     Note over APP,DRIVER: Call MK_Read() periodically
 ```
----
 
-### Processing Pipeline
+### 10.2 Processing Pipeline
 
 The keyboard driver executes a fixed processing pipeline every time ``MK_Read()``is called.
 
@@ -576,9 +609,7 @@ flowchart TD
     ACTION --> OUTPUT
 ```
 
----
-
-### Execution Model
+### 10.3 Execution Model
 
 The driver is designed for a polling-based execution model.
 
@@ -615,7 +646,7 @@ The driver does not create tasks, interrupts or background processing.
 
 ---
 
-## Usage Example
+## 11. Usage Example
 
 ```c
 #include "MatrixKeyboard_Driver.h"
@@ -715,10 +746,9 @@ int main(void)
 
 ---
 
-## Design Decisions
+## 12. Design Decisions
 
----
-### Hardware Independence
+### 12.1 Hardware Independence
 
 All hardware-specific operations are isolated through the scan interface.
 
@@ -761,9 +791,7 @@ This allows the same driver core to be reused with:
 - I/O expanders.
 - Custom scanning circuits.
 
----
-
-### Single Responsibility
+### 12.2 Single Responsibility
 
 Each processing stage performs one well-defined task.
 
@@ -805,9 +833,7 @@ Each module has a clear responsibility:
 | Event Processing | User interaction logic |
 | Output Layer | Application communication |
 
----
-
-### Extensibility
+### 12.3 Extensibility
 
 The architecture allows new features to be added without modifying the existing scanning engine.
 
@@ -821,9 +847,7 @@ Possible future extensions:
 
 The core driver remains unchanged because hardware and processing stages are isolated.
 
----
-
-### Output
+### 12.4 Output
 
 Whenever a valid user action is detected, `MK_Read()` fills the output structure.
 
@@ -846,15 +870,13 @@ MK_KEY_ACTION_CLICK
 Each generated action is returned only once.
 
 ---
-## Error Handling
+## 13. Error Handling
 
 All public Matrix Keyboard operations return a `MK_OpStatusTypeDef` value.
 
 The application should verify the returned status whenever the success of an operation is relevant to system behavior.
 
----
-
-### Return Codes
+### 13.1 Return Codes
 
 All API functions return one of the following status codes:
 
@@ -873,9 +895,7 @@ Failure Scenarios:
 |`MK_Read`	|Scan failure	|Hardware scan operation failed (e.g., GPIO read/write error).|
 |`MK_Read`	|Processing failure	|Debounce, event generation or state machine processing failed.|
 
----
-
-### Recommended Strategy
+### 13.2 Recommended Strategy
 
 For initialization errors:
 
@@ -928,9 +948,8 @@ while (1)
     }
 }
 ```
----
 
-### Error Propagation
+### 13.3 Error Propagation
 
 Operation failures may originate from:
 
@@ -939,38 +958,34 @@ Operation failures may originate from:
 - The GPIO Platform Interface (GPIO read/write failures).
 - The driver shall propagate the failure status when the requested operation cannot be completed successfully. The specific cause of the failure is not exposed through the API, but the application can implement additional diagnostics at the platform or adapter level if required.
 
-
 ---
 
-## Usage Constraints
+## 14. Usage Constraints
 
 The following constraints apply when using the Matrix Keyboard driver.
 
-### Initialization Requirements
+### 14.1 Initialization Requirements
 
 - The `MK_HandleTypeDef` must be initialized by calling `MK_Init()` before any other driver operation.
 - The `MK_ConfigTypeDef` structure must remain valid for the entire lifetime of the driver instance.
 - The key mapping table (KeysTable) must remain valid for the entire lifetime of the driver instance.
 - The KeysTable must have exactly Rows × Columns entries.
 
----
-### Scan Adapter Requirements
+### 14.2 Scan Adapter Requirements
 
 - The scan interface must be properly initialized before calling `MK_Read()`.
 - The scan adapter implementation must be compatible with the configured matrix dimensions.
 - The scan adapter must correctly normalize electrical levels according to the specified active level configuration.
 - The GPIO descriptors provided to the scan adapter must remain valid for the entire lifetime of the driver.
 
----
-### Execution Model
+### 14.3 Execution Model
 
 - `MK_Read()` must be called periodically from the application's main loop or a periodic task.
 - The driver does not create its own execution context, interrupts, or background processing.
 - The debounce interval is configured during initialization and cannot be changed at runtime.
 - All timing is based on the platform time interface (`Platform_GetMillis`).
 
----
-### Pointer Validity
+### 14.4 Pointer Validity
 
 - The Device pointer passed to `MK_Init()` and MK_Read() must not be NULL.
 - The Config pointer passed to `MK_Init()` must not be NULL.
@@ -978,8 +993,7 @@ The following constraints apply when using the Matrix Keyboard driver.
 - The Output pointer passed to `MK_Read()` must not be NULL.
 - The driver does not perform dynamic memory allocation.
 
----
-### Hardware Constraints
+### 14.5 Hardware Constraints
 
  - The supported matrix dimensions depend on the capabilities of the underlying scan adapter.
 
@@ -994,8 +1008,7 @@ Bit = 0 → Key is physically released.
 
 - All GPIO pins must be configured appropriately (output for columns, input for rows).
 
----
-### Key Mapping
+### 14.6 Key Mapping
 
 - The `_key_map` array must contain one entry for each physical key position.
 
@@ -1003,8 +1016,7 @@ Bit = 0 → Key is physically released.
 
 - The driver does not validate the key map contents. Invalid key codes may result in undefined application behavior.
 
----
-### Application Responsibilities
+### 14.7 Application Responsibilities
 
 - The application is responsible for controlling the timing between `MK_Read()` calls.
 - The application is responsible for processing the generated key actions.
@@ -1019,7 +1031,7 @@ Bit = 0 → Key is physically released.
 
 ---
 
-## Applications
+## 15. Applications
 
 The expected integration architecture is:
 
@@ -1060,7 +1072,7 @@ The underlying hardware implementation can be replaced without modifying applica
 
 ---
 
-## Limitations
+## 16. Limitations
 
 Version 1 currently supports:
 
@@ -1083,7 +1095,7 @@ Not implemented:
 
 ---
 
-## License
+## 17. License
 
 This module is part of the:
 
