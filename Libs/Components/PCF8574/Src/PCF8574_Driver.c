@@ -163,6 +163,8 @@ PCF8574_StatusTypeDef PCF8574_WritePort(PCF8574_HandleTypeDef* Device, uint8_t M
  * @details	Retrieves the logic state of all eight PCF8574 I/O pins through the I2C interface.
  *
  * @param  	Device  - Device pointer to the PCF8574 device handle.
+ * @param   Buffer  - Pointer to the output buffer where the data 
+ *                    read from the hardware port will be stored.
  *
  * @note   	Relevant implementation note, constraint or side effect.
  *
@@ -244,6 +246,8 @@ PCF8574_StatusTypeDef PCF8574_WriteBit(PCF8574_HandleTypeDef* Device, uint8_t Bi
  *
  * @param   Device  - Device pointer to the PCF8574 device handle.
  * @param   Bit     - Port bit position to be read.
+ * @param   Buffer  - Pointer to an output buffer that will receive 
+ *                    the extracted bit state (represented as 0 or 1).
  *
  * @note   	Valid bit positions range from 0 to 7.
  *
@@ -336,7 +340,4 @@ PCF8574_StatusTypeDef PCF8574_ToggleBit(PCF8574_HandleTypeDef* Device, uint8_t B
         }
     }
 }
-
-
-
 

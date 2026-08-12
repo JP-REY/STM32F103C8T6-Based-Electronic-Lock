@@ -12,8 +12,8 @@
  * @date    Jul 15, 2026
  **********************************************************************************************************************************/
 
-#ifndef LIBS_DRIVERS_HD44780_LCDDISP_INC_LCD_DRIVER_H_
-#define LIBS_DRIVERS_HD44780_LCDDISP_INC_LCD_DRIVER_H_
+#ifndef LIBS_COMPONENTS_HD44780_INC_LCD_DRIVER_H_
+#define LIBS_COMPONENTS_HD44780_INC_LCD_DRIVER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -154,4 +154,4 @@ HD44780_OpStatusTypeDef HD44780_SetBrightness   (HD44780_HandleTypeDef* Device, 
 }
 #endif
 
-#endif /* LIBS_DRIVERS_HD44780_LCDDISP_INC_LCD_DRIVER_H_ */
+#endif /* LIBS_COMPONENTS_HD44780_INC_LCD_DRIVER_H_ */

@@ -18,8 +18,8 @@
  * @date    Aug 3, 2026
  **********************************************************************************************************************************/
 
-#ifndef COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_
-#define COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_
+#ifndef LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_
+#define LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,4 +68,4 @@ MK_ScanOpStatusTypeDef MK_GPIO_ScanAdapterInit(MK_ScanInterfaceTypeDef* Scan, MK
 }
 #endif
 
-#endif /* COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_ */
+#endif /* LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_ */

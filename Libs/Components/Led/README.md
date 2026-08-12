@@ -1,6 +1,87 @@
-# Hardware-Independent Interface for Controlling LEDs through a Platform GPIO Interface.
+<h1 align="left">LED Driver</h1>
 
-## Overview
+<p align="left">
+  <big>
+    Hardware-independent driver for controlling LEDs through a platform GPIO interface,<br>
+    designed for portable embedded systems.
+  </big>
+</p>
+
+---
+## Table of Contents
+
+* [1. Overview](#1-overview)
+* [2. Features](#2-features)
+* [3. Architecture](#3-architecture)
+
+  * [3.1 Architectural Principles](#31-architectural-principles)
+* [4. Directory Structure](#4-directory-structure)
+* [5. Driver Responsibilities](#5-driver-responsibilities)
+* [6. Dependencies](#6-dependencies)
+* [7. Data Structures](#7-data-structures)
+
+  * [7.1 LED Operation Status](#71-led-operation-status)
+  * [7.2 LED Active Level](#72-led-active-level)
+  * [7.3 LED Effect Type](#73-led-effect-type)
+  * [7.4 LED State](#74-led-state)
+  * [7.5 LED Effect Context](#75-led-effect-context)
+  * [7.6 LED Driver Handle](#76-led-driver-handle)
+* [8. API Reference](#8-api-reference)
+
+  * [8.1 LED_Init](#81-led_init)
+  * [8.2 LED_On](#82-led_on)
+  * [8.3 LED_Off](#83-led_off)
+  * [8.4 LED_BlinkOn](#84-led_blinkon)
+  * [8.5 LED_BlinkOff](#85-led_blinkoff)
+  * [8.6 LED_TriggerEffect](#86-led_triggereffect)
+  * [8.7 LED_Update](#87-led_update)
+  * [8.8 Effect Execution Model](#88-effect-execution-model)
+  * [8.9 State Transitions](#89-state-transitions)
+  * [8.10 State Descriptions](#810-state-descriptions)
+  * [8.11 Effect Restoration Summary](#811-effect-restoration-summary)
+  * [8.12 Quick Reference: API to State Mapping](#812-quick-reference-api-to-state-mapping)
+  * [8.13 Non-Blocking Operation](#813-non-blocking-operation)
+* [9. Operation Flow](#9-operation-flow)
+
+  * [9.1 Initialization Flow](#91-initialization-flow)
+  * [9.2 Application Runtime Flow](#92-application-runtime-flow)
+  * [9.3 Finite Effect Flow](#93-finite-effect-flow)
+* [10. Usage Example](#10-usage-example)
+* [11. Design Decisions](#11-design-decisions)
+
+  * [11.1 Hardware Abstraction Through Platform Interfaces](#111-hardware-abstraction-through-platform-interfaces)
+  * [11.2 Logical LED State Abstraction](#112-logical-led-state-abstraction)
+  * [11.3 Non-Blocking Effect Execution](#113-non-blocking-effect-execution)
+  * [11.4 Application-Owned Scheduling](#114-application-owned-scheduling)
+  * [11.5 Effect State Encapsulation](#115-effect-state-encapsulation)
+  * [11.6 Temporary Effect Restoration](#116-temporary-effect-restoration)
+  * [11.7 Millisecond-Based Timing](#117-millisecond-based-timing)
+  * [11.8 Explicit Operation Status](#118-explicit-operation-status)
+  * [11.9 Driver-Owned Runtime State](#119-driver-owned-runtime-state)
+  * [11.10 Separation of Control and Execution](#1110-separation-of-control-and-execution)
+* [12. Error Handling](#12-error-handling)
+
+  * [12.1 General Failure Conditions](#121-general-failure-conditions)
+  * [12.2 GPIO Errors](#122-gpio-errors)
+  * [12.3 Effect Configuration Errors](#123-effect-configuration-errors)
+  * [12.4 Error Information](#124-error-information)
+* [13. Usage Constraints](#13-usage-constraints)
+
+  * [13.1 Driver Initialization](#131-driver-initialization)
+  * [13.2 Periodic LED_Update Execution](#132-periodic-led_update-execution)
+  * [13.3 Timing Resolution](#133-timing-resolution)
+  * [13.4 Blocking Behavior](#134-blocking-behavior)
+  * [13.5 Effect Scheduling](#135-effect-scheduling)
+  * [13.6 Direct LED Control During Effects](#136-direct-led-control-during-effects)
+  * [13.7 Handle Ownership](#137-handle-ownership)
+  * [13.8 Single-Instance State](#138-single-instance-state)
+* [14. Applications](#14-applications)
+* [15. Limitations](#15-limitations)
+* [16. Future Improvements](#16-future-improvements)
+* [17. License](#17-license)
+
+---
+## 1. Overview
 
 - The driver abstracts the electrical characteristics of the LED, including active-high and active-low configurations, while providing a logical interface for direct LED control and non-blocking timed effects.
 
@@ -12,7 +93,7 @@
 
 ---
 
-## Features
+## 2. Features
 
 * Hardware-independent LED control through a GPIO platform interface.
 * Support for active-high and active-low LED configurations.
@@ -29,7 +110,7 @@
 
 ---
 
-## Architecture
+## 3. Architecture
 
 The LED Driver follows a layered architecture in which the application interacts only with the public LED API.
 
@@ -77,8 +158,7 @@ flowchart LR
     style GPIO_HW fill:#bbb,stroke:#000,stroke-width:2px,color:#000
     style TIME_HW fill:#bbb,stroke:#000,stroke-width:2px,color:#000
 ```
----
-### Architectural Principles
+### 3.1 Architectural Principles
 
 The architecture separates three main responsibilities:
 
@@ -92,7 +172,7 @@ This separation allows the underlying GPIO implementation to be replaced without
 
 ---
 
-## Directory Structure
+## 4. Directory Structure
 
 A typical project integration follows the structure below:
 
@@ -111,7 +191,7 @@ The LED Driver itself depends only on the platform interfaces and does not direc
 
 ---
 
-## Driver Responsibilities
+## 5. Driver Responsibilities
 
 The LED Driver is responsible for:
 
@@ -136,7 +216,7 @@ The driver is not responsible for:
 
 ---
 
-## Dependencies
+## 6. Dependencies
 
 The LED Driver depends on two platform abstractions:
 
@@ -172,11 +252,9 @@ The driver does not use blocking delays to execute LED effects.
 
 ---
 
-## Data Structures
+## 7. Data Structures
 
----
-
-### LED Operation Status
+### 7.1 LED Operation Status
 
 `LED_OpStatusTypeDef` defines the result of a public LED driver operation.
 
@@ -194,9 +272,7 @@ typedef enum
 | `LED_OPERATION_OK`   | Operation completed successfully. |
 | `LED_OPERATION_FAIL` | Operation could not be completed. |
 
----
-
-### LED Active Level
+### 7.2 LED Active Level
 
 `LED_ActiveLevelTypeDef` defines the electrical GPIO level required to turn the LED on.
 
@@ -216,9 +292,7 @@ typedef enum
 
 This abstraction allows the application to use the same logical API regardless of the electrical polarity of the connected LED.
 
----
-
-### LED Effect Type
+### 7.3 LED Effect Type
 
 `LED_EffectTypeDef` defines the effects supported by the driver.
 
@@ -240,9 +314,7 @@ typedef enum
 | `LED_EFFECT_PULSE`  | Executes a finite sequence of LED state transitions.                                        |
 | `LED_EFFECT_FLASH`  | Executes a finite sequence of transitions and restores the previous LED behavior and state. |
 
----
-
-### LED State
+### 7.4 LED State
 
 `LED_StateTypeDef` represents the logical state of the LED.
 
@@ -264,9 +336,7 @@ Logical ON  -> GPIO LOW
 Logical OFF -> GPIO HIGH
 ```
 
----
-
-### LED Effect Context
+### 7.5 LED Effect Context
 
 `LED_EffectContextTypeDef` stores internal information required to manage active and temporary effects.
 
@@ -288,9 +358,7 @@ typedef struct
 
 This structure is private driver state and shall not be accessed or modified directly by the application.
 
----
-
-### LED Driver Handle
+### 7.6 LED Driver Handle
 
 `LED_HandleTypeDef` represents one LED driver instance and contains its configuration and runtime state.
 
@@ -330,15 +398,12 @@ All members of `LED_HandleTypeDef` are internal driver state and shall not be mo
 
 ---
 
-## API Reference
+## 8. API Reference
 
----
-
-### LED_Init
+### 8.1 LED_Init
 
 - Initializes an LED driver instance.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_Init(
@@ -347,7 +412,6 @@ LED_OpStatusTypeDef LED_Init(
     LED_ActiveLevelTypeDef ActiveLevel
 );
 ```
----
 #### Parameters
 
 | Parameter     | Description                                     |
@@ -356,7 +420,6 @@ LED_OpStatusTypeDef LED_Init(
 | `Gpio`        | Pointer to the configured GPIO platform handle. |
 | `ActiveLevel` | Electrical GPIO level that activates the LED.   |
 
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -367,26 +430,21 @@ LED_OpStatusTypeDef LED_Init(
 - The GPIO platform interface shall be configured for output operation before calling `LED_Init()`.
 - The driver initializes its internal effect state and establishes the LED output in the OFF state.
 
----
-
-### LED_On
+### 8.2 LED_On
 
 - Turns the LED on.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_On(
     LED_HandleTypeDef* Device
 );
 ```
----
 #### Parameters
 | Parameter | Description                                   |
 | --------- | --------------------------------------------- |
 | `Device`  | Pointer to the initialized LED driver handle. |
 
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -410,26 +468,21 @@ LED_ON -> GPIO LOW
 **Note:**
 - Calling `LED_On()` does not necessarily cancel a previously configured timed effect. A subsequent `LED_Update()` may modify the LED state if an effect remains active.
 
----
-
-### LED_Off
+### 8.3 LED_Off
 
 - Turns the LED off.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_Off(
     LED_HandleTypeDef* Device
 );
 ```
----
 #### Parameters
 | Parameter | Description                                   |
 | --------- | --------------------------------------------- |
 | `Device`  | Pointer to the initialized LED driver handle. |
 
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -441,13 +494,10 @@ The physical GPIO level is automatically selected according to the configured ac
 **Note:**
 - Calling `LED_Off()` does not necessarily cancel a previously configured timed effect.
 
----
-
-### LED_BlinkOn
+### 8.4 LED_BlinkOn
 
 - Enables continuous LED blinking.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_BlinkOn(
@@ -455,14 +505,12 @@ LED_OpStatusTypeDef LED_BlinkOn(
     uint32_t BlinkTimeMs
 );
 ```
----
 #### Parameters
 | Parameter     | Description                                                              |
 | ------------- | ------------------------------------------------------------------------ |
 | `Device`      | Pointer to the initialized LED driver handle.                            |
 | `BlinkTimeMs` | Time interval between consecutive LED state transitions in milliseconds. |
 
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -474,20 +522,16 @@ The function configures the blink effect but does not block the caller.
 **Note:**
 - The actual LED transitions are performed by `LED_Update()`.
 
----
-
-### LED_BlinkOff
+### 8.5 LED_BlinkOff
 
 - Disables the continuous blink effect.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_BlinkOff(
     LED_HandleTypeDef* Device
 );
 ```
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -499,13 +543,10 @@ The function changes the current effect to `LED_EFFECT_STATIC`.
 **Note:**
 - The current physical LED state is not modified by `LED_BlinkOff()`.
 
----
-
-### LED_TriggerEffect
+### 8.6 LED_TriggerEffect
 
 - Triggers a finite LED effect.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_TriggerEffect(
@@ -515,7 +556,6 @@ LED_OpStatusTypeDef LED_TriggerEffect(
     uint16_t Repeats
 );
 ```
----
 #### Parameters
 | Parameter  | Description                                                          |
 | ---------- | -------------------------------------------------------------------- |
@@ -524,7 +564,6 @@ LED_OpStatusTypeDef LED_TriggerEffect(
 | `Interval` | Time interval between consecutive state transitions in milliseconds. |
 | `Repeats`  | Number of complete effect cycles.                                    |
 
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -548,20 +587,16 @@ Before triggering a finite effect, the driver stores:
 
 These values are used to restore the previous LED behavior when the temporary effect completes.
 
----
-
-### LED_Update
+### 8.7 LED_Update
 
 - Processes the currently active LED effect.
 
----
 #### Function Signature
 ```c
 LED_OpStatusTypeDef LED_Update(
     LED_HandleTypeDef* Device
 );
 ```
----
 #### Return
 | Return Value         | Description                                  |
 | -------------------- | -------------------------------------------- |
@@ -584,13 +619,11 @@ Timer-driven scheduler
 - The function does not use blocking delays.
 - The driver compares the current platform time with the last effect update timestamp and performs the required LED transition when the configured interval has elapsed.
 
----
-
-### Effect Execution Model
+### 8.8 Effect Execution Model
 
 The LED Driver uses a time-driven effect model.
 
-### State Transitions
+### 8.9 State Transitions
 
 | From State | To State | Triggering Action | Description |
 | :--- | :--- | :--- | :--- |
@@ -611,9 +644,7 @@ The LED Driver uses a time-driven effect model.
 | **FLASH** | STATIC | Effect Complete | Restores previous state and effect. |
 | **FLASH** | BLINK | Effect Complete | Restores previous blink effect and state. |
 
----
-
-### State Descriptions
+### 8.10 State Descriptions
 
 | State | Description |
 | :--- | :--- |
@@ -624,18 +655,14 @@ The LED Driver uses a time-driven effect model.
 | **PULSE** | Executes one complete ON/OFF cycle. Finite effect with automatic restoration. |
 | **FLASH** | Executes configurable number of ON/OFF cycles. Finite effect with restoration. |
 
----
-
-### Effect Restoration Summary
+### 8.11 Effect Restoration Summary
 
 | Finite Effect | Transitions | Restoration Behavior |
 | :--- | :--- | :--- |
 | **PULSE** | 2 transitions (ON→OFF) | Restores previous effect only. |
 | **FLASH** | 2 × Repeats transitions | Restores previous effect AND previous LED state. |
 
----
-
-### Quick Reference: API to State Mapping
+### 8.12 Quick Reference: API to State Mapping
 
 | API Function | Effect | Duration | Restoration |
 | :--- | :--- | :--- | :--- |
@@ -648,9 +675,7 @@ The LED Driver uses a time-driven effect model.
 
 The actual effect progression is driven by repeated calls to `LED_Update()` rather than by blocking delays.
 
----
-
-### Non-Blocking Operation
+### 8.13 Non-Blocking Operation
 
 Timed effects are configured by the application and executed asynchronously from the application's perspective.
 
@@ -681,9 +706,9 @@ and performs a transition only when the interval has elapsed.
 
 ---
 
-## Operation Flow
+## 9. Operation Flow
 
-### Initialization Flow
+### 9.1 Initialization Flow
 
 The LED Driver must be initialized before any LED operation is performed.
 
@@ -717,9 +742,7 @@ sequenceDiagram
 
 After successful initialization, the LED instance is ready to receive logical control commands and timed effects.
 
----
-
-### Application Runtime Flow
+### 9.2 Application Runtime Flow
 
 The application interacts with the LED Driver through logical operations while `LED_Update()` is periodically executed to process timed effects.
 
@@ -768,9 +791,7 @@ Instead, the driver periodically evaluates the elapsed time and performs a state
 
 This allows the application to continue executing other tasks between LED updates.
 
----
-
-### Finite Effect Flow
+### 9.3 Finite Effect Flow
 
 Finite effects such as `LED_EFFECT_PULSE` and `LED_EFFECT_FLASH` maintain internal effect state and transition counters until the configured number of cycles has been completed.
 
@@ -803,8 +824,7 @@ This mechanism allows a temporary effect to execute without permanently replacin
 
 ---
 
-
-## Usage Example
+## 10. Usage Example
 
 A typical application can initialize an LED and execute a non-blocking blink effect as follows:
 
@@ -832,11 +852,9 @@ while (1)
 The application requests a 500 ms blink interval, while the LED Driver handles the GPIO transitions internally through the platform abstraction.
 
 ---
-## Design Decisions
+## 11. Design Decisions
 
----
-
-### Hardware Abstraction Through Platform Interfaces
+### 11.1 Hardware Abstraction Through Platform Interfaces
 
 The LED Driver does not directly access MCU-specific GPIO registers or hardware abstraction layers.
 
@@ -844,9 +862,7 @@ GPIO operations are performed through the platform GPIO interface.
 
 This decision isolates the LED logic from the underlying microcontroller implementation and allows the GPIO adapter to be replaced without modifying the driver.
 
----
-
-### Logical LED State Abstraction
+### 11.2 Logical LED State Abstraction
 
 The driver exposes logical `LED_STATE_ON` and `LED_STATE_OFF` states instead of exposing physical GPIO levels.
 
@@ -854,9 +870,7 @@ The configured `LED_ActiveLevelTypeDef` determines how these logical states are 
 
 This allows active-high and active-low LEDs to use the same application-level API.
 
----
-
-### Non-Blocking Effect Execution
+### 11.3 Non-Blocking Effect Execution
 
 LED effects are implemented using timestamp-based scheduling instead of blocking delays.
 
@@ -868,9 +882,7 @@ Current Time - Last Update Time >= Effect Interval
 
 This allows LED effects to execute concurrently with other application tasks.
 
----
-
-### Application-Owned Scheduling
+### 11.4 Application-Owned Scheduling
 
 The driver does not create its own execution context.
 
@@ -883,9 +895,7 @@ This keeps the driver independent of the execution environment and allows it to 
 * Cooperative schedulers.
 * Timer-driven application frameworks.
 
----
-
-### Effect State Encapsulation
+### 11.5 Effect State Encapsulation
 
 Effect state is maintained internally through `LED_EffectContextTypeDef` and the private members of `LED_HandleTypeDef`.
 
@@ -893,9 +903,7 @@ The application does not manipulate effect counters, timestamps or restoration s
 
 This prevents application code from creating inconsistent internal effect states.
 
----
-
-### Temporary Effect Restoration
+### 11.6 Temporary Effect Restoration
 
 Finite effects preserve the LED state and effect that were active before the temporary effect was triggered.
 
@@ -903,9 +911,7 @@ When the finite effect completes, the driver restores the previous behavior.
 
 This allows temporary indications such as flashes or pulses to be introduced without requiring the application to manually reconstruct the previous LED configuration.
 
----
-
-### Millisecond-Based Timing
+### 11.7 Millisecond-Based Timing
 
 The driver uses the platform millisecond time base for effect scheduling.
 
@@ -913,9 +919,7 @@ This provides a simple and portable timing abstraction while avoiding direct dep
 
 The timing source can therefore be replaced independently from the LED driver implementation.
 
----
-
-### Explicit Operation Status
+### 11.8 Explicit Operation Status
 
 Public API functions return `LED_OpStatusTypeDef`.
 
@@ -930,9 +934,7 @@ LED_OPERATION_FAIL
 
 Detailed hardware-specific errors remain encapsulated within the platform layer.
 
----
-
-### Driver-Owned Runtime State
+### 11.9 Driver-Owned Runtime State
 
 The `LED_HandleTypeDef` contains the runtime state associated with an LED instance.
 
@@ -948,9 +950,7 @@ This includes:
 
 Keeping this information in the device handle allows the driver to maintain independent state for each LED instance.
 
----
-
-### Separation of Control and Execution
+### 11.10 Separation of Control and Execution
 
 The public API separates **requesting an LED behavior** from **executing timed behavior**.
 
@@ -968,11 +968,11 @@ configure the desired behavior.
 This separation prevents effect configuration functions from becoming blocking operations and keeps the driver's execution model deterministic.
 
 ---
-## Error Handling
+## 12. Error Handling
 
 The LED Driver uses `LED_OpStatusTypeDef` for operation status reporting.
 
-### General Failure Conditions
+### 12.1 General Failure Conditions
 
 `LED_OPERATION_FAIL` may be returned when:
 
@@ -985,9 +985,7 @@ The LED Driver uses `LED_OpStatusTypeDef` for operation status reporting.
 
 The driver validates the initialization state before executing public operations.
 
----
-
-### GPIO Errors
+### 12.2 GPIO Errors
 
 The LED Driver propagates failures returned by the GPIO platform interface.
 
@@ -1008,9 +1006,7 @@ LED_OPERATION_FAIL
 
 This prevents the application from assuming that the requested LED state was successfully applied.
 
----
-
-### Effect Configuration Errors
+### 12.3 Effect Configuration Errors
 
 `LED_TriggerEffect()` returns `LED_OPERATION_FAIL` if:
 
@@ -1020,9 +1016,7 @@ This prevents the application from assuming that the requested LED state was suc
 
 The effect configuration itself is maintained internally by the driver.
 
----
-
-### Error Information
+### 12.4 Error Information
 
 The current driver provides a binary operation status:
 
@@ -1037,11 +1031,9 @@ Consequently, the application can determine whether an operation succeeded but c
 
 ---
 
-## Usage Constraints
+## 13. Usage Constraints
 
----
-
-### Driver Initialization
+### 13.1 Driver Initialization
 
 `LED_Init()` shall be called before any other LED operation.
 
@@ -1057,9 +1049,7 @@ LED_Init()
 LED Operations
 ```
 
----
-
-### Periodic LED_Update Execution
+### 13.2 Periodic LED_Update Execution
 
 `LED_Update()` must be called periodically while a timed effect is active.
 
@@ -1069,9 +1059,7 @@ The driver does not create its own task, timer interrupt or scheduler.
 
 The application owns the execution context of `LED_Update()`.
 
----
-
-### Timing Resolution
+### 13.3 Timing Resolution
 
 LED effects use the platform millisecond time base.
 
@@ -1085,9 +1073,7 @@ and by the frequency at which the application calls `LED_Update()`.
 
 For example, configuring a 100 ms effect interval does not guarantee a transition exactly at 100 ms if `LED_Update()` is executed less frequently.
 
----
-
-### Blocking Behavior
+### 13.4 Blocking Behavior
 
 The LED Driver does not use blocking delays to implement LED effects.
 
@@ -1095,9 +1081,7 @@ Timed transitions are evaluated using timestamps and executed only when the conf
 
 This allows the driver to be used in cooperative main loops and periodic RTOS tasks.
 
----
-
-### Effect Scheduling
+### 13.5 Effect Scheduling
 
 Only one effect is represented as the current active effect in each `LED_HandleTypeDef`.
 
@@ -1105,9 +1089,7 @@ Triggering a new finite effect replaces the currently active effect context and 
 
 Applications should therefore treat effect triggering as a replacement of the current effect rather than as a queue of independent LED effects.
 
----
-
-### Direct LED Control During Effects
+### 13.6 Direct LED Control During Effects
 
 `LED_On()` and `LED_Off()` directly modify the LED state but do not necessarily terminate an active timed effect.
 
@@ -1122,17 +1104,13 @@ LED_BlinkOff(&StatusLed);
 LED_Off(&StatusLed);
 ```
 
----
-
-### Handle Ownership
+### 13.7 Handle Ownership
 
 The `LED_HandleTypeDef` must remain valid for the entire lifetime of the LED driver instance.
 
 The application shall not modify the internal handle members directly.
 
----
-
-### Single-Instance State
+### 13.8 Single-Instance State
 
 The driver maintains runtime state inside `LED_HandleTypeDef`, allowing the logical state and effect context to be associated with a specific LED instance.
 
@@ -1146,7 +1124,7 @@ LED_HandleTypeDef ActivityLed;
 
 ---
 
-## Applications
+## 14. Applications
 
 The LED Driver is suitable for embedded applications where LEDs are used as status indicators, diagnostic indicators or simple human-machine interface elements.
 
@@ -1228,7 +1206,7 @@ The GPIO platform adapter can therefore be replaced without changing the LED eff
 
 ---
 
-## Limitations
+## 15. Limitations
 
 The current implementation has the following limitations:
 
@@ -1246,7 +1224,7 @@ The current implementation has the following limitations:
 
 ---
 
-## Future Improvements
+## 16. Future Improvements
 
 Potential future extensions include:
 
@@ -1265,7 +1243,7 @@ Potential future extensions include:
 These extensions can be introduced without changing the underlying GPIO abstraction.
 
 ---
-## License
+## 17. License
 
 This module is part of the:
 

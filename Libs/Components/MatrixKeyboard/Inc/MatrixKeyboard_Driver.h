@@ -322,4 +322,4 @@ MK_OpStatusTypeDef MK_Read(MK_HandleTypeDef *Device, MK_OutputTypeDef *Output);
 }
 #endif
 
-#endif /* LIBS_DRIVERS_MATRIX4X4_KEYB_INC_4X4MK_DRIVER_H_ */
+#endif /* LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_DRIVER_H_ */

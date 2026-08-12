@@ -21,8 +21,8 @@
  * @date    Ago 10, 2026
  **********************************************************************************************************************************/
 
-#ifndef LIBS_DRIVERS_LED_STATUSIND_INC_STSLED_DRIVER_H_
-#define LIBS_DRIVERS_LED_STATUSIND_INC_STSLED_DRIVER_H_
+#ifndef LIBS_COMPONENTS_LED_INC_LED_DRIVER_H_
+#define LIBS_COMPONENTS_LED_INC_LED_DRIVER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -176,4 +176,4 @@ LED_OpStatusTypeDef LED_Update        (LED_HandleTypeDef* Device);
 }
 #endif
 
-#endif /* LIBS_DRIVERS_LED_STATUSIND_INC_STSLED_DRIVER_H_ */
+#endif /* LIBS_COMPONENTS_LED_INC_LED_DRIVER_H_ */

@@ -18,8 +18,8 @@
  * @date    Jul 24, 2026
  **********************************************************************************************************************************/
 
-#ifndef COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_
-#define COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_
+#ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_
+#define LIBS_COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,4 +49,4 @@ void HD44780_PCF8574_BusAdapterInit(HD44780_BusInterfaceTypeDef* Bus, PCF8574_Ha
 }
 #endif
 
-#endif /* COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_ */
+#endif /* LIBS_COMPONENTS_HD44780_INC_HD44780_PCF8574_BUSADAPTER_H_ */

@@ -11,8 +11,8 @@
  * @date    Jul 15, 2026
  **********************************************************************************************************************************/
 
-#ifndef LIBS_DRIVERS_PCF8574_IOEXP_INC_PCF8574_DRIVER_H_
-#define LIBS_DRIVERS_PCF8574_IOEXP_INC_PCF8574_DRIVER_H_
+#ifndef LIBS_COMPONENTS_PCF8574_INC_PCF8574_DRIVER_H_
+#define LIBS_COMPONENTS_PCF8574_INC_PCF8574_DRIVER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,4 +88,4 @@ PCF8574_StatusTypeDef PCF8574_ToggleBit (PCF8574_HandleTypeDef* Device, uint8_t 
 }
 #endif
 
-#endif /* LIBS_DRIVERS_PCF8574_IOEXP_INC_PCF8574_DRIVER_H_ */
+#endif /* LIBS_COMPONENTS_PCF8574_INC_PCF8574_DRIVER_H_ */
