@@ -4,7 +4,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Aug 3, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -32,7 +32,7 @@ static MK_ScanOpStatus_t ReadRows     (void* Context, uint32_t* RowsMask);
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Selects the active keyboard column.
  *
  * @details Deactivates all matrix columns and drives only the specified column
@@ -50,7 +50,7 @@ static MK_ScanOpStatus_t ReadRows     (void* Context, uint32_t* RowsMask);
  * @return  MK_SCAN_OP_OK   - Column successfully selected.
  * @return  MK_SCAN_OP_FAIL - Failed to select the requested column or invalid
  *                            parameters were provided.
- **********************************************************************************************************************************/
+ */
 static MK_ScanOpStatus_t SelectColumn(void* Context, uint8_t Column)
 {
     if(Context == NULL)
@@ -104,7 +104,7 @@ static MK_ScanOpStatus_t SelectColumn(void* Context, uint8_t Column)
     return MK_SCAN_OP_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Reads the current logical state of all keyboard rows.
  *
  * @details Samples every configured row input and packs the resulting
@@ -129,9 +129,9 @@ static MK_ScanOpStatus_t SelectColumn(void* Context, uint8_t Column)
  * @note    The adapter is responsible for setting or clearing every bit
  *          in the output mask before returning.
  *
- * @return  MK_SCAN_OP_OK   Row states successfully read.
- * @return  MK_SCAN_OP_FAIL Invalid parameters or row sampling failed.
- **********************************************************************************************************************************/
+ * @return  MK_SCAN_OP_OK   - Row states successfully read.
+ * @return  MK_SCAN_OP_FAIL - Invalid parameters or row sampling failed.
+ */
 static MK_ScanOpStatus_t ReadRows(void* Context, uint32_t* RowsMask)
 {
     if(Context == NULL || RowsMask == NULL)
@@ -164,7 +164,7 @@ static MK_ScanOpStatus_t ReadRows(void* Context, uint32_t* RowsMask)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Initializes the GPIO scan adapter.
  *
  * @details Initializes a Matrix Keyboard scan interface instance with the GPIO-
@@ -184,7 +184,7 @@ static MK_ScanOpStatus_t ReadRows(void* Context, uint32_t* RowsMask)
  *
  * @return  MK_SCAN_OP_OK   - Adapter successfully initialized.
  * @return  MK_SCAN_OP_FAIL - Initialization failed due to invalid parameters.
- **********************************************************************************************************************************/
+ */
 MK_ScanOpStatus_t MK_GPIO_ScanAdapterInit(MK_ScanInterface_t *Scan, MK_GPIO_ScanAdapter_t *Context)
 {
     if (Scan == NULL || Context == NULL)

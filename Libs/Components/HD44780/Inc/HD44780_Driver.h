@@ -9,7 +9,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 15, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_HD44780_INC_LCD_DRIVER_H_
@@ -34,7 +34,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   HD44780 Operation Status type.
  *
  * @details Indicates the status of HD44780 driver operation.
@@ -42,7 +42,7 @@ extern "C" {
  * @note    HD44780_OPERATION_OK/HD44780_OPERATION_FAIL indicates whether
  *          HD44780 operation was succeed or not.
  *
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_OPERATION_OK,
@@ -50,7 +50,7 @@ typedef enum
 
 }HD44780_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   HD44780 data interface mode.
  *
  * @details Selects whether the HD44780 communicates through an 8-bit or a 4-bit
@@ -58,7 +58,7 @@ typedef enum
  *
  * @note    The selected mode must match the physical hardware connection
  *          between the controller and the display.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_8BIT_MODE,
@@ -66,14 +66,14 @@ typedef enum
 
 }HD44780_InterfaceMode_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   HD44780 character font configuration.
  *
  * @details Selects the character font used by HD44780.
  *
  * @note    The 5x10 font is supported only in single-line display mode,
  *          according to the HD44780 specification.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_5X10_FONT,
@@ -81,7 +81,7 @@ typedef enum
 
 }HD44780_CharacterFont_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   HD44780 display line configuration.
  *
  * @details Selects whether the display operates in single-line or two-line
@@ -89,7 +89,7 @@ typedef enum
  *
  * @note    The enumeration values match the bit encoding required by the
  *          Function Set instruction.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_2LINE = 0x01,
@@ -97,7 +97,7 @@ typedef enum
 
 }HD44780_LineNumber_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   HD44780 device instance.
  *
  * @details Stores the configuration and private runtime data associated with
@@ -106,17 +106,17 @@ typedef enum
  * @warning Members identified as private driver data are intended for internal
  *          driver use only and must not be accessed or modified directly by
  *          the application after initialization.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    // << Private data. Do not read or modify ! >>
-    /* Communication bus interface used by the driver. */ HD44780_BusInterface_t       _bus;
-    /* Backlight control interface used by the driver. */ HD44780_BacklightInterface_t _backlight;
-    /* Number of display lines configure for HD44780.  */ HD44780_LineNumber_t         _rows;
-    /* Number of display columns.                      */ uint8_t                      _cols;
-    /* Selected HD44780 data interface mode.           */ HD44780_InterfaceMode_t      _interface_mode;
-    /* Selected character font configuration.          */ HD44780_CharacterFont_t      _font_dot_size;
-    /* Indicates if HD44780 instance has initialized   */ bool                         _initialized;
+                                                    /*< Private data. Do not read or modify !           */
+    HD44780_BusInterface_t       _bus;              /*< Communication bus interface used by the driver. */  
+    HD44780_BacklightInterface_t _backlight;        /*< Backlight control interface used by the driver. */
+    HD44780_LineNumber_t         _rows;             /*< Number of display lines configure for HD44780.  */
+    uint8_t                      _cols;             /*< Number of display columns.                      */
+    HD44780_InterfaceMode_t      _interface_mode;   /*< Selected HD44780 data interface mode.           */
+    HD44780_CharacterFont_t      _font_dot_size;    /*< Selected character font configuration.          */
+    bool                         _initialized;      /*< Indicates if HD44780 instance has initialized   */
 
 }HD44780_Handle_t;
 

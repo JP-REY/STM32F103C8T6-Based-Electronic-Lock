@@ -4,7 +4,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 29, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -40,8 +40,8 @@
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/* << Helper Functions >> */
-/**********************************************************************************************************************************
+// Helper Functions
+/**
  * @brief   Checks whether a Platform PWM instance has been initialized.
  *
  * @details Returns the current initialization state of the specified
@@ -55,13 +55,13 @@
  *
  * @return  true   - if the PWM instance has been initialized.
  * @return  false  - if the PWM instance has not been initialized.
- **********************************************************************************************************************************/
+ */
 static inline bool PPWM_IsInit(const PWM_Handle_t* Instance)
 {
     return Instance == NULL ? false : Instance->_initialized;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Clamps a duty cycle value to the specified maximum value.
  *
  * @details Returns the specified duty cycle value if it does not exceed
@@ -72,13 +72,13 @@ static inline bool PPWM_IsInit(const PWM_Handle_t* Instance)
  * @param   Max_Value - Maximum allowed duty cycle value.
  *
  * @return  A duty cycle value guaranteed not to exceed Max_Value.
- **********************************************************************************************************************************/
+ */
 static inline uint16_t PPWM_ClampDutyValue(uint16_t Duty, uint16_t Max_Value)
 {
     return Duty > Max_Value ? Max_Value : Duty;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Maps a duty cycle percentage to a timer compare register (CCRx) value.
  *
  * @details Performs a linear interpolation between two numeric ranges,
@@ -99,7 +99,7 @@ static inline uint16_t PPWM_ClampDutyValue(uint16_t Duty, uint16_t Max_Value)
  *
  * @return  Timer compare register (CCRx) value obtained through linear
  *          interpolation between the specified input and output ranges.
- **********************************************************************************************************************************/
+ */
 static inline uint16_t PPWM_MapDutyPercentToValue(uint16_t Duty_Percent, uint16_t Duty_Min_Percent, uint16_t Duty_Min_Val,
                                                   uint16_t Duty_Max_Percent, uint16_t Duty_Max_Val)
 {
@@ -109,7 +109,7 @@ static inline uint16_t PPWM_MapDutyPercentToValue(uint16_t Duty_Percent, uint16_
            (Duty_Max_Percent - Duty_Min_Percent) + Duty_Min_Val;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Maps a compare register value to a duty cycle percentage.
  *
  * @details Performs a linear interpolation between two numeric ranges,
@@ -130,7 +130,7 @@ static inline uint16_t PPWM_MapDutyPercentToValue(uint16_t Duty_Percent, uint16_
  *
  * @return  Duty cycle percentage obtained through linear interpolation
  *          between the specified input and output ranges.
- **********************************************************************************************************************************/
+ */
 static inline uint16_t PPWM_MapDutyValueToPercent(uint16_t Duty_Val, uint16_t Duty_Min_Val, uint16_t Duty_Min_Percent,
                                                   uint16_t Duty_Max_Val, uint16_t Duty_Max_Percent)
 {
@@ -140,7 +140,7 @@ static inline uint16_t PPWM_MapDutyValueToPercent(uint16_t Duty_Val, uint16_t Du
            (Duty_Max_Val - Duty_Min_Val) + Duty_Min_Percent;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the address of the timer compare register (CCRx) for the specified PWM channel.
  *
  * @details Resolves the hardware compare register (CCRx) associated with the
@@ -155,7 +155,7 @@ static inline uint16_t PPWM_MapDutyValueToPercent(uint16_t Duty_Val, uint16_t Du
  *
  * @return  Pointer to the corresponding timer compare register (CCRx).
  * @return  NULL if the instance, platform context or channel is invalid.
- **********************************************************************************************************************************/
+ */
 static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_Handle_t* Instance, PWM_Channel_t Channel)
 {
     if(Instance == NULL)
@@ -181,7 +181,7 @@ static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_Handle_t* Instance, PW
     }
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the CCxP bit mask corresponding to a PWM channel.
  *
  * @details Maps the specified PWM output channel to its corresponding CCxP
@@ -194,7 +194,7 @@ static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_Handle_t* Instance, PW
  *
  * @return  CCxP bit mask corresponding to the specified PWM channel.
  * @return  0 if the specified channel is invalid.
- **********************************************************************************************************************************/
+ */
 static inline uint32_t PPWM_GetCCxPBitMask(PWM_Channel_t Channel)
 {
     switch(Channel)
@@ -208,7 +208,7 @@ static inline uint32_t PPWM_GetCCxPBitMask(PWM_Channel_t Channel)
     }
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the address of the timer auto-reload register (ARR).
  *
  * @details Resolves the hardware auto-reload register (ARR) associated with
@@ -222,7 +222,7 @@ static inline uint32_t PPWM_GetCCxPBitMask(PWM_Channel_t Channel)
  *
  * @return  Pointer to the timer auto-reload register (ARR).
  * @return  NULL if the instance or platform context is invalid.
- **********************************************************************************************************************************/
+ */
 static inline volatile uint32_t* PPWM_GetARRRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
@@ -240,7 +240,7 @@ static inline volatile uint32_t* PPWM_GetARRRegister(PWM_Handle_t* Instance)
     return &(ctx->Instance->ARR);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the address of the timer prescaler register (PSC).
  *
  * @details Resolves the hardware prescaler register (PSC) associated with
@@ -254,7 +254,7 @@ static inline volatile uint32_t* PPWM_GetARRRegister(PWM_Handle_t* Instance)
  *
  * @return  Pointer to the timer prescaler register (PSC).
  * @return  NULL if the instance or platform context is invalid.
- **********************************************************************************************************************************/
+ */
 static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
@@ -272,7 +272,7 @@ static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_Handle_t* Instance)
     return &(ctx->Instance->PSC);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the address of the timer capture/compare enable register (CCER).
  *
  * @details Resolves the hardware capture/compare enable register (CCER)
@@ -287,7 +287,7 @@ static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_Handle_t* Instance)
  *
  * @return  Pointer to the timer capture/compare enable register (CCER).
  * @return  NULL if the instance or platform context is invalid.
- **********************************************************************************************************************************/
+ */
 static inline volatile uint32_t* PPWM_GetCCERRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
@@ -305,7 +305,7 @@ static inline volatile uint32_t* PPWM_GetCCERRegister(PWM_Handle_t* Instance)
     return &(ctx->Instance->CCER);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the timer input clock frequency.
  *
  * @details Provides the clock frequency driving the timer peripheral used by
@@ -322,13 +322,13 @@ static inline volatile uint32_t* PPWM_GetCCERRegister(PWM_Handle_t* Instance)
  *          the actual timer instance and RCC clock configuration.
  *
  * @return  Timer input clock frequency in hertz (Hz).
- **********************************************************************************************************************************/
+ */
 static inline uint32_t PPWM_GetTimerClockFreq()
 {
     return HAL_RCC_GetSysClockFreq();
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Refreshes the PWM duty cycle after a timer period update.
  *
  * @details Recalculates the timer compare register (CCRx) value according to
@@ -354,7 +354,7 @@ static inline uint32_t PPWM_GetTimerClockFreq()
  * @return  PWM_OPERATION_OK   - Duty cycle successfully refreshed.
  * @return  PWM_OPERATION_FAIL - Invalid instance, platform context or
  *                               timer register access.
- **********************************************************************************************************************************/
+ */
 static inline PWM_OpStatus_t PPWM_RefreshDuty(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
@@ -379,13 +379,10 @@ static inline PWM_OpStatus_t PPWM_RefreshDuty(PWM_Handle_t* Instance)
 
     uint16_t old_max_duty = Instance->_max_duty;
 
-    /* << Updates duty max value based on the new arr register value >> */
     Instance->_max_duty = *arr_reg;
 
-    /* << Rescales the compare register value to preserve the duty cycle ratio >>  */
     uint16_t duty_refreshed = ((*ccrx_reg) * (Instance->_max_duty) + (*ccrx_reg)) / (old_max_duty);
 
-    /* << Applies refreshed duty value >> */
     *ccrx_reg = duty_refreshed;
 
     Instance->_duty = duty_refreshed;
@@ -396,7 +393,7 @@ static inline PWM_OpStatus_t PPWM_RefreshDuty(PWM_Handle_t* Instance)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Creates and configures a Platform PWM instance.
  *
  * @details Initializes a Platform PWM handle by associating it with a
@@ -432,7 +429,7 @@ static inline PWM_OpStatus_t PPWM_RefreshDuty(PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - PWM instance successfully created.
  * @return  PWM_OPERATION_FAIL - Invalid parameter or unsupported platform configuration.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t Channel)
 {
     TIM_HandleTypeDef* ctx = (TIM_HandleTypeDef*)Context;
@@ -444,7 +441,6 @@ PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t 
         return PWM_OPERATION_FAIL;
     }
 
-    /* << PWM Channel initialization >> */
     Instance->Ctx       = ctx;
     Instance->_channel  = Channel;
 
@@ -456,7 +452,6 @@ PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t 
     Instance->_duty      = *ccrx_reg;
     Instance->_polarity  = (PWM_Polarity_t)(READ_BIT(*ccer_reg ,PPWM_GetCCxPBitMask(Channel)));
 
-    /* << PWM frequency calculation based on register values pre-configured by Cube MX >> */
     Instance->_frequency = ((timer_clk_freq)/((*psc_reg + 1U) * (*arr_reg + 1U)));
 
     Instance->_max_duty     = *arr_reg;
@@ -466,7 +461,7 @@ PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t 
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Initializes a Platform PWM instance.
  *
  * @details Marks the specified Platform PWM instance as initialized,
@@ -486,7 +481,7 @@ PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t 
  *
  * @return  PWM_OPERATION_OK   - The instance was successfully initialized or was already initialized.
  * @return  PWM_OPERATION_FAIL - Instance is NULL.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_Init(PWM_Handle_t* Instance)
 {
     if(Instance == NULL) return PWM_OPERATION_FAIL;
@@ -498,7 +493,7 @@ PWM_OpStatus_t PPWM_Init(PWM_Handle_t* Instance)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Enables PWM signal generation for the specified output channel.
  *
  * @details Starts PWM waveform generation on the associated hardware channel.
@@ -516,7 +511,7 @@ PWM_OpStatus_t PPWM_Init(PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - PWM generation successfully enabled or already enabled.
  * @return  PWM_OPERATION_FAIL - Invalid instance or platform-specific enable operation failed.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_Enable(PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -537,7 +532,7 @@ PWM_OpStatus_t PPWM_Enable(PWM_Handle_t* Instance)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Disables PWM signal generation for the specified output channel.
  *
  * @details Stops PWM waveform generation on the associated hardware channel.
@@ -555,7 +550,7 @@ PWM_OpStatus_t PPWM_Enable(PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - PWM generation successfully disabled or already disabled.
  * @return  PWM_OPERATION_FAIL - Invalid instance or platform-specific disable operation failed.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_Disable(PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -575,7 +570,7 @@ PWM_OpStatus_t PPWM_Disable(PWM_Handle_t* Instance)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Sets the PWM duty cycle using a compare register value.
  *
  * @details Updates the duty cycle by writing the specified compare value to
@@ -597,7 +592,7 @@ PWM_OpStatus_t PPWM_Disable(PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - Duty cycle successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_SetDutyVal(PWM_Handle_t* Instance, uint16_t Duty)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -628,7 +623,7 @@ PWM_OpStatus_t PPWM_SetDutyVal(PWM_Handle_t* Instance, uint16_t Duty)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Sets the PWM duty cycle as a percentage.
  *
  * @details Converts the specified duty cycle percentage into the equivalent
@@ -649,7 +644,7 @@ PWM_OpStatus_t PPWM_SetDutyVal(PWM_Handle_t* Instance, uint16_t Duty)
  *
  * @return  PWM_OPERATION_OK   - Duty cycle successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_SetDutyPercent(PWM_Handle_t* Instance, uint16_t Duty_Percent)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -682,7 +677,7 @@ PWM_OpStatus_t PPWM_SetDutyPercent(PWM_Handle_t* Instance, uint16_t Duty_Percent
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current PWM duty cycle compare value.
  *
  * @details Retrieves the compare register value currently stored by the
@@ -699,7 +694,7 @@ PWM_OpStatus_t PPWM_SetDutyPercent(PWM_Handle_t* Instance, uint16_t Duty_Percent
  * @return  Current compare register value.
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
- **********************************************************************************************************************************/
+ */
 uint16_t PPWM_GetDutyVal(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -710,7 +705,7 @@ uint16_t PPWM_GetDutyVal(const PWM_Handle_t* Instance)
     return Instance->_duty;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current PWM duty cycle percent.
  *
  * @details Map the compare register value currently stored by the
@@ -727,7 +722,7 @@ uint16_t PPWM_GetDutyVal(const PWM_Handle_t* Instance)
  * @return  Current duty cycle percent value.
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
- **********************************************************************************************************************************/
+ */
 uint16_t PPWM_GetDutyPercent(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -740,7 +735,7 @@ uint16_t PPWM_GetDutyPercent(const PWM_Handle_t* Instance)
                                       PPWM_MAX_DUTY_PERCENT);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the maximum duty cycle value supported by the PWM instance.
  *
  * @details Retrieves the maximum compare register value that can be applied
@@ -758,7 +753,7 @@ uint16_t PPWM_GetDutyPercent(const PWM_Handle_t* Instance)
  *          instance.
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
- **********************************************************************************************************************************/
+ */
 uint16_t PPWM_GetMaxDuty(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -776,7 +771,7 @@ uint16_t PPWM_GetMaxDuty(const PWM_Handle_t* Instance)
     return ctx->Instance->ARR;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Sets the PWM signal frequency.
  *
  * @details Configures the PWM output frequency by updating the timer auto-reload
@@ -815,7 +810,7 @@ uint16_t PPWM_GetMaxDuty(const PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - PWM frequency successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid parameter or unsupported timer configuration.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_SetFrequency(PWM_Handle_t* Instance, uint32_t Frequency)
 {
     uint32_t arr = 0;
@@ -852,7 +847,7 @@ PWM_OpStatus_t PPWM_SetFrequency(PWM_Handle_t* Instance, uint32_t Frequency)
         return PWM_OPERATION_FAIL;
     }
 
-    /* << Temporarily disable update events to prevent shadow register updates while ARR is being reconfigured >> */
+    // Temporarily disable update events to prevent shadow register updates while ARR is being reconfigured.
     SET_BIT((ctx->Instance->CR1), TIM_CR1_UDS_BIT_MASK);
 
     arr = ((timer_clk_freq)/((*psc_reg + 1U) * Frequency));
@@ -880,7 +875,7 @@ PWM_OpStatus_t PPWM_SetFrequency(PWM_Handle_t* Instance, uint32_t Frequency)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current PWM output frequency.
  *
  * @details Retrieves the PWM output frequency currently maintained by the
@@ -896,7 +891,7 @@ PWM_OpStatus_t PPWM_SetFrequency(PWM_Handle_t* Instance, uint32_t Frequency)
  *
  * @return  Current PWM output frequency in hertz (Hz).
  * @return  0 if the specified instance is NULL or has not been initialized.
- **********************************************************************************************************************************/
+ */
 uint32_t PPWM_GetFrequency(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -907,7 +902,7 @@ uint32_t PPWM_GetFrequency(const PWM_Handle_t* Instance)
     return Instance->_frequency;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Sets the active polarity of the PWM output signal.
  *
  * @details Configures the active output polarity of the associated PWM
@@ -927,7 +922,7 @@ uint32_t PPWM_GetFrequency(const PWM_Handle_t* Instance)
  *
  * @return  PWM_OPERATION_OK   - PWM polarity successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
- **********************************************************************************************************************************/
+ */
 PWM_OpStatus_t PPWM_SetPolarity(PWM_Handle_t* Instance, PWM_Polarity_t Polarity)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -959,7 +954,7 @@ PWM_OpStatus_t PPWM_SetPolarity(PWM_Handle_t* Instance, PWM_Polarity_t Polarity)
     return PWM_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current PWM output polarity.
  *
  * @details Retrieves the polarity currently configured for the specified
@@ -973,7 +968,7 @@ PWM_OpStatus_t PPWM_SetPolarity(PWM_Handle_t* Instance, PWM_Polarity_t Polarity)
  * @return  Current PWM output polarity.
  *
  * @warning Returns PWM_POLARITY_HIGH if the specified instance is NULL or has not been initialized.
- **********************************************************************************************************************************/
+ */
 PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
@@ -984,7 +979,7 @@ PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t* Instance)
     return Instance->_polarity;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current operating state of the PWM instance.
  *
  * @details Indicates whether PWM waveform generation is currently enabled or
@@ -1000,7 +995,7 @@ PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t* Instance)
  *
  * @return  PWM_STATE_ENABLED  - PWM generation is currently enabled.
  * @return  PWM_STATE_DISABLED - PWM generation is currently disabled.
- **********************************************************************************************************************************/
+ */
 PWM_State_t PPWM_GetState(const PWM_Handle_t* Instance)
 {
     if(!(PPWM_IsInit(Instance)))

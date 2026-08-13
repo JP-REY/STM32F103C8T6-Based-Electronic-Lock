@@ -9,7 +9,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Ago 07, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -41,7 +41,7 @@ static MK_OpStatus_t     MK_Process            (MK_Handle_t* Device);
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Checks whether the matrix keyboard driver has been initialized.
  *
  * @details Returns the initialization state stored in the driver instance.
@@ -51,13 +51,13 @@ static MK_OpStatus_t     MK_Process            (MK_Handle_t* Device);
  *
  * @return  true  The driver has been successfully initialized.
  * @return  false The driver is not initialized or the device pointer is NULL.
- **********************************************************************************************************************************/
+ */
 static inline bool MK_IsInit(MK_Handle_t* Device)
 {
     return Device == NULL ? false : Device->_is_initialized;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Scans the keyboard matrix and updates the raw level of every key.
  *
  * @details Sequentially selects each matrix column through the configured
@@ -75,7 +75,7 @@ static inline bool MK_IsInit(MK_Handle_t* Device)
  *
  * @return  MK_SCAN_OP_OK   - Matrix successfully scanned.
  * @return  MK_SCAN_OP_FAIL - Invalid device or scan operation failed.
- **********************************************************************************************************************************/
+ */
 static MK_ScanOpStatus_t MK_Scan(MK_Handle_t *Device)
 {
     if (Device == NULL || !MK_IsInit(Device))
@@ -111,7 +111,7 @@ static MK_ScanOpStatus_t MK_Scan(MK_Handle_t *Device)
     return MK_SCAN_OP_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Applies debounce filtering to all keys.
  *
  * @details Processes the raw level of every key and validates level
@@ -133,7 +133,7 @@ static MK_ScanOpStatus_t MK_Scan(MK_Handle_t *Device)
  *
  * @return  MK_OPERATION_OK   - Debounce processing completed successfully.
  * @return  MK_OPERATION_FAIL - Invalid device or processing failed.
- **********************************************************************************************************************************/
+ */
 static MK_OpStatus_t MK_FilterKeysDebounce(MK_Handle_t* Device)
 {
     if (Device == NULL || !MK_IsInit(Device))
@@ -200,7 +200,7 @@ static MK_OpStatus_t MK_FilterKeysDebounce(MK_Handle_t* Device)
     return MK_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Updates the output event of every key.
  *
  * @details Compares the current stable level of each key with its previous
@@ -220,7 +220,7 @@ static MK_OpStatus_t MK_FilterKeysDebounce(MK_Handle_t* Device)
  *
  * @return  MK_OPERATION_OK   - Event generation completed successfully.
  * @return  MK_OPERATION_FAIL - Invalid device or inconsistent key state.
- **********************************************************************************************************************************/
+ */
 static MK_OpStatus_t MK_UpdateKeysEvent(MK_Handle_t* Device)
 {
     if (Device == NULL || !MK_IsInit(Device))
@@ -263,7 +263,7 @@ static MK_OpStatus_t MK_UpdateKeysEvent(MK_Handle_t* Device)
     return MK_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Processes the outputed event of every key.
  *
  * @details Evaluates the current state and outputed event of each key to
@@ -283,7 +283,7 @@ static MK_OpStatus_t MK_UpdateKeysEvent(MK_Handle_t* Device)
  *
  * @return  MK_OPERATION_OK   - State machine processed successfully.
  * @return  MK_OPERATION_FAIL - Invalid device or inconsistent key state.
- **********************************************************************************************************************************/
+ */
 static MK_OpStatus_t MK_ProcessKeysEvent(MK_Handle_t* Device)
 {
     if (Device == NULL || !MK_IsInit(Device))
@@ -337,7 +337,7 @@ static MK_OpStatus_t MK_ProcessKeysEvent(MK_Handle_t* Device)
     return MK_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Executes the complete key processing pipeline.
  *
  * @details Performs all processing stages required to transform the raw
@@ -358,7 +358,7 @@ static MK_OpStatus_t MK_ProcessKeysEvent(MK_Handle_t* Device)
  *
  * @return  MK_OPERATION_OK   - All processing stages completed successfully.
  * @return  MK_OPERATION_FAIL - Invalid device or a processing stage failed.
- **********************************************************************************************************************************/
+ */
 static MK_OpStatus_t MK_Process(MK_Handle_t* Device)
 {
     if (Device == NULL || !MK_IsInit(Device))
@@ -384,7 +384,7 @@ static MK_OpStatus_t MK_Process(MK_Handle_t* Device)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Initializes a matrix keyboard driver instance.
  *
  * @details Associates the driver instance with the supplied configuration
@@ -407,7 +407,7 @@ static MK_OpStatus_t MK_Process(MK_Handle_t* Device)
  *
  * @return  MK_OPERATION_OK   - Driver successfully initialized.
  * @return  MK_OPERATION_FAIL - Invalid parameters or initialization failed.
- **********************************************************************************************************************************/
+ */
 MK_OpStatus_t MK_Init(MK_Handle_t* Device, const MK_Config_t* Config, MK_Key_t* KeysTable)
 {
     if (Device == NULL || Config == NULL)
@@ -449,7 +449,7 @@ MK_OpStatus_t MK_Init(MK_Handle_t* Device, const MK_Config_t* Config, MK_Key_t* 
     return MK_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Reads and processes the matrix keyboard.
  *
  * @details Executes a complete keyboard acquisition cycle by scanning the
@@ -487,7 +487,7 @@ MK_OpStatus_t MK_Init(MK_Handle_t* Device, const MK_Config_t* Config, MK_Key_t* 
  * @return  MK_OPERATION_OK   - Keyboard successfully processed.
  * @return  MK_OPERATION_FAIL - Invalid parameters or an internal processing
  *                              stage failed.
- **********************************************************************************************************************************/
+ */
 MK_OpStatus_t MK_Read(MK_Handle_t* Device, MK_Output_t* Output)
 {
     if(Device == NULL || Output == NULL || !MK_IsInit(Device))

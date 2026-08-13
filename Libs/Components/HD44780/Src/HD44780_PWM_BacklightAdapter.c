@@ -1,10 +1,10 @@
 /**********************************************************************************************************************************
  * @file    PWM_BacklightAdapter.c
- * @brief   Describe this module implementation.
+ * @brief   PWM_BacklightAdapter.c module implementation.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 29, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -35,7 +35,7 @@ static uint16_t                    GetBrightness (void* Context);
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Enables the HD44780 backlight using PWM control.
  *
  * @details Enables the PWM peripheral associated with the HD44780 backlight by
@@ -54,7 +54,7 @@ static uint16_t                    GetBrightness (void* Context);
  *
  * @return  HD44780_BACKLIGHT_OP_OK   - Indicates that the backlight was successfully enabled.
  *          HD44780_BACKLIGHT_OP_FAIL - Indicates that the PWM context is invalid or the enable operation failed.
- **********************************************************************************************************************************/
+ */
 static HD44780_BacklightOpStatus_t TurnOn(void* Context)
 {
     PWM_Handle_t* ctx = Context;
@@ -72,7 +72,7 @@ static HD44780_BacklightOpStatus_t TurnOn(void* Context)
     return HD44780_BACKLIGHT_OP_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Disables the HD44780 backlight using PWM control.
  *
  * @details Disables the PWM peripheral associated with the HD44780 backlight.
@@ -87,7 +87,7 @@ static HD44780_BacklightOpStatus_t TurnOn(void* Context)
  *
  * @return  HD44780_BACKLIGHT_OP_OK   - Indicates that the backlight was successfully disabled.
  *          HD44780_BACKLIGHT_OP_FAIL - Indicates that the PWM context is invalid or the disable operation failed.
- **********************************************************************************************************************************/
+ */
 static HD44780_BacklightOpStatus_t TurnOff(void* Context)
 {
     PWM_Handle_t* ctx = Context;
@@ -105,7 +105,7 @@ static HD44780_BacklightOpStatus_t TurnOff(void* Context)
     return HD44780_BACKLIGHT_OP_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Sets the HD44780 backlight brightness using PWM duty cycle control.
  *
  * @details Updates the PWM duty cycle associated with the HD44780 backlight
@@ -124,7 +124,7 @@ static HD44780_BacklightOpStatus_t TurnOff(void* Context)
  *
  * @return  HD44780_BACKLIGHT_OP_OK   - Indicates that the brightness was successfully updated.
  *          HD44780_BACKLIGHT_OP_FAIL - Indicates that the PWM context is invalid or the duty cycle update failed.
- **********************************************************************************************************************************/
+ */
 static HD44780_BacklightOpStatus_t SetBrightness(void* Context, uint16_t Level)
 {
     PWM_Handle_t* ctx = Context;
@@ -142,7 +142,7 @@ static HD44780_BacklightOpStatus_t SetBrightness(void* Context, uint16_t Level)
     return HD44780_BACKLIGHT_OP_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Gets the current HD44780 backlight brightness level.
  *
  * @details Returns the brightness percentage currently configured in the PWM
@@ -158,7 +158,7 @@ static HD44780_BacklightOpStatus_t SetBrightness(void* Context, uint16_t Level)
  * @note    If the supplied context is invalid, this function returns 0.
  *
  * @return  Current backlight brightness level expressed as a percentage from 0 to 100.
- **********************************************************************************************************************************/
+ */
 static uint16_t GetBrightness(void* Context)
 {
     PWM_Handle_t* ctx = Context;
@@ -174,7 +174,7 @@ static uint16_t GetBrightness(void* Context)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Initializes the HD44780 PWM backlight adapter interface.
  *
  * @details Configures an HD44780_BacklightInterface_t instance to use
@@ -193,7 +193,7 @@ static uint16_t GetBrightness(void* Context)
  *
  * @return  HD44780_BACKLIGHT_OP_OK   - Indicates that the adapter was successfully initialized.
  *          HD44780_BACKLIGHT_OP_FAIL - Indicates that one or more parameters are invalid.
- **********************************************************************************************************************************/
+ */
 HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, void* Context)
 {
     if ((Backlight == NULL) || (Context == NULL))

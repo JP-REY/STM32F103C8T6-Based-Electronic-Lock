@@ -27,7 +27,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 29, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef INC_PWM_PLATFORM_INTERFACE_H_
@@ -50,7 +50,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the operation status returned by the Platform PWM interface.
  *
  * @details This enumeration represents the execution result of a Platform PWM
@@ -60,7 +60,7 @@ extern "C" {
  * @note    Every Platform PWM function returning this type shall return
  *          PWM_OPERATION_OK when the requested operation completes
  *          successfully.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     PWM_OPERATION_OK = 0U,
@@ -68,7 +68,7 @@ typedef enum
 
 }PWM_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Identifies a PWM output channel.
  *
  * @details This enumeration specifies which hardware Output Compare (OC)
@@ -84,7 +84,7 @@ typedef enum
  *              PWM_CHANNEL_4 -> TIMx_CCR4
  *
  * @note    Not every platform is required to support all four channels.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     PWM_CHANNEL_1 = (uint32_t) 0x00000000U,
@@ -94,7 +94,7 @@ typedef enum
 
 }PWM_Channel_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the active output polarity of a PWM signal.
  *
  * @details The selected polarity determines whether the active portion of the
@@ -104,7 +104,7 @@ typedef enum
  *
  * @note    On STM32 devices this configuration typically maps to the CCxP bit
  *          of the TIMx_CCER register.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     PWM_POLARITY_HIGH = 0U,
@@ -112,7 +112,7 @@ typedef enum
 
 }PWM_Polarity_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the current operation state of a PWM signal.
  *
  * @details The selected state determines whether the PWM channel is enabled
@@ -122,7 +122,7 @@ typedef enum
  *
  * @note    On STM32 devices this configuration typically maps to the CCxP bit
  *          of the TIMx_CCER register.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     PWM_STATE_ENABLED,
@@ -130,7 +130,7 @@ typedef enum
 
 }PWM_State_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Platform PWM instance.
  *
  * @details This structure represents a single logical PWM output channel.
@@ -146,26 +146,25 @@ typedef enum
  * @note    On platforms where multiple channels share the same timer
  *          peripheral (e.g. STM32 TIM2-TIM5), changing the PWM frequency
  *          affects every channel associated with that timer.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /**************************************************************************************************
+    /**
      * @brief   Platform-specific context.
      *
      * @details Opaque pointer reserved for the Platform PWM implementation.
      *          This member typically stores the native peripheral handle
      *          required by the underlying platform.
-     **************************************************************************************************/
+     */
     void* Ctx;
-
-    /* << Private data. Do not read or modify!               >> */
-    /* << PWM output channel                                 >> */ PWM_Channel_t  _channel;
-    /* << PWM output polarity                                >> */ PWM_Polarity_t _polarity;
-    /* << Current compare register value (TIMx_CCRx)         >> */ uint16_t            _duty;
-    /* << Max duty value according to TIMx_ARR register      >> */ uint16_t            _max_duty;
-    /* << Configured PWM frequency                           >> */ uint32_t            _frequency;
-    /* << Indicates if the PWM instance has been initialized >> */ bool                _initialized;
-    /* << Indicates if PWM generation is currently enabled.  >> */ bool                _started;
+                                 /*< Private data. Do not read or modify!                */ 
+    PWM_Channel_t  _channel;     /*< PWM output channel.                                 */ 
+    PWM_Polarity_t _polarity;    /*< PWM output polarity.                                */ 
+    uint16_t       _duty;        /*< Current compare register value (TIMx_CCRx).         */ 
+    uint16_t       _max_duty;    /*< Max duty value according to TIMx_ARR register.      */ 
+    uint32_t       _frequency;   /*< Configured PWM frequency.                           */ 
+    bool           _initialized; /*< Indicates if the PWM instance has been initialized. */ 
+    bool           _started;     /*< Indicates if PWM generation is currently enabled.   */ 
 
 }PWM_Handle_t;
 

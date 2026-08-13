@@ -18,8 +18,8 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Ago 10, 2026
- **********************************************************************************************************************************/
+ * @date    Aug 13, 2026
+ **********************************************************************************************************************************/ 
 
 #ifndef LIBS_COMPONENTS_LED_INC_LED_DRIVER_H_
 #define LIBS_COMPONENTS_LED_INC_LED_DRIVER_H_
@@ -41,11 +41,11 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief    LED operation status.
  *
  * @details  Defines the possible return statuses for LED driver operations.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     LED_OPERATION_OK,
@@ -53,17 +53,17 @@ typedef enum
 
 }LED_OpStatus_t;
 
-/**********************************************************************************************************************************
-* @brief   LED active electrical level.
-*
-* @details Defines the GPIO electrical level that activates the LED.
-*
-*          LED_ACTIVE_LOW indicates that the LED is turned on when the GPIO
-*          output is driven LOW.
-*
-*          LED_ACTIVE_HIGH indicates that the LED is turned on when the GPIO
-*          output is driven HIGH.
- **********************************************************************************************************************************/
+/**
+ * @brief   LED active electrical level.
+ *
+ * @details Defines the GPIO electrical level that activates the LED.
+ *
+ *          LED_ACTIVE_LOW indicates that the LED is turned on when the GPIO
+ *          output is driven LOW.
+ *
+ *          LED_ACTIVE_HIGH indicates that the LED is turned on when the GPIO
+ *          output is driven HIGH.
+ */
 typedef enum
 {
     LED_ACTIVE_LOW  = 0U,
@@ -71,11 +71,11 @@ typedef enum
 
 }LED_ActiveLevel_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief    LED effect type.
  *
  * @details  Defines the effects used by LED instance.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     LED_EFFECT_STATIC,
@@ -85,11 +85,11 @@ typedef enum
 
 }LED_Effect_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief    LED GPIO state.
  *
  * @details  Represents the logical output state of the LED instance.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     LED_STATE_ON,
@@ -97,7 +97,7 @@ typedef enum
 
 }LED_State_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief    LED effect context.
  *
  * @details  Stores the internal effect state required to manage temporary
@@ -113,17 +113,17 @@ typedef enum
  *
  * @warning  This structure is private driver state and should not be accessed
  *           or modified directly by the application.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /* << Private data. Do not read or modify!                                 >>*/
-    /* << LED state to restore after the flash effect complete.                >>*/ LED_State_t  _return_led_state;
-    /* << Currently active LED effect.                                         >>*/ LED_Effect_t _current_effect;
-    /* << LED effect to restore after the triggered effect has been completed. >>*/ LED_Effect_t _return_effect;
+                                    /*< Private data. Do not read or modify!                                 */
+    LED_State_t  _return_led_state; /*< LED state to restore after the flash effect complete.                */
+    LED_Effect_t _current_effect;   /*< Currently active LED effect.                                         */
+    LED_Effect_t _return_effect;    /*< LED effect to restore after the triggered effect has been completed. */
 
 }LED_EffectContext_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief    LED driver handle.
  *
  * @details  Stores the hardware configuration, current LED state, active
@@ -140,21 +140,21 @@ typedef struct
  *
  * @warning  All struct members are internal driver state and should not be
  *           accessed or modified directly by the application.
- **********************************************************************************************************************************/
+*/
 typedef struct
 {
-    /* << Private data. Do not read or modify!                                   >>*/
-    /* << Pointer to LED gpio handle.                                            >>*/ void*               _gpio;
-    /* << Current LED logical state.                                             >>*/ LED_State_t         _current_state;
-    /* << Electrical level which LED is active (on).                             >>*/ LED_ActiveLevel_t   _active_level;
-    /* << LED effect context                                                     >>*/ LED_EffectContext_t _effect_context;
-    /* << Number of complete flash cycles configured for the current effect.     >>*/ uint16_t            _effect_repeat;
-    /* << Number of remaining LED state transitions in the current flash effect. >>*/ uint16_t            _effect_counter;
-    /* << Timestamp of the last LED effect update, in milliseconds.              >>*/ uint32_t            _last_update_time_ms;
-    /* << Blink effect interval, in milliseconds.                                >>*/ uint32_t            _blink_time_interval_ms;
-    /* << Flash effect interval between consecutive state transitions            >>*/ uint32_t            _effect_time_interval_ms;
-    /* << Indicates whether the flash effect is currently active.                >>*/ bool                _effect_is_active;
-    /* << Indicates whether the LED driver has been successfully initialized.    >>*/ bool                _initialized;
+                                                  /*< Private data. Do not read or modify!                                   */
+    void*               _gpio;                    /*< Pointer to LED gpio handle.                                            */
+    LED_State_t         _current_state;           /*< Current LED logical state.                                             */
+    LED_ActiveLevel_t   _active_level;            /*< Electrical level which LED is active (on).                             */
+    LED_EffectContext_t _effect_context;          /*< LED effect context                                                     */
+    uint16_t            _effect_repeat;           /*< Number of complete flash cycles configured for the current effect.     */
+    uint16_t            _effect_counter;          /*< Number of remaining LED state transitions in the current flash effect. */
+    uint32_t            _last_update_time_ms;     /*< Timestamp of the last LED effect update, in milliseconds.              */
+    uint32_t            _blink_time_interval_ms;  /*< Blink effect interval, in milliseconds.                                */
+    uint32_t            _effect_time_interval_ms; /*< Flash effect interval between consecutive state transitions            */
+    bool                _effect_is_active;        /*< Indicates whether the flash effect is currently active.                */
+    bool                _initialized;             /*< Indicates whether the LED driver has been successfully initialized.    */
 
 }LED_Handle_t;
 

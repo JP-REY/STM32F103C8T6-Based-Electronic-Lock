@@ -4,7 +4,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 15, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -31,14 +31,14 @@ static bool PCF8754_IsInit(PCF8574_Handle_t* Device);
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief Check whether the PCF8574 device instance is initialized.
  *
  * @param  Device - Device pointer to the PCF8574 device handle.
  *
  * @return true   - The device instance is initialized.
  * @return false  - The device instance is not initialized.
- **********************************************************************************************************************************/
+ */
 static bool PCF8754_IsInit(PCF8574_Handle_t* Device)
 {
     return Device->_initialized;
@@ -47,7 +47,7 @@ static bool PCF8754_IsInit(PCF8574_Handle_t* Device)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Initializes a PCF8574 device instance.
  *
  * @details Configures the device handle with the specified I2C address and initializes
@@ -61,14 +61,14 @@ static bool PCF8754_IsInit(PCF8574_Handle_t* Device)
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_Init(PCF8574_Handle_t* Device, uint8_t Address, void* I2C_Context)
 {
     if(Device == NULL || I2C_Context == NULL)
     {
         return PCF8574_OPERATION_FAIL;
     }
-    /* If PCF8754 instace has been already initialized return */
+
     if(Device->_initialized)
     {
         return PCF8574_OPERATION_OK;
@@ -87,7 +87,7 @@ PCF8574_OpStatus_t PCF8574_Init(PCF8574_Handle_t* Device, uint8_t Address, void*
     return PCF8574_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Deinitializes a PCF8574 device instance.
  *
  * @details	Resets the device handle and invalidates its internal initialization state,
@@ -95,11 +95,9 @@ PCF8574_OpStatus_t PCF8574_Init(PCF8574_Handle_t* Device, uint8_t Address, void*
  *
  * @param  	Device  - Device pointer to the PCF8574 device handle.
  *
- * @note   	None.
- *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_Deinit(PCF8574_Handle_t* Device)
 {
     if(Device == NULL || !(PCF8754_IsInit(Device)))
@@ -112,7 +110,6 @@ PCF8574_OpStatus_t PCF8574_Deinit(PCF8574_Handle_t* Device)
         return PCF8574_OPERATION_FAIL;
     }
 
-    /* Deinitialize device instance */
     Device->_i2c_context    = NULL;
     Device->_device_address = 0x00;
     Device->_port_shadow    = 0x00;
@@ -121,7 +118,7 @@ PCF8574_OpStatus_t PCF8574_Deinit(PCF8574_Handle_t* Device)
     return PCF8574_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Writes an 8-bit value to the PCF8574 I/O port.
  *
  * @details	Updates all eight PCF8574 I/O pins according to the bit values provided
@@ -135,7 +132,7 @@ PCF8574_OpStatus_t PCF8574_Deinit(PCF8574_Handle_t* Device)
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_WritePort(PCF8574_Handle_t* Device, uint8_t Mask)
 {
     uint8_t data_buffer = Mask;
@@ -157,7 +154,7 @@ PCF8574_OpStatus_t PCF8574_WritePort(PCF8574_Handle_t* Device, uint8_t Mask)
     return PCF8574_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Reads the current state of the PCF8574 I/O port.
  *
  * @details	Retrieves the logic state of all eight PCF8574 I/O pins through the I2C interface.
@@ -166,11 +163,9 @@ PCF8574_OpStatus_t PCF8574_WritePort(PCF8574_Handle_t* Device, uint8_t Mask)
  * @param   Buffer  - Pointer to the output buffer where the data 
  *                    read from the hardware port will be stored.
  *
- * @note   	Relevant implementation note, constraint or side effect.
- *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_ReadPort(PCF8574_Handle_t* Device, uint8_t* Buffer)
 {
     if(Device == NULL || Buffer == NULL || !(PCF8754_IsInit(Device)) )
@@ -188,18 +183,16 @@ PCF8574_OpStatus_t PCF8574_ReadPort(PCF8574_Handle_t* Device, uint8_t* Buffer)
     return PCF8574_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Clears all PCF8574 I/O port bits.
  *
  * @details	Writes logic low to all eight PCF8574 I/O pins.
  *
  * @param  	Device  - Device pointer to the PCF8574 device handle.
  *
- * @note   	None.
- *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_ClearPort(PCF8574_Handle_t* Device)
 {
     if(Device == NULL || !(PCF8754_IsInit(Device)))
@@ -210,7 +203,7 @@ PCF8574_OpStatus_t PCF8574_ClearPort(PCF8574_Handle_t* Device)
     return PCF8574_WritePort(Device, 0x00);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Sets a specific PCF8574 I/O port bit.
  *
  * @details	Sets the selected I/O bit to logic high while preserving the state of the
@@ -223,7 +216,7 @@ PCF8574_OpStatus_t PCF8574_ClearPort(PCF8574_Handle_t* Device)
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_WriteBit(PCF8574_Handle_t* Device, uint8_t Bit)
 {
     uint8_t data_buffer = 0x00;
@@ -238,7 +231,7 @@ PCF8574_OpStatus_t PCF8574_WriteBit(PCF8574_Handle_t* Device, uint8_t Bit)
     return PCF8574_WritePort(Device, data_buffer);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Reads the state of a specific PCF8574 I/O port bit.
  *
  * @details	Reads the PCF8574 port and extracts the logic state corresponding to the
@@ -253,7 +246,7 @@ PCF8574_OpStatus_t PCF8574_WriteBit(PCF8574_Handle_t* Device, uint8_t Bit)
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_ReadBit(PCF8574_Handle_t* Device, uint8_t Bit, uint8_t* Buffer)
 {
     uint8_t data_buffer = 0x00;
@@ -273,7 +266,7 @@ PCF8574_OpStatus_t PCF8574_ReadBit(PCF8574_Handle_t* Device, uint8_t Bit, uint8_
     return PCF8574_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Clears a specific PCF8574 I/O port bit.
  *
  * @details	Sets the selected I/O bit to logic low while preserving the state of the
@@ -286,7 +279,7 @@ PCF8574_OpStatus_t PCF8574_ReadBit(PCF8574_Handle_t* Device, uint8_t Bit, uint8_
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_ClearBit(PCF8574_Handle_t* Device, uint8_t Bit)
 {
     uint8_t data_buffer = 0x00;
@@ -301,7 +294,7 @@ PCF8574_OpStatus_t PCF8574_ClearBit(PCF8574_Handle_t* Device, uint8_t Bit)
     return PCF8574_WritePort(Device, data_buffer);
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief  	Toggles a specific PCF8574 I/O port bit.
  *
  * @details	Toggles the selected I/O bit while preserving the state of the
@@ -314,7 +307,7 @@ PCF8574_OpStatus_t PCF8574_ClearBit(PCF8574_Handle_t* Device, uint8_t Bit)
  *
  * @return  PCF8574_OPERATION_OK   - Indicates that PCF8574 operation has been succeed.
  * @return  PCF8574_OPERATION_FAIL - Indicates that PCF8574 operation has been failed.
- **********************************************************************************************************************************/
+ */
 PCF8574_OpStatus_t PCF8574_ToggleBit(PCF8574_Handle_t* Device, uint8_t Bit)
 {
     uint8_t data_buffer = 0x00;

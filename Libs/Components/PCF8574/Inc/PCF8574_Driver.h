@@ -8,7 +8,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 15, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_PCF8574_INC_PCF8574_DRIVER_H_
@@ -32,7 +32,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   PCF8574 Operation Status type.
  *
  * @details Indicates the status of PCF8574 driver operation.
@@ -40,7 +40,7 @@ extern "C" {
  * @note    PCF8574_OPERATION_OK/PCF8574_OPERATION_FAIL indicates whether
  *          PCF8574 operation was succeed or not.
  *
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     PCF8574_OPERATION_OK,
@@ -48,7 +48,7 @@ typedef enum
 
 }PCF8574_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   PCF8574 device handle.
  *
  * @details This structure represents a PCF8574 device instance and stores the information required by the driver
@@ -59,14 +59,14 @@ typedef enum
  * @warning Members identified as private driver data are intended for internal driver use only and must
  *          not be accessed or modified directly by application.
  *
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-     /* << Private data. Do not read or modify!                   >> */
-     /* << Platform-specific I2C communication context.           >> */ void*   _i2c_context;   
-     /* << PCF8574 I2C device address.                            >> */ uint8_t _device_address;
-     /* << Software shadow of the current port state.             >> */ uint8_t _port_shadow;   
-     /* << Internal initialization state. Do not access directly. >> */ bool    _initialized;   
+                             /*< Private data. Do not read or modify!                   */ 
+    void*   _i2c_context;    /*< Platform-specific I2C communication context.           */ 
+    uint8_t _device_address; /*< PCF8574 I2C device address.                            */ 
+    uint8_t _port_shadow;    /*< Software shadow of the current port state.             */ 
+    bool    _initialized;    /*< Internal initialization state. Do not access directly. */ 
 
 }PCF8574_Handle_t;
 

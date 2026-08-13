@@ -14,7 +14,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Ago 08, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_BUZZER_INC_BUZZER_DRIVER_H_
@@ -38,12 +38,12 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the operation status returned by the buzzer driver.
  *
  * @details This enumeration indicates whether a buzzer operation was
  *          successfully executed or failed.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     BUZZER_OPERATION_OK,
@@ -51,7 +51,7 @@ typedef enum
 
 }Buzzer_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Represents the buzzer device instance.
  *
  * @details This structure stores the runtime context required by the buzzer
@@ -64,12 +64,12 @@ typedef enum
  * @warning The structure members are private data and shall not be accessed
  *          or modified directly by the application. The buzzer driver API
  *          shall be used to manage the device state.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /* << Private data. Do not read or modify >> */
-    /* << Pointer to the PWM platform handle used by the buzzer. >> */ PWM_Handle_t* _context;
-    /* << Indicates wheter buzzer instance has been initialized. >> */ bool          _initialized;
+                                  /*< Private data. Do not read or modify!                   */
+    PWM_Handle_t* _context;       /*< Pointer to the PWM platform handle used by the buzzer. */
+    bool          _initialized;   /*< Indicates wheter buzzer instance has been initialized. */
 
 }Buzzer_Handle_t;
 
@@ -89,3 +89,6 @@ Buzzer_OpStatus_t Buzzer_Off          (Buzzer_Handle_t* Device);
 #endif
 
 #endif /* LIBS_COMPONENTS_BUZZER_INC_BUZZER_DRIVER_H_*/
+
+
+

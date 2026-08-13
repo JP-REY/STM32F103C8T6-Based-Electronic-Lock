@@ -4,7 +4,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Aug 3, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -30,7 +30,7 @@
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Checks whether a Platform GPIO instance has been initialized.
  *
  * @details This helper function validates the initialization state of a GPIO
@@ -41,7 +41,7 @@
  *
  * @return  true   - if the GPIO instance has been initialized.
  * @return  false  - if the instance is NULL or not initialized.
- **********************************************************************************************************************************/
+ */
 static inline bool PGPIO_IsInit(GPIO_Handle_t* Instance)
 {
     return Instance == NULL ? false : Instance->_initialized;
@@ -50,7 +50,7 @@ static inline bool PGPIO_IsInit(GPIO_Handle_t* Instance)
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Creates and configures a Platform GPIO instance.
  *
  * @details Initializes a Platform GPIO handle by associating it with the
@@ -66,9 +66,9 @@ static inline bool PGPIO_IsInit(GPIO_Handle_t* Instance)
  * @note    On STM32 platforms, the pin number is internally converted to the
  *          corresponding GPIO_PIN_x bit mask.
  *
- * @return  GPIO_OPERATION_OK   - if the instance was successfully created.
- * @return  GPIO_OPERATION_FAIL - if any parameter is invalid.
- **********************************************************************************************************************************/
+ * @return  GPIO_OPERATION_OK   - Whether the instance was successfully created.
+ * @return  GPIO_OPERATION_FAIL - Whether any parameter is invalid.
+ */
 GPIO_OpStatus_t PGPIO_Init(GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GPIO_Pin)
 {
     if(Instance == NULL || GPIO_Port == NULL)
@@ -84,7 +84,7 @@ GPIO_OpStatus_t PGPIO_Init(GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GP
     return GPIO_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Drives the GPIO output to the HIGH logic level.
  *
  * @details Writes a logic HIGH level to the associated GPIO output pin through
@@ -94,9 +94,9 @@ GPIO_OpStatus_t PGPIO_Init(GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GP
  *
  * @note    The GPIO instance shall be initialized before calling this function.
  *
- * @return  GPIO_OPERATION_OK   - if the operation completes successfully.
- * @return  GPIO_OPERATION_FAIL - if the supplied instance is NULL.
- **********************************************************************************************************************************/
+ * @return  GPIO_OPERATION_OK   - Whether the operation completes successfully.
+ * @return  GPIO_OPERATION_FAIL - Whether the supplied instance is NULL.
+ */
 GPIO_OpStatus_t PGPIO_Set(GPIO_Handle_t* Instance)
 {
     if(Instance == NULL || !PGPIO_IsInit(Instance))
@@ -115,7 +115,7 @@ GPIO_OpStatus_t PGPIO_Set(GPIO_Handle_t* Instance)
     return GPIO_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Drives the GPIO output to the LOW logic level.
  *
  * @details Writes a logic LOW level to the associated GPIO output pin through
@@ -125,9 +125,9 @@ GPIO_OpStatus_t PGPIO_Set(GPIO_Handle_t* Instance)
  *
  * @note    The GPIO instance shall be initialized before calling this function.
  *
- * @return  GPIO_OPERATION_OK   - if the operation completes successfully.
- * @return  GPIO_OPERATION_FAIL - if the supplied instance is NULL.
- **********************************************************************************************************************************/
+ * @return  GPIO_OPERATION_OK   - Whether the operation completes successfully.
+ * @return  GPIO_OPERATION_FAIL - Whether the supplied instance is NULL.
+ */
 GPIO_OpStatus_t PGPIO_Reset(GPIO_Handle_t* Instance)
 {
     if(Instance == NULL || !PGPIO_IsInit(Instance))
@@ -146,7 +146,7 @@ GPIO_OpStatus_t PGPIO_Reset(GPIO_Handle_t* Instance)
     return GPIO_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Toggles the current GPIO output level.
  *
  * @details Inverts the logical state of the associated GPIO output pin.
@@ -158,9 +158,9 @@ GPIO_OpStatus_t PGPIO_Reset(GPIO_Handle_t* Instance)
  *
  * @note    The GPIO instance shall be initialized before calling this function.
  *
- * @return  GPIO_OPERATION_OK   - if the operation completes successfully.
- * @return  GPIO_OPERATION_FAIL - if the supplied instance is NULL.
- **********************************************************************************************************************************/
+ * @return  GPIO_OPERATION_OK   - Whether the operation completes successfully.
+ * @return  GPIO_OPERATION_FAIL - Whether the supplied instance is NULL.
+ */
 GPIO_OpStatus_t PGPIO_Toggle(GPIO_Handle_t* Instance)
 {
     if(Instance == NULL || !PGPIO_IsInit(Instance))
@@ -177,7 +177,7 @@ GPIO_OpStatus_t PGPIO_Toggle(GPIO_Handle_t* Instance)
     return GPIO_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current logical level of a GPIO pin.
  *
  * @details Reads the current logic level reported by the underlying hardware
@@ -192,7 +192,7 @@ GPIO_OpStatus_t PGPIO_Toggle(GPIO_Handle_t* Instance)
  * @return  GPIO_LEVEL_HIGH    if the pin is at logic HIGH.
  * @return  GPIO_LEVEL_LOW     if the pin is at logic LOW.
  * @return  GPIO_LEVEL_UNKNOWN if the supplied instance is NULL.
- **********************************************************************************************************************************/
+ */
 GPIO_Level_t PGPIO_GetLevel(const GPIO_Handle_t* Instance)
 {
     if(Instance == NULL)
@@ -200,11 +200,11 @@ GPIO_Level_t PGPIO_GetLevel(const GPIO_Handle_t* Instance)
         return GPIO_LEVEL_UNKNOWN;
     }
 
-    GPIO_TypeDef*     port  = (GPIO_TypeDef*) Instance->_gpio_config._gpio_port;
+    GPIO_TypeDef* port  = (GPIO_TypeDef*) Instance->_gpio_config._gpio_port;
 
-    uint16_t          pin   = (uint16_t)Instance->_gpio_config._gpio_pin;
+    uint16_t      pin   = (uint16_t)Instance->_gpio_config._gpio_pin;
 
-    GPIO_Level_t level = (GPIO_Level_t)HAL_GPIO_ReadPin(port, pin);
+    GPIO_Level_t  level = (GPIO_Level_t)HAL_GPIO_ReadPin(port, pin);
 
     return level;
 }

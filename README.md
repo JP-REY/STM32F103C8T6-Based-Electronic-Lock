@@ -1794,8 +1794,9 @@ Example:
 /** @brief Immutable initialization data for one service instance. */
 typedef struct
 {
-    uint32_t entry_timeout_ms; /**< Credential inactivity timeout in milliseconds; must be nonzero. */
-    const Time_Platform *time; /**< Non-owning monotonic time dependency; must remain valid for the instance lifetime. */
+    uint32_t entry_timeout_ms; /*< Credential inactivity timeout in milliseconds; must be nonzero.                    */
+    const Time_Platform *time; /*< Non-owning monotonic time dependency; must remain valid for the instance lifetime. */
+
 } Example_Service_Config;
 ```
 
@@ -1810,18 +1811,20 @@ Every public function shall document:
 ```c
 /**
  * @brief   Concise action and result.
+ * 
  * @details Behavior, side effects and state transition, when needed.
  *
- * @param[in]     object  Valid initialized instance; must not be NULL.
- * @param[in,out] value   Meaning, unit, range, ownership and capacity.
+ * @param[in]     object  - Valid initialized instance; must not be NULL.
+ * @param[in,out] value   - Meaning, unit, range, ownership and capacity.
  *
  * @pre     Preconditions not enforceable by the type system.
+ * 
  * @note    Timing, task-context or reentrancy information.
+ * 
  * @warning Safety restriction or irreversible side effect, when applicable.
  *
- * @return MODULE_STATUS_OK on success.
- * @return MODULE_STATUS_INVALID_ARGUMENT when a mandatory argument is invalid.
- * @return MODULE_STATUS_DEVICE_ERROR when the dependency cannot complete.
+ * @return MODULE_STATUS_OK   - On success.
+ * @return MODULE_STATUS_FAIL - When a mandatory argument is invalid or the dependency cannot complete.
  */
 ```
 
