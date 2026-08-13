@@ -42,7 +42,6 @@ extern "C" {
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
@@ -62,7 +61,7 @@ typedef enum
     GPIO_OPERATION_OK = 0U,
     GPIO_OPERATION_FAIL
 
-}GPIO_OpStatusTypeDef;
+}GPIO_OpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Defines the logical level of a GPIO pin.
@@ -78,13 +77,11 @@ typedef enum
  **********************************************************************************************************************************/
 typedef enum
 {
-    GPIO_LEVEL_HIGH = 1U,
-    GPIO_LEVEL_LOW  = 0U,
-
+    GPIO_LEVEL_HIGH    = 1U,
+    GPIO_LEVEL_LOW     = 0U,
     GPIO_LEVEL_UNKNOWN = 0xFFU
 
-}GPIO_LevelTypeDef;
-
+}GPIO_Level_t;
 
 /**********************************************************************************************************************************
  * @brief   GPIO hardware configuration.
@@ -101,7 +98,7 @@ typedef struct
     void*    _gpio_port;
     uint16_t _gpio_pin;
 
-}GPIO_ConfigTypeDef;
+}GPIO_Config_t;
 
 /**********************************************************************************************************************************
  * @brief   Platform GPIO instance.
@@ -120,10 +117,10 @@ typedef struct
 typedef struct
 {
     /* << Private data. Do not read or modify!                >> */
-    /* << Platform GPIO hardware configuration                >> */ GPIO_ConfigTypeDef _gpio_config;
-    /* << Indicates whether the instance has been initialized >> */ bool               _initialized;
+    /* << Platform GPIO hardware configuration                >> */ GPIO_Config_t _gpio_config;
+    /* << Indicates whether the instance has been initialized >> */ bool          _initialized;
 
-}GPIO_HandleTypeDef;
+}GPIO_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -132,11 +129,11 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-GPIO_OpStatusTypeDef PGPIO_Init     (GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
-GPIO_OpStatusTypeDef PGPIO_Set      (GPIO_HandleTypeDef* Instance);
-GPIO_OpStatusTypeDef PGPIO_Reset    (GPIO_HandleTypeDef* Instance);
-GPIO_OpStatusTypeDef PGPIO_Toggle   (GPIO_HandleTypeDef* Instance);
-GPIO_LevelTypeDef    PGPIO_GetLevel (const GPIO_HandleTypeDef* Instance);
+GPIO_OpStatus_t PGPIO_Init     (GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
+GPIO_OpStatus_t PGPIO_Set      (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Reset    (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Toggle   (GPIO_Handle_t* Instance);
+GPIO_Level_t    PGPIO_GetLevel (const GPIO_Handle_t* Instance);
 
 #ifdef __cplusplus
 }

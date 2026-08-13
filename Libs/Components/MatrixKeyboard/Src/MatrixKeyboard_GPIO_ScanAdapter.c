@@ -26,8 +26,8 @@
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static MK_ScanOpStatusTypeDef SelectColumn (void* Context, uint8_t Column);
-static MK_ScanOpStatusTypeDef ReadRows     (void* Context, uint32_t* RowsMask);
+static MK_ScanOpStatus_t SelectColumn (void* Context, uint8_t Column);
+static MK_ScanOpStatus_t ReadRows     (void* Context, uint32_t* RowsMask);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -51,14 +51,14 @@ static MK_ScanOpStatusTypeDef ReadRows     (void* Context, uint32_t* RowsMask);
  * @return  MK_SCAN_OP_FAIL - Failed to select the requested column or invalid
  *                            parameters were provided.
  **********************************************************************************************************************************/
-static MK_ScanOpStatusTypeDef SelectColumn(void* Context, uint8_t Column)
+static MK_ScanOpStatus_t SelectColumn(void* Context, uint8_t Column)
 {
     if(Context == NULL)
     {
         return MK_SCAN_OP_FAIL;
     }
 
-    MK_GPIO_ScanAdapterContextTypeDef* ctx = Context;
+    MK_GPIO_ScanAdapter_t* ctx = Context;
 
     if(Column >= ctx->ColumnCount || ctx->ActiveLevel > 1)
     {
@@ -132,18 +132,18 @@ static MK_ScanOpStatusTypeDef SelectColumn(void* Context, uint8_t Column)
  * @return  MK_SCAN_OP_OK   Row states successfully read.
  * @return  MK_SCAN_OP_FAIL Invalid parameters or row sampling failed.
  **********************************************************************************************************************************/
-static MK_ScanOpStatusTypeDef ReadRows(void* Context, uint32_t* RowsMask)
+static MK_ScanOpStatus_t ReadRows(void* Context, uint32_t* RowsMask)
 {
     if(Context == NULL || RowsMask == NULL)
     {
         return MK_SCAN_OP_FAIL;
     }
 
-    MK_GPIO_ScanAdapterContextTypeDef* ctx = Context;
+    MK_GPIO_ScanAdapter_t* ctx = Context;
 
     for(uint8_t row = 0U; row < ctx->RowCount; row++)
     {
-        GPIO_LevelTypeDef level = PGPIO_GetLevel(&ctx->Rows[row]);
+        GPIO_Level_t level = PGPIO_GetLevel(&ctx->Rows[row]);
 
         bool pressed = (level == ctx->ActiveLevel);
 
@@ -185,7 +185,7 @@ static MK_ScanOpStatusTypeDef ReadRows(void* Context, uint32_t* RowsMask)
  * @return  MK_SCAN_OP_OK   - Adapter successfully initialized.
  * @return  MK_SCAN_OP_FAIL - Initialization failed due to invalid parameters.
  **********************************************************************************************************************************/
-MK_ScanOpStatusTypeDef MK_GPIO_ScanAdapterInit(MK_ScanInterfaceTypeDef *Scan, MK_GPIO_ScanAdapterContextTypeDef *Context)
+MK_ScanOpStatus_t MK_GPIO_ScanAdapterInit(MK_ScanInterface_t *Scan, MK_GPIO_ScanAdapter_t *Context)
 {
     if (Scan == NULL || Context == NULL)
     {

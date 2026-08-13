@@ -45,7 +45,7 @@
  * @return  true  - if the handle is valid and initialized.
  * @return  false - if the handle is NULL or has not been initialized.
  **********************************************************************************************************************************/
-static inline bool Buzzer_IsInit(Buzzer_HandleTypeDef* Device)
+static inline bool Buzzer_IsInit(Buzzer_Handle_t* Device)
 {
     return Device == NULL ? false : Device->_initialized;
 }
@@ -58,7 +58,7 @@ static inline bool Buzzer_IsInit(Buzzer_HandleTypeDef* Device)
  *
  * @details The Buzzer Driver does not create or allocate a PWM instance.
  *          Instead, it receives a pointer to an externally created
- *          PWM_HandleTypeDef through the Context parameter.
+ *          PWM_Handle_t through the Context parameter.
  *
  *          The supplied PWM instance must already contain a valid platform
  *          context associated with the target timer and PWM channel.
@@ -74,7 +74,7 @@ static inline bool Buzzer_IsInit(Buzzer_HandleTypeDef* Device)
  *          and validity of the PWM handle while the buzzer is in use.
  *
  * @param   Device  - Pointer to the buzzer handle instance.
- * @param   Context - Pointer to a previously created PWM_HandleTypeDef.
+ * @param   Context - Pointer to a previously created PWM_Handle_t.
  *
  * @warning The PWM handle must have a valid platform context associated with
  *          a timer and PWM channel before calling this function.
@@ -85,7 +85,7 @@ static inline bool Buzzer_IsInit(Buzzer_HandleTypeDef* Device)
  * @return  BUZZER_OPERATION_OK   - if initialization succeeds.
  * @return  BUZZER_OPERATION_FAIL - if any parameter or PWM configuration
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_Init(Buzzer_HandleTypeDef* Device, PWM_HandleTypeDef* Context)
+Buzzer_OpStatus_t Buzzer_Init(Buzzer_Handle_t* Device, PWM_Handle_t* Context)
 {
     if(Device == NULL || Context == NULL)
     {
@@ -132,7 +132,7 @@ Buzzer_OpStatusTypeDef Buzzer_Init(Buzzer_HandleTypeDef* Device, PWM_HandleTypeD
  * @return  BUZZER_OPERATION_FAIL - if the handle is invalid, the buzzer is not
  *                                  initialized, or the underlying PWM operation fails.
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_SetFrequency(Buzzer_HandleTypeDef* Device, uint32_t Frequency)
+Buzzer_OpStatus_t Buzzer_SetFrequency(Buzzer_Handle_t* Device, uint32_t Frequency)
 {
     if(Device == NULL || !Buzzer_IsInit(Device))
     {
@@ -158,7 +158,7 @@ Buzzer_OpStatusTypeDef Buzzer_SetFrequency(Buzzer_HandleTypeDef* Device, uint32_
  * @return  BUZZER_OPERATION_FAIL - if the handle is invalid, the buzzer is not
  *                                  initialized, or the underlying PWM operation fails.
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_On(Buzzer_HandleTypeDef* Device)
+Buzzer_OpStatus_t Buzzer_On(Buzzer_Handle_t* Device)
 {
     if(Device == NULL || !Buzzer_IsInit(Device))
     {
@@ -185,7 +185,7 @@ Buzzer_OpStatusTypeDef Buzzer_On(Buzzer_HandleTypeDef* Device)
  * @return  BUZZER_OPERATION_FAIL - if the handle is invalid, the buzzer is not
  *                                  initialized, or the underlying PWM operation fails.
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_Off(Buzzer_HandleTypeDef* Device)
+Buzzer_OpStatus_t Buzzer_Off(Buzzer_Handle_t* Device)
 {
     if(Device == NULL || !Buzzer_IsInit(Device))
     {

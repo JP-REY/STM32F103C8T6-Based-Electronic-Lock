@@ -256,7 +256,7 @@ The driver does not use blocking delays to execute LED effects.
 
 ### 7.1 LED Operation Status
 
-`LED_OpStatusTypeDef` defines the result of a public LED driver operation.
+`LED_OpStatus_t` defines the result of a public LED driver operation.
 
 ```c
 typedef enum
@@ -264,7 +264,7 @@ typedef enum
     LED_OPERATION_OK,
     LED_OPERATION_FAIL
 
-} LED_OpStatusTypeDef;
+} LED_OpStatus_t;
 ```
 
 | Status               | Description                       |
@@ -274,7 +274,7 @@ typedef enum
 
 ### 7.2 LED Active Level
 
-`LED_ActiveLevelTypeDef` defines the electrical GPIO level required to turn the LED on.
+`LED_ActiveLevel_t` defines the electrical GPIO level required to turn the LED on.
 
 ```c
 typedef enum
@@ -282,7 +282,7 @@ typedef enum
     LED_ACTIVE_LOW  = 0U,
     LED_ACTIVE_HIGH = 1U
 
-} LED_ActiveLevelTypeDef;
+} LED_ActiveLevel_t;
 ```
 
 | Configuration     | LED ON    | LED OFF   |
@@ -294,7 +294,7 @@ This abstraction allows the application to use the same logical API regardless o
 
 ### 7.3 LED Effect Type
 
-`LED_EffectTypeDef` defines the effects supported by the driver.
+`LED_Effect_t` defines the effects supported by the driver.
 
 ```c
 typedef enum
@@ -304,7 +304,7 @@ typedef enum
     LED_EFFECT_PULSE,
     LED_EFFECT_FLASH
 
-} LED_EffectTypeDef;
+} LED_Effect_t;
 ```
 
 | Effect              | Description                                                                                 |
@@ -316,7 +316,7 @@ typedef enum
 
 ### 7.4 LED State
 
-`LED_StateTypeDef` represents the logical state of the LED.
+`LED_State_t` represents the logical state of the LED.
 
 ```c
 typedef enum
@@ -324,7 +324,7 @@ typedef enum
     LED_STATE_ON,
     LED_STATE_OFF
 
-} LED_StateTypeDef;
+} LED_State_t;
 ```
 
 The logical state is independent of the physical GPIO level.
@@ -338,16 +338,16 @@ Logical OFF -> GPIO HIGH
 
 ### 7.5 LED Effect Context
 
-`LED_EffectContextTypeDef` stores internal information required to manage active and temporary effects.
+`LED_EffectContext_t` stores internal information required to manage active and temporary effects.
 
 ```c
 typedef struct
 {
-    LED_StateTypeDef  _return_led_state;
-    LED_EffectTypeDef _current_effect;
-    LED_EffectTypeDef _return_effect;
+    LED_State_t  _return_led_state;
+    LED_Effect_t _current_effect;
+    LED_Effect_t _return_effect;
 
-} LED_EffectContextTypeDef;
+} LED_EffectContext_t;
 ```
 
 | Member              | Description                                           |
@@ -360,24 +360,24 @@ This structure is private driver state and shall not be accessed or modified dir
 
 ### 7.6 LED Driver Handle
 
-`LED_HandleTypeDef` represents one LED driver instance and contains its configuration and runtime state.
+`LED_Handle_t` represents one LED driver instance and contains its configuration and runtime state.
 
 ```c
 typedef struct
 {
-    GPIO_HandleTypeDef      *_gpio;
-    LED_StateTypeDef         _current_state;
-    LED_ActiveLevelTypeDef   _active_level;
-    LED_EffectContextTypeDef _effect_context;
-    uint16_t                 _effect_repeat;
-    uint16_t                 _effect_counter;
-    uint32_t                 _last_update_time_ms;
-    uint32_t                 _blink_time_interval_ms;
-    uint32_t                 _effect_time_interval_ms;
-    bool                     _effect_is_active;
-    bool                     _initialized;
+    GPIO_Handle_t      *_gpio;
+    LED_State_t         _current_state;
+    LED_ActiveLevel_t   _active_level;
+    LED_EffectContext_t _effect_context;
+    uint16_t            _effect_repeat;
+    uint16_t            _effect_counter;
+    uint32_t            _last_update_time_ms;
+    uint32_t            _blink_time_interval_ms;
+    uint32_t            _effect_time_interval_ms;
+    bool                _effect_is_active;
+    bool                _initialized;
 
-} LED_HandleTypeDef;
+} LED_Handle_t;
 ```
 
 | Member                     | Description                                                      |
@@ -394,7 +394,7 @@ typedef struct
 | `_effect_is_active`        | Indicates whether a flash effect is currently active.            |
 | `_initialized`             | Indicates whether the LED driver instance has been initialized.  |
 
-All members of `LED_HandleTypeDef` are internal driver state and shall not be modified directly by the application.
+All members of `LED_Handle_t` are internal driver state and shall not be modified directly by the application.
 
 ---
 
@@ -406,10 +406,10 @@ All members of `LED_HandleTypeDef` are internal driver state and shall not be mo
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_Init(
-    LED_HandleTypeDef* Device,
-    GPIO_HandleTypeDef* Gpio,
-    LED_ActiveLevelTypeDef ActiveLevel
+LED_OpStatus_t LED_Init(
+    LED_Handle_t* Device,
+    GPIO_Handle_t* Gpio,
+    LED_ActiveLevel_t ActiveLevel
 );
 ```
 #### Parameters
@@ -436,8 +436,8 @@ LED_OpStatusTypeDef LED_Init(
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_On(
-    LED_HandleTypeDef* Device
+LED_OpStatus_t LED_On(
+    LED_Handle_t* Device
 );
 ```
 #### Parameters
@@ -474,8 +474,8 @@ LED_ON -> GPIO LOW
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_Off(
-    LED_HandleTypeDef* Device
+LED_OpStatus_t LED_Off(
+    LED_Handle_t* Device
 );
 ```
 #### Parameters
@@ -500,8 +500,8 @@ The physical GPIO level is automatically selected according to the configured ac
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_BlinkOn(
-    LED_HandleTypeDef* Device,
+LED_OpStatus_t LED_BlinkOn(
+    LED_Handle_t* Device,
     uint32_t BlinkTimeMs
 );
 ```
@@ -528,8 +528,8 @@ The function configures the blink effect but does not block the caller.
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_BlinkOff(
-    LED_HandleTypeDef* Device
+LED_OpStatus_t LED_BlinkOff(
+    LED_Handle_t* Device
 );
 ```
 #### Return
@@ -549,9 +549,9 @@ The function changes the current effect to `LED_EFFECT_STATIC`.
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_TriggerEffect(
-    LED_HandleTypeDef* Device,
-    LED_EffectTypeDef Effect,
+LED_OpStatus_t LED_TriggerEffect(
+    LED_Handle_t* Device,
+    LED_Effect_t Effect,
     uint32_t Interval,
     uint16_t Repeats
 );
@@ -593,8 +593,8 @@ These values are used to restore the previous LED behavior when the temporary ef
 
 #### Function Signature
 ```c
-LED_OpStatusTypeDef LED_Update(
-    LED_HandleTypeDef* Device
+LED_OpStatus_t LED_Update(
+    LED_Handle_t* Device
 );
 ```
 #### Return
@@ -829,7 +829,7 @@ This mechanism allows a temporary effect to execute without permanently replacin
 A typical application can initialize an LED and execute a non-blocking blink effect as follows:
 
 ```c
-LED_HandleTypeDef StatusLed;
+LED_Handle_t StatusLed;
 
 LED_Init(
     &StatusLed,
@@ -866,7 +866,7 @@ This decision isolates the LED logic from the underlying microcontroller impleme
 
 The driver exposes logical `LED_STATE_ON` and `LED_STATE_OFF` states instead of exposing physical GPIO levels.
 
-The configured `LED_ActiveLevelTypeDef` determines how these logical states are translated into electrical GPIO levels.
+The configured `LED_ActiveLevel_t` determines how these logical states are translated into electrical GPIO levels.
 
 This allows active-high and active-low LEDs to use the same application-level API.
 
@@ -897,7 +897,7 @@ This keeps the driver independent of the execution environment and allows it to 
 
 ### 11.5 Effect State Encapsulation
 
-Effect state is maintained internally through `LED_EffectContextTypeDef` and the private members of `LED_HandleTypeDef`.
+Effect state is maintained internally through `LED_EffectContext_t` and the private members of `LED_Handle_t`.
 
 The application does not manipulate effect counters, timestamps or restoration state directly.
 
@@ -921,7 +921,7 @@ The timing source can therefore be replaced independently from the LED driver im
 
 ### 11.8 Explicit Operation Status
 
-Public API functions return `LED_OpStatusTypeDef`.
+Public API functions return `LED_OpStatus_t`.
 
 This allows the application to detect failures originating from parameter validation, initialization state or the underlying GPIO platform interface.
 
@@ -936,7 +936,7 @@ Detailed hardware-specific errors remain encapsulated within the platform layer.
 
 ### 11.9 Driver-Owned Runtime State
 
-The `LED_HandleTypeDef` contains the runtime state associated with an LED instance.
+The `LED_Handle_t` contains the runtime state associated with an LED instance.
 
 This includes:
 
@@ -970,7 +970,7 @@ This separation prevents effect configuration functions from becoming blocking o
 ---
 ## 12. Error Handling
 
-The LED Driver uses `LED_OpStatusTypeDef` for operation status reporting.
+The LED Driver uses `LED_OpStatus_t` for operation status reporting.
 
 ### 12.1 General Failure Conditions
 
@@ -1083,7 +1083,7 @@ This allows the driver to be used in cooperative main loops and periodic RTOS ta
 
 ### 13.5 Effect Scheduling
 
-Only one effect is represented as the current active effect in each `LED_HandleTypeDef`.
+Only one effect is represented as the current active effect in each `LED_Handle_t`.
 
 Triggering a new finite effect replaces the currently active effect context and stores the previous behavior for restoration.
 
@@ -1106,20 +1106,20 @@ LED_Off(&StatusLed);
 
 ### 13.7 Handle Ownership
 
-The `LED_HandleTypeDef` must remain valid for the entire lifetime of the LED driver instance.
+The `LED_Handle_t` must remain valid for the entire lifetime of the LED driver instance.
 
 The application shall not modify the internal handle members directly.
 
 ### 13.8 Single-Instance State
 
-The driver maintains runtime state inside `LED_HandleTypeDef`, allowing the logical state and effect context to be associated with a specific LED instance.
+The driver maintains runtime state inside `LED_Handle_t`, allowing the logical state and effect context to be associated with a specific LED instance.
 
 Each physical LED should therefore have its own handle:
 
 ```text
-LED_HandleTypeDef StatusLed;
-LED_HandleTypeDef ErrorLed;
-LED_HandleTypeDef ActivityLed;
+LED_Handle_t StatusLed;
+LED_Handle_t ErrorLed;
+LED_Handle_t ActivityLed;
 ```
 
 ---

@@ -48,13 +48,13 @@ extern "C" {
  **********************************************************************************************************************************/
 typedef struct
 {
-    /* << Array containing the GPIO descriptors associated with the matrix columns. >> */ GPIO_HandleTypeDef *Columns;
-    /* << Number of GPIO descriptors available in the Columns array.                >> */ uint8_t             ColumnCount;
-    /* << Array containing the GPIO descriptors associated with the matrix rows.    >> */ GPIO_HandleTypeDef *Rows;
-    /* << Number of GPIO descriptors available in the Rows array.                   >> */ uint8_t             RowCount;
-    /* << Logic level that drives gpio into its active state                        >> */ GPIO_LevelTypeDef   ActiveLevel;
+    /* << Array containing the GPIO descriptors associated with the matrix columns. >> */ GPIO_Handle_t *Columns;
+    /* << Number of GPIO descriptors available in the Columns array.                >> */ uint8_t        ColumnCount;
+    /* << Array containing the GPIO descriptors associated with the matrix rows.    >> */ GPIO_Handle_t *Rows;
+    /* << Number of GPIO descriptors available in the Rows array.                   >> */ uint8_t        RowCount;
+    /* << Logic level that drives gpio into its active state                        >> */ GPIO_Level_t   ActiveLevel;
 
-} MK_GPIO_ScanAdapterContextTypeDef;
+} MK_GPIO_ScanAdapter_t;
 
 /**********************************************************************************************************************************
  Data
@@ -62,7 +62,7 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-MK_ScanOpStatusTypeDef MK_GPIO_ScanAdapterInit(MK_ScanInterfaceTypeDef* Scan, MK_GPIO_ScanAdapterContextTypeDef* Context);
+MK_ScanOpStatus_t MK_GPIO_ScanAdapterInit(MK_ScanInterface_t* Scan, MK_GPIO_ScanAdapter_t* Context);
 
 #ifdef __cplusplus
 }

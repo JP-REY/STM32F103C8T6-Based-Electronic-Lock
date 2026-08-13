@@ -11,6 +11,7 @@
  **********************************************************************************************************************************/
 #include "Time_Platform_Interface.h"
 #include "tim.h"
+#include "stm32f4xx.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -51,9 +52,7 @@ void Platform_DelayMs(uint32_t Delay)
     uint32_t wait_time  = Delay;
     uint32_t tick_start = HAL_GetTick();
 
-    while((HAL_GetTick() - tick_start) < wait_time)
-    {
-    }
+    while((HAL_GetTick() - tick_start) < wait_time){}
 }
 
 /**********************************************************************************************************************************
@@ -90,10 +89,7 @@ void Platform_DelayUs(uint32_t Delay)
     uint32_t wait_time  = Delay;
     uint32_t tick_start = Platform_GetMicros();
 
-    while(Platform_GetMicros() - tick_start < wait_time)
-    {
-      /* Do nothing */
-    }
+    while(Platform_GetMicros() - tick_start < wait_time){}
 }
 
 /**********************************************************************************************************************************

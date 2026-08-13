@@ -54,8 +54,8 @@
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static HD44780_BusOpStatusTypeDef TransferNibble (void* Context, uint8_t Nibble, HD44780_RegisterSelectTypeDef Rs);
-static HD44780_BusOpStatusTypeDef PulseEnable    (void* Context);
+static HD44780_BusOpStatus_t TransferNibble (void* Context, uint8_t Nibble, HD44780_RegisterSelect_t Rs);
+static HD44780_BusOpStatus_t PulseEnable    (void* Context);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -78,9 +78,9 @@ static HD44780_BusOpStatusTypeDef PulseEnable    (void* Context);
  * @return  HD44780_BUS_OPERATION_OK   - Indicates if the transfer completes successfully.
  * @return  HD44780_BUS_OPERATION_FAIL - Indicates if the transfer failed.
  **********************************************************************************************************************************/
-static HD44780_BusOpStatusTypeDef TransferNibble(void* Context, uint8_t Nibble, HD44780_RegisterSelectTypeDef Rs)
+static HD44780_BusOpStatus_t TransferNibble(void* Context, uint8_t Nibble, HD44780_RegisterSelect_t Rs)
 {
-    PCF8574_HandleTypeDef* ctx = Context;
+    PCF8574_Handle_t* ctx = Context;
     uint8_t write_port = 0x00;
 
     if(ctx == NULL)
@@ -120,9 +120,9 @@ static HD44780_BusOpStatusTypeDef TransferNibble(void* Context, uint8_t Nibble, 
  * @return  HD44780_BUS_OPERATION_OK   - Indicates if the pulse is successfully generated;
  * @return  HD44780_BUS_OPERATION_FAIL - Indicates if the pulse generation has failed;
  **********************************************************************************************************************************/
-static HD44780_BusOpStatusTypeDef PulseEnable(void* Context)
+static HD44780_BusOpStatus_t PulseEnable(void* Context)
 {
-    PCF8574_HandleTypeDef* ctx = Context;
+    PCF8574_Handle_t* ctx = Context;
 
     if(ctx == NULL)
     {
@@ -159,16 +159,18 @@ static HD44780_BusOpStatusTypeDef PulseEnable(void* Context)
  * @note    The caller is responsible for ensuring that the PCF8574 driver has
  *          been properly initialized before this function is called.
  **********************************************************************************************************************************/
-void HD44780_PCF8574_BusAdapterInit(HD44780_BusInterfaceTypeDef* Bus, PCF8574_HandleTypeDef* PCF8574_Instance)
+HD44780_BusOpStatus_t HD44780_PCF8574_BusAdapterInit(HD44780_BusInterface_t* Bus, PCF8574_Handle_t* PCF8574_Instance)
 {
     if ((Bus == NULL) || (PCF8574_Instance == NULL))
     {
-        return;
+        return HD44780_BUS_OPERATION_FAIL;
     }
 
     Bus->Context = PCF8574_Instance;
 
     Bus->TransferNibble = TransferNibble;
+
+    return HD44780_BUS_OPERATION_OK;
 }
 
 

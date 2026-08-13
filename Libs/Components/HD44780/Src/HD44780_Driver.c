@@ -134,7 +134,7 @@ typedef enum
     */
     HD44780_CMD_SETDDRAMADDR    = 0x80U
 
-}HD44780_CmdTypeDef;
+}HD44780_Cmd_t;
 
 /**********************************************************************************************************************************
  * @brief   Bit positions for the HD44780 Function Set instruction.
@@ -151,7 +151,7 @@ typedef enum
     HD44780_N_LINE_NUMBER     = 0x03U,
     HD44780_F_CHAR_FONT       = 0x02U,
 
-}HD44780_FunctionSetBitsTypeDef;
+}HD44780_FunctionSetBits_t;
 
 /**********************************************************************************************************************************
  * @brief   Bit positions for the HD44780 Display Control instruction.
@@ -167,7 +167,7 @@ typedef enum
     HD44780_C_CURSOR_ON_OFF   = 0x01U,
     HD44780_B_BLINKING_ON_OFF = 0x00U,
 
-}HD44780_DisplayControlBitsTypeDef;
+}HD44780_DisplayControlBits_t;
 
 /**********************************************************************************************************************************
  * @brief   Bit positions for the HD44780 Cursor or Display Shift instruction.
@@ -182,7 +182,7 @@ typedef enum
     HD44780_SC_DISPLAY_SHIFT = 0x03U,
     HD44780_RL_SHIFT_RIGHT   = 0x02U,
 
-}HD44780_CursorShiftBitsTypeDef;
+}HD44780_CursorShiftBits_t;
 
 /**********************************************************************************************************************************
  * @brief   Bit positions for the HD44780 Entry Mode Set instruction.
@@ -198,7 +198,7 @@ typedef enum
     HD44780_ID_INC_DEC_CURSOR = 0x01U,
     HD44780_S_ENABLE_SHIFT    = 0x00U,
 
-}HD44780_EntryModeSetBitsTypeDef;
+}HD44780_EntryModeSetBits_t;
 
 /**********************************************************************************************************************************
  Private Constants
@@ -228,8 +228,8 @@ static volatile uint8_t g_custom_char7_loaded = 0x00;
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static HD44780_OpStatusTypeDef HD44780_SendCommand (HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command);
-static HD44780_OpStatusTypeDef HD44780_SendData    (HD44780_HandleTypeDef* Device, uint8_t Data);
+static HD44780_OpStatus_t HD44780_SendCommand (HD44780_Handle_t* Device, HD44780_Cmd_t Command);
+static HD44780_OpStatus_t HD44780_SendData    (HD44780_Handle_t* Device, uint8_t Data);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -304,7 +304,7 @@ static inline void HD44780_WaitInstructionDefault(void)
  *
  * @return  None.
  **********************************************************************************************************************************/
-static void HD44780_WaitInstruction(HD44780_CmdTypeDef Command)
+static void HD44780_WaitInstruction(HD44780_Cmd_t Command)
 {
     switch(Command)
     {
@@ -339,7 +339,7 @@ static void HD44780_WaitInstruction(HD44780_CmdTypeDef Command)
  * @return  true  - The device handle is valid and the driver is initialized.
  *          false - The device handle is NULL or the driver is not initialized.
  **********************************************************************************************************************************/
-static bool inline HD44780_IsInit(HD44780_HandleTypeDef* Device)
+static bool inline HD44780_IsInit(HD44780_Handle_t* Device)
 {
     return Device == NULL ? false : Device->_initialized;
 }
@@ -360,7 +360,7 @@ static bool inline HD44780_IsInit(HD44780_HandleTypeDef* Device)
  *
  * @return  Maximum valid CGRAM character position.
  **********************************************************************************************************************************/
-static inline uint8_t HD44780_GetCGRAMLimit(HD44780_HandleTypeDef* Device)
+static inline uint8_t HD44780_GetCGRAMLimit(HD44780_Handle_t* Device)
 {
     return Device->_font_dot_size == HD44780_5X8_FONT ? 0x07 : 0x03;
 }
@@ -416,7 +416,7 @@ static inline void HD44780_SetCustomCharFlag(uint8_t CharPosition)
  *
  * @return  Bitmask containing the programmed custom character positions.
  **********************************************************************************************************************************/
-static inline uint8_t HD44780_GetCustomChars(HD44780_HandleTypeDef* Device)
+static inline uint8_t HD44780_GetCustomChars(HD44780_Handle_t* Device)
 {
     if(Device->_font_dot_size == HD44780_5X8_FONT)
     {
@@ -447,7 +447,7 @@ static inline uint8_t HD44780_GetCustomChars(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device, HD44780_CmdTypeDef Command)
+static HD44780_OpStatus_t HD44780_SendCommand(HD44780_Handle_t* Device, HD44780_Cmd_t Command)
 {
     uint8_t high_nibble = 0x00;
     uint8_t low_nibble  = 0x00;
@@ -485,7 +485,7 @@ static HD44780_OpStatusTypeDef HD44780_SendCommand(HD44780_HandleTypeDef* Device
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, uint8_t Data)
+static HD44780_OpStatus_t HD44780_SendData(HD44780_Handle_t* Device, uint8_t Data)
 {
     uint8_t high_nibble = 0x00;
     uint8_t low_nibble  = 0x00;
@@ -535,7 +535,7 @@ static HD44780_OpStatusTypeDef HD44780_SendData(HD44780_HandleTypeDef* Device, u
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_Init(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -666,7 +666,7 @@ HD44780_OpStatusTypeDef HD44780_Init(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_Clear(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_Clear(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -703,7 +703,7 @@ HD44780_OpStatusTypeDef HD44780_Clear(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_Home(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_Home(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -738,7 +738,7 @@ HD44780_OpStatusTypeDef HD44780_Home(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_DisplayOn(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_DisplayOn(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -783,7 +783,7 @@ HD44780_OpStatusTypeDef HD44780_DisplayOn(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_DisplayOff(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_DisplayOff(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -828,7 +828,7 @@ HD44780_OpStatusTypeDef HD44780_DisplayOff(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_CursorOn(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_CursorOn(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -871,7 +871,7 @@ HD44780_OpStatusTypeDef HD44780_CursorOn(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_CursorOff(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_CursorOff(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -913,7 +913,7 @@ HD44780_OpStatusTypeDef HD44780_CursorOff(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_BlinkOn(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_BlinkOn(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -956,7 +956,7 @@ HD44780_OpStatusTypeDef HD44780_BlinkOn(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_BlinkOff(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_BlinkOff(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -1000,7 +1000,7 @@ HD44780_OpStatusTypeDef HD44780_BlinkOff(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_IncrementCursor(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_IncrementCursor(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -1041,7 +1041,7 @@ HD44780_OpStatusTypeDef HD44780_IncrementCursor(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_DecrementCursor(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_DecrementCursor(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -1082,7 +1082,7 @@ HD44780_OpStatusTypeDef HD44780_DecrementCursor(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_EnableShift(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_EnableShift(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -1122,7 +1122,7 @@ HD44780_OpStatusTypeDef HD44780_EnableShift(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_DisableShift(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_DisableShift(HD44780_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
@@ -1165,7 +1165,7 @@ HD44780_OpStatusTypeDef HD44780_DisableShift(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t Row, uint8_t Col)
+HD44780_OpStatus_t HD44780_SetCursor(HD44780_Handle_t* Device, uint8_t Row, uint8_t Col)
 {
     uint8_t line0_base_addr = 0x00;
     uint8_t line1_base_addr = 0x40;
@@ -1222,7 +1222,7 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(HD44780_HandleTypeDef* Device, uint8_t
  * @return  HD44780_OPERATION_OK   - Indicates that the character was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the character transmission has failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_WriteChar(HD44780_HandleTypeDef* Device, uint8_t Char)
+HD44780_OpStatus_t HD44780_WriteChar(HD44780_Handle_t* Device, uint8_t Char)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
@@ -1258,7 +1258,7 @@ HD44780_OpStatusTypeDef HD44780_WriteChar(HD44780_HandleTypeDef* Device, uint8_t
  * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_WriteString(HD44780_HandleTypeDef* Device, const char* String)
+HD44780_OpStatus_t HD44780_WriteString(HD44780_Handle_t* Device, const char* String)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)) || String == NULL)
     {
@@ -1298,7 +1298,7 @@ HD44780_OpStatusTypeDef HD44780_WriteString(HD44780_HandleTypeDef* Device, const
  * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
  *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_PrintLine(HD44780_HandleTypeDef* Device, uint8_t Row, const char* Text)
+HD44780_OpStatus_t HD44780_PrintLine(HD44780_Handle_t* Device, uint8_t Row, const char* Text)
 {
     uint8_t col = 0;
 
@@ -1343,7 +1343,7 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(HD44780_HandleTypeDef* Device, uint8_t
  * @return  HD44780_OPERATION_OK   - Indicates that the row was successfully cleared.
  *          HD44780_OPERATION_FAIL - Indicates that the clear operation has failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t Row)
+HD44780_OpStatus_t HD44780_ClearLine(HD44780_Handle_t* Device, uint8_t Row)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
@@ -1410,7 +1410,7 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(HD44780_HandleTypeDef* Device, uint8_t
  *                                   initialized, the bitmap pointer is NULL, or a communication
  *                                   error occurs.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_CreateChar(HD44780_HandleTypeDef* Device, uint8_t Position, const uint8_t* PatternBitMap)
+HD44780_OpStatus_t HD44780_CreateChar(HD44780_Handle_t* Device, uint8_t Position, const uint8_t* PatternBitMap)
 {
     uint8_t pattern_size = 0x00;
     uint8_t address_counter = 0x00;
@@ -1473,7 +1473,7 @@ HD44780_OpStatusTypeDef HD44780_CreateChar(HD44780_HandleTypeDef* Device, uint8_
  *                                   initialized, the specified character does not exist in CGRAM, or a
  *                                   communication error occurs.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_WriteCustomChar(HD44780_HandleTypeDef* Device, uint8_t CharPosition)
+HD44780_OpStatus_t HD44780_WriteCustomChar(HD44780_Handle_t* Device, uint8_t CharPosition)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)) || CharPosition > HD44780_GetCGRAMLimit(Device))
     {
@@ -1515,7 +1515,7 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(HD44780_HandleTypeDef* Device, u
  * @param   Device - Pointer to the HD44780 device instance.
  *
  * @note    The backlight implementation is defined externally through the
- *          HD44780_BacklightInterfaceTypeDef interface.
+ *          HD44780_BacklightInterface_t interface.
  *
  * @note    The resulting backlight behavior depends on the capabilities and
  *          internal state management of the selected adapter implementation.
@@ -1524,7 +1524,7 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(HD44780_HandleTypeDef* Device, u
  *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the
  *                                   backlight enable operation failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_BacklightOn(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_BacklightOn(HD44780_Handle_t* Device)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
@@ -1565,7 +1565,7 @@ HD44780_OpStatusTypeDef HD44780_BacklightOn(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the backlight was successfully disabled.
  *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_BacklightOff(HD44780_HandleTypeDef* Device)
+HD44780_OpStatus_t HD44780_BacklightOff(HD44780_Handle_t* Device)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {
@@ -1602,7 +1602,7 @@ HD44780_OpStatusTypeDef HD44780_BacklightOff(HD44780_HandleTypeDef* Device)
  * @return  HD44780_OPERATION_OK   - Indicates that the brightness level was successfully updated.
  *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
  **********************************************************************************************************************************/
-HD44780_OpStatusTypeDef HD44780_SetBrightness(HD44780_HandleTypeDef* Device, uint16_t BrightPercent)
+HD44780_OpStatus_t HD44780_SetBrightness(HD44780_Handle_t* Device, uint16_t BrightPercent)
 {
     if(Device == NULL || !(HD44780_IsInit(Device)))
     {

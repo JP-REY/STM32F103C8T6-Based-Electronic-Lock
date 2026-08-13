@@ -9,8 +9,8 @@
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "PWM_Platform_Interface.h"
+#include "stm32f4xx.h"
 #include "tim.h"
 /**********************************************************************************************************************************
  Private Macros
@@ -56,7 +56,7 @@
  * @return  true   - if the PWM instance has been initialized.
  * @return  false  - if the PWM instance has not been initialized.
  **********************************************************************************************************************************/
-static inline bool PPWM_IsInit(const PWM_HandleTypeDef* Instance)
+static inline bool PPWM_IsInit(const PWM_Handle_t* Instance)
 {
     return Instance == NULL ? false : Instance->_initialized;
 }
@@ -156,7 +156,7 @@ static inline uint16_t PPWM_MapDutyValueToPercent(uint16_t Duty_Val, uint16_t Du
  * @return  Pointer to the corresponding timer compare register (CCRx).
  * @return  NULL if the instance, platform context or channel is invalid.
  **********************************************************************************************************************************/
-static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_HandleTypeDef* Instance, PWM_ChannelTypeDef Channel)
+static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_Handle_t* Instance, PWM_Channel_t Channel)
 {
     if(Instance == NULL)
     {
@@ -195,7 +195,7 @@ static inline volatile uint32_t* PPWM_GetCCRxRegister(PWM_HandleTypeDef* Instanc
  * @return  CCxP bit mask corresponding to the specified PWM channel.
  * @return  0 if the specified channel is invalid.
  **********************************************************************************************************************************/
-static inline uint32_t PPWM_GetCCxPBitMask(PWM_ChannelTypeDef Channel)
+static inline uint32_t PPWM_GetCCxPBitMask(PWM_Channel_t Channel)
 {
     switch(Channel)
     {
@@ -223,7 +223,7 @@ static inline uint32_t PPWM_GetCCxPBitMask(PWM_ChannelTypeDef Channel)
  * @return  Pointer to the timer auto-reload register (ARR).
  * @return  NULL if the instance or platform context is invalid.
  **********************************************************************************************************************************/
-static inline volatile uint32_t* PPWM_GetARRRegister(PWM_HandleTypeDef* Instance)
+static inline volatile uint32_t* PPWM_GetARRRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
     {
@@ -255,7 +255,7 @@ static inline volatile uint32_t* PPWM_GetARRRegister(PWM_HandleTypeDef* Instance
  * @return  Pointer to the timer prescaler register (PSC).
  * @return  NULL if the instance or platform context is invalid.
  **********************************************************************************************************************************/
-static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_HandleTypeDef* Instance)
+static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
     {
@@ -288,7 +288,7 @@ static inline volatile uint32_t* PPWM_GetPSCRegister(PWM_HandleTypeDef* Instance
  * @return  Pointer to the timer capture/compare enable register (CCER).
  * @return  NULL if the instance or platform context is invalid.
  **********************************************************************************************************************************/
-static inline volatile uint32_t* PPWM_GetCCERRegister(PWM_HandleTypeDef* Instance)
+static inline volatile uint32_t* PPWM_GetCCERRegister(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
     {
@@ -355,7 +355,7 @@ static inline uint32_t PPWM_GetTimerClockFreq()
  * @return  PWM_OPERATION_FAIL - Invalid instance, platform context or
  *                               timer register access.
  **********************************************************************************************************************************/
-static inline PWM_OpStatusTypeDef PPWM_RefreshDuty(PWM_HandleTypeDef* Instance)
+static inline PWM_OpStatus_t PPWM_RefreshDuty(PWM_Handle_t* Instance)
 {
     if(Instance == NULL)
     {
@@ -433,7 +433,7 @@ static inline PWM_OpStatusTypeDef PPWM_RefreshDuty(PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - PWM instance successfully created.
  * @return  PWM_OPERATION_FAIL - Invalid parameter or unsupported platform configuration.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_Create(PWM_HandleTypeDef* Instance, void* Context, PWM_ChannelTypeDef Channel)
+PWM_OpStatus_t PPWM_Create(PWM_Handle_t* Instance, void* Context, PWM_Channel_t Channel)
 {
     TIM_HandleTypeDef* ctx = (TIM_HandleTypeDef*)Context;
 
@@ -454,7 +454,7 @@ PWM_OpStatusTypeDef PPWM_Create(PWM_HandleTypeDef* Instance, void* Context, PWM_
     volatile uint32_t* ccrx_reg = PPWM_GetCCRxRegister(Instance, Instance->_channel);
 
     Instance->_duty      = *ccrx_reg;
-    Instance->_polarity  = (PWM_PolarityTypeDef)(READ_BIT(*ccer_reg ,PPWM_GetCCxPBitMask(Channel)));
+    Instance->_polarity  = (PWM_Polarity_t)(READ_BIT(*ccer_reg ,PPWM_GetCCxPBitMask(Channel)));
 
     /* << PWM frequency calculation based on register values pre-configured by Cube MX >> */
     Instance->_frequency = ((timer_clk_freq)/((*psc_reg + 1U) * (*arr_reg + 1U)));
@@ -487,7 +487,7 @@ PWM_OpStatusTypeDef PPWM_Create(PWM_HandleTypeDef* Instance, void* Context, PWM_
  * @return  PWM_OPERATION_OK   - The instance was successfully initialized or was already initialized.
  * @return  PWM_OPERATION_FAIL - Instance is NULL.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_Init(PWM_HandleTypeDef* Instance)
+PWM_OpStatus_t PPWM_Init(PWM_Handle_t* Instance)
 {
     if(Instance == NULL) return PWM_OPERATION_FAIL;
 
@@ -517,7 +517,7 @@ PWM_OpStatusTypeDef PPWM_Init(PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - PWM generation successfully enabled or already enabled.
  * @return  PWM_OPERATION_FAIL - Invalid instance or platform-specific enable operation failed.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_Enable(PWM_HandleTypeDef* Instance)
+PWM_OpStatus_t PPWM_Enable(PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -556,7 +556,7 @@ PWM_OpStatusTypeDef PPWM_Enable(PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - PWM generation successfully disabled or already disabled.
  * @return  PWM_OPERATION_FAIL - Invalid instance or platform-specific disable operation failed.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_Disable(PWM_HandleTypeDef* Instance)
+PWM_OpStatus_t PPWM_Disable(PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -598,7 +598,7 @@ PWM_OpStatusTypeDef PPWM_Disable(PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - Duty cycle successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_SetDutyVal(PWM_HandleTypeDef* Instance, uint16_t Duty)
+PWM_OpStatus_t PPWM_SetDutyVal(PWM_Handle_t* Instance, uint16_t Duty)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -650,7 +650,7 @@ PWM_OpStatusTypeDef PPWM_SetDutyVal(PWM_HandleTypeDef* Instance, uint16_t Duty)
  * @return  PWM_OPERATION_OK   - Duty cycle successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_SetDutyPercent(PWM_HandleTypeDef* Instance, uint16_t Duty_Percent)
+PWM_OpStatus_t PPWM_SetDutyPercent(PWM_Handle_t* Instance, uint16_t Duty_Percent)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -700,7 +700,7 @@ PWM_OpStatusTypeDef PPWM_SetDutyPercent(PWM_HandleTypeDef* Instance, uint16_t Du
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
  **********************************************************************************************************************************/
-uint16_t PPWM_GetDutyVal(const PWM_HandleTypeDef* Instance)
+uint16_t PPWM_GetDutyVal(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -728,7 +728,7 @@ uint16_t PPWM_GetDutyVal(const PWM_HandleTypeDef* Instance)
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
  **********************************************************************************************************************************/
-uint16_t PPWM_GetDutyPercent(const PWM_HandleTypeDef* Instance)
+uint16_t PPWM_GetDutyPercent(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -759,7 +759,7 @@ uint16_t PPWM_GetDutyPercent(const PWM_HandleTypeDef* Instance)
  *
  * @warning Returns 0 if the specified instance is NULL or has not been initialized.
  **********************************************************************************************************************************/
-uint16_t PPWM_GetMaxDuty(const PWM_HandleTypeDef* Instance)
+uint16_t PPWM_GetMaxDuty(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -816,7 +816,7 @@ uint16_t PPWM_GetMaxDuty(const PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - PWM frequency successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid parameter or unsupported timer configuration.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_SetFrequency(PWM_HandleTypeDef* Instance, uint32_t Frequency)
+PWM_OpStatus_t PPWM_SetFrequency(PWM_Handle_t* Instance, uint32_t Frequency)
 {
     uint32_t arr = 0;
 
@@ -897,7 +897,7 @@ PWM_OpStatusTypeDef PPWM_SetFrequency(PWM_HandleTypeDef* Instance, uint32_t Freq
  * @return  Current PWM output frequency in hertz (Hz).
  * @return  0 if the specified instance is NULL or has not been initialized.
  **********************************************************************************************************************************/
-uint32_t PPWM_GetFrequency(const PWM_HandleTypeDef* Instance)
+uint32_t PPWM_GetFrequency(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -928,7 +928,7 @@ uint32_t PPWM_GetFrequency(const PWM_HandleTypeDef* Instance)
  * @return  PWM_OPERATION_OK   - PWM polarity successfully updated.
  * @return  PWM_OPERATION_FAIL - Invalid instance or uninitialized PWM instance.
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_SetPolarity(PWM_HandleTypeDef* Instance, PWM_PolarityTypeDef Polarity)
+PWM_OpStatus_t PPWM_SetPolarity(PWM_Handle_t* Instance, PWM_Polarity_t Polarity)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -974,7 +974,7 @@ PWM_OpStatusTypeDef PPWM_SetPolarity(PWM_HandleTypeDef* Instance, PWM_PolarityTy
  *
  * @warning Returns PWM_POLARITY_HIGH if the specified instance is NULL or has not been initialized.
  **********************************************************************************************************************************/
-PWM_PolarityTypeDef PPWM_GetPolarity(const PWM_HandleTypeDef* Instance)
+PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t* Instance)
 {
     if(Instance == NULL || !(PPWM_IsInit(Instance)))
     {
@@ -1001,7 +1001,7 @@ PWM_PolarityTypeDef PPWM_GetPolarity(const PWM_HandleTypeDef* Instance)
  * @return  PWM_STATE_ENABLED  - PWM generation is currently enabled.
  * @return  PWM_STATE_DISABLED - PWM generation is currently disabled.
  **********************************************************************************************************************************/
-PWM_StateTypeDef PPWM_GetState(const PWM_HandleTypeDef* Instance)
+PWM_State_t PPWM_GetState(const PWM_Handle_t* Instance)
 {
     if(!(PPWM_IsInit(Instance)))
     {

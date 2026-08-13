@@ -27,7 +27,6 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "stdint.h"
 #include "stdbool.h"
 
@@ -48,7 +47,7 @@ typedef enum
     HD44780_BACKLIGHT_OP_OK,
     HD44780_BACKLIGHT_OP_FAIL
 
-}HD44780_BacklightOpStatusTypeDef;
+}HD44780_BacklightOpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Generic backlight control interface.
@@ -81,7 +80,7 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
     **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOn) (void* Context);
 
     /**********************************************************************************************************************************
      * @brief   Turns the HD44780 module backlight off.
@@ -94,7 +93,7 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
      **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOff) (void* Context);
 
     /**********************************************************************************************************************************
      * @brief   Sets the HD44780 module backlight brightness.
@@ -112,7 +111,7 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
      **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(void* Context, uint16_t Level);
+    HD44780_BacklightOpStatus_t (*SetBrightness) (void* Context, uint16_t Level);
 
     /**********************************************************************************************************************************
      * @brief   Gets the HD44780 module backlight brightness level.
@@ -149,7 +148,7 @@ typedef struct
      **********************************************************************************************************************************/
     void* Context;
 
-}HD44780_BacklightInterfaceTypeDef;
+}HD44780_BacklightInterface_t;
 
 /**********************************************************************************************************************************
  Data

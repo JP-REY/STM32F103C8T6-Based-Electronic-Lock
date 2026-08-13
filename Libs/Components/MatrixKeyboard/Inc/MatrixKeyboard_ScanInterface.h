@@ -69,7 +69,7 @@ typedef enum
     MK_SCAN_OP_OK,      /* << Scan operation completed successfully. >> */
     MK_SCAN_OP_FAIL     /* << Scan operation could not be completed. >> */
 
-} MK_ScanOpStatusTypeDef;
+}MK_ScanOpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Matrix keyboard hardware scan abstraction.
@@ -116,7 +116,7 @@ typedef struct
      * @return  MK_SCAN_OP_OK   - Column successfully selected.
      * @return  MK_SCAN_OP_FAIL - Failed to select the requested column.
      **********************************************************************************************************************************/
-    MK_ScanOpStatusTypeDef (*SelectColumn)(void* Context, uint8_t Column);
+    MK_ScanOpStatus_t (*SelectColumn) (void* Context, uint8_t Column);
 
     /**********************************************************************************************************************************
      * @brief   Samples the logical state of all keyboard rows.
@@ -151,7 +151,7 @@ typedef struct
      * @return  MK_SCAN_OP_OK   - Row states successfully sampled.
      * @return  MK_SCAN_OP_FAIL - Failed to acquire the row states.
      **********************************************************************************************************************************/
-    MK_ScanOpStatusTypeDef (*ReadRows)(void* Context, uint32_t* RowsMask);
+    MK_ScanOpStatus_t (*ReadRows) (void* Context, uint32_t* RowsMask);
 
     /**********************************************************************************************************************************
      * @brief   Pointer to the implementation-specific context.
@@ -173,7 +173,7 @@ typedef struct
      **********************************************************************************************************************************/
     void* Context;
 
-}MK_ScanInterfaceTypeDef;
+}MK_ScanInterface_t;
 
 /**********************************************************************************************************************************
  Data

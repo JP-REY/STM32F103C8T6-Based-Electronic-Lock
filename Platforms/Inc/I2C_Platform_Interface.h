@@ -24,9 +24,9 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "stdint.h"
 #include "stdbool.h"
+#include "stddef.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -49,7 +49,7 @@ typedef enum
     I2C_OPERATION_BUSY,
     I2C_OPERATION_TIMEOUT
 
-}PI2C_OpStatusTypeDef;
+}I2C_OpStatus_t;
 
 /**********************************************************************************************************************************
  Data
@@ -57,8 +57,8 @@ typedef enum
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-PI2C_OpStatusTypeDef PI2C_Write (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
-PI2C_OpStatusTypeDef PI2C_Read  (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
+I2C_OpStatus_t PI2C_Write (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
+I2C_OpStatus_t PI2C_Read  (void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout);
 
 #ifdef __cplusplus
 }

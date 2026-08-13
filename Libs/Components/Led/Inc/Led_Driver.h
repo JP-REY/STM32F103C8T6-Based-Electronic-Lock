@@ -34,7 +34,7 @@ extern "C" {
 #include "stdint.h"
 #include "stdbool.h"
 #include "stddef.h"
-#include "GPIO_Platform_Interface.h"
+
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
@@ -51,7 +51,7 @@ typedef enum
     LED_OPERATION_OK,
     LED_OPERATION_FAIL
 
-}LED_OpStatusTypeDef;
+}LED_OpStatus_t;
 
 /**********************************************************************************************************************************
 * @brief   LED active electrical level.
@@ -69,7 +69,7 @@ typedef enum
     LED_ACTIVE_LOW  = 0U,
     LED_ACTIVE_HIGH = 1U
 
-}LED_ActiveLevelTypeDef;
+}LED_ActiveLevel_t;
 
 /**********************************************************************************************************************************
  * @brief    LED effect type.
@@ -83,7 +83,7 @@ typedef enum
     LED_EFFECT_PULSE,
     LED_EFFECT_FLASH,
 
-}LED_EffectTypeDef;
+}LED_Effect_t;
 
 /**********************************************************************************************************************************
  * @brief    LED GPIO state.
@@ -95,7 +95,7 @@ typedef enum
     LED_STATE_ON,
     LED_STATE_OFF
 
-}LED_StateTypeDef;
+}LED_State_t;
 
 /**********************************************************************************************************************************
  * @brief    LED effect context.
@@ -117,11 +117,11 @@ typedef enum
 typedef struct
 {
     /* << Private data. Do not read or modify!                                 >>*/
-    /* << LED state to restore after the flash effect complete.                >>*/ LED_StateTypeDef  _return_led_state;
-    /* << Currently active LED effect.                                         >>*/ LED_EffectTypeDef _current_effect;
-    /* << LED effect to restore after the triggered effect has been completed. >>*/ LED_EffectTypeDef _return_effect;
+    /* << LED state to restore after the flash effect complete.                >>*/ LED_State_t  _return_led_state;
+    /* << Currently active LED effect.                                         >>*/ LED_Effect_t _current_effect;
+    /* << LED effect to restore after the triggered effect has been completed. >>*/ LED_Effect_t _return_effect;
 
-}LED_EffectContextTypeDef;
+}LED_EffectContext_t;
 
 /**********************************************************************************************************************************
  * @brief    LED driver handle.
@@ -144,19 +144,19 @@ typedef struct
 typedef struct
 {
     /* << Private data. Do not read or modify!                                   >>*/
-    /* << Pointer to LED gpio handle.                                            >>*/ GPIO_HandleTypeDef*      _gpio;
-    /* << Current LED logical state.                                             >>*/ LED_StateTypeDef         _current_state;
-    /* << Electrical level which LED is active (on).                             >>*/ LED_ActiveLevelTypeDef   _active_level;
-    /* << LED effect context                                                     >>*/ LED_EffectContextTypeDef _effect_context;
-    /* << Number of complete flash cycles configured for the current effect.     >>*/ uint16_t                 _effect_repeat;
-    /* << Number of remaining LED state transitions in the current flash effect. >>*/ uint16_t                 _effect_counter;
-    /* << Timestamp of the last LED effect update, in milliseconds.              >>*/ uint32_t                 _last_update_time_ms;
-    /* << Blink effect interval, in milliseconds.                                >>*/ uint32_t                 _blink_time_interval_ms;
-    /* << Flash effect interval between consecutive state transitions            >>*/ uint32_t                 _effect_time_interval_ms;
-    /* << Indicates whether the flash effect is currently active.                >>*/ bool                     _effect_is_active;
-    /* << Indicates whether the LED driver has been successfully initialized.    >>*/ bool                     _initialized;
+    /* << Pointer to LED gpio handle.                                            >>*/ void*               _gpio;
+    /* << Current LED logical state.                                             >>*/ LED_State_t         _current_state;
+    /* << Electrical level which LED is active (on).                             >>*/ LED_ActiveLevel_t   _active_level;
+    /* << LED effect context                                                     >>*/ LED_EffectContext_t _effect_context;
+    /* << Number of complete flash cycles configured for the current effect.     >>*/ uint16_t            _effect_repeat;
+    /* << Number of remaining LED state transitions in the current flash effect. >>*/ uint16_t            _effect_counter;
+    /* << Timestamp of the last LED effect update, in milliseconds.              >>*/ uint32_t            _last_update_time_ms;
+    /* << Blink effect interval, in milliseconds.                                >>*/ uint32_t            _blink_time_interval_ms;
+    /* << Flash effect interval between consecutive state transitions            >>*/ uint32_t            _effect_time_interval_ms;
+    /* << Indicates whether the flash effect is currently active.                >>*/ bool                _effect_is_active;
+    /* << Indicates whether the LED driver has been successfully initialized.    >>*/ bool                _initialized;
 
-}LED_HandleTypeDef;
+}LED_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -164,13 +164,13 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_Init          (LED_HandleTypeDef* Device, GPIO_HandleTypeDef* Gpio, LED_ActiveLevelTypeDef ActiveLevel);
-LED_OpStatusTypeDef LED_On            (LED_HandleTypeDef* Device);
-LED_OpStatusTypeDef LED_Off           (LED_HandleTypeDef* Device);
-LED_OpStatusTypeDef LED_BlinkOn       (LED_HandleTypeDef* Device, uint32_t BlinkTimeMs);
-LED_OpStatusTypeDef LED_BlinkOff      (LED_HandleTypeDef* Device);
-LED_OpStatusTypeDef LED_TriggerEffect (LED_HandleTypeDef* Device, LED_EffectTypeDef Effect, uint32_t Interval, uint16_t Repeats);
-LED_OpStatusTypeDef LED_Update        (LED_HandleTypeDef* Device);
+LED_OpStatus_t LED_Init          (LED_Handle_t* Device, void* Gpio, LED_ActiveLevel_t ActiveLevel);
+LED_OpStatus_t LED_On            (LED_Handle_t* Device);
+LED_OpStatus_t LED_Off           (LED_Handle_t* Device);
+LED_OpStatus_t LED_BlinkOn       (LED_Handle_t* Device, uint32_t BlinkTimeMs);
+LED_OpStatus_t LED_BlinkOff      (LED_Handle_t* Device);
+LED_OpStatus_t LED_TriggerEffect (LED_Handle_t* Device, LED_Effect_t Effect, uint32_t Interval, uint16_t Repeats);
+LED_OpStatus_t LED_Update        (LED_Handle_t* Device);
 
 #ifdef __cplusplus
 }

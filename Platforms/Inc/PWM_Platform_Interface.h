@@ -66,7 +66,7 @@ typedef enum
     PWM_OPERATION_OK = 0U,
     PWM_OPERATION_FAIL
 
-} PWM_OpStatusTypeDef;
+}PWM_OpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Identifies a PWM output channel.
@@ -92,7 +92,7 @@ typedef enum
     PWM_CHANNEL_3 = (uint32_t) 0x00000008U,
     PWM_CHANNEL_4 = (uint32_t) 0x0000000CU
 
-} PWM_ChannelTypeDef;
+}PWM_Channel_t;
 
 /**********************************************************************************************************************************
  * @brief   Defines the active output polarity of a PWM signal.
@@ -110,7 +110,7 @@ typedef enum
     PWM_POLARITY_HIGH = 0U,
     PWM_POLARITY_LOW
 
-} PWM_PolarityTypeDef;
+}PWM_Polarity_t;
 
 /**********************************************************************************************************************************
  * @brief   Defines the current operation state of a PWM signal.
@@ -128,7 +128,7 @@ typedef enum
     PWM_STATE_ENABLED,
     PWM_STATE_DISABLED
 
-}PWM_StateTypeDef;
+}PWM_State_t;
 
 /**********************************************************************************************************************************
  * @brief   Platform PWM instance.
@@ -159,15 +159,15 @@ typedef struct
     void* Ctx;
 
     /* << Private data. Do not read or modify!               >> */
-    /* << PWM output channel                                 >> */ PWM_ChannelTypeDef  _channel;
-    /* << PWM output polarity                                >> */ PWM_PolarityTypeDef _polarity;
+    /* << PWM output channel                                 >> */ PWM_Channel_t  _channel;
+    /* << PWM output polarity                                >> */ PWM_Polarity_t _polarity;
     /* << Current compare register value (TIMx_CCRx)         >> */ uint16_t            _duty;
     /* << Max duty value according to TIMx_ARR register      >> */ uint16_t            _max_duty;
     /* << Configured PWM frequency                           >> */ uint32_t            _frequency;
     /* << Indicates if the PWM instance has been initialized >> */ bool                _initialized;
     /* << Indicates if PWM generation is currently enabled.  >> */ bool                _started;
 
-}PWM_HandleTypeDef;
+}PWM_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -175,20 +175,20 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-PWM_OpStatusTypeDef PPWM_Create         (PWM_HandleTypeDef* Instance, void* Context, PWM_ChannelTypeDef Channel);
-PWM_OpStatusTypeDef PPWM_Init           (PWM_HandleTypeDef* Instance);
-PWM_OpStatusTypeDef PPWM_Enable         (PWM_HandleTypeDef* Instance);
-PWM_OpStatusTypeDef PPWM_Disable        (PWM_HandleTypeDef* Instance);
-PWM_OpStatusTypeDef PPWM_SetDutyVal     (PWM_HandleTypeDef* Instance, uint16_t Duty);
-PWM_OpStatusTypeDef PPWM_SetDutyPercent (PWM_HandleTypeDef* Instance, uint16_t Duty_Percent);
-uint16_t            PPWM_GetDutyVal     (const PWM_HandleTypeDef* Instance);
-uint16_t            PPWM_GetDutyPercent (const PWM_HandleTypeDef* Instance);
-uint16_t            PPWM_GetMaxDuty     (const PWM_HandleTypeDef* Instance);
-PWM_OpStatusTypeDef PPWM_SetFrequency   (PWM_HandleTypeDef* Instance, uint32_t Frequency);
-uint32_t            PPWM_GetFrequency   (const PWM_HandleTypeDef* Instance);
-PWM_OpStatusTypeDef PPWM_SetPolarity    (PWM_HandleTypeDef* Instance, PWM_PolarityTypeDef Polarity);
-PWM_PolarityTypeDef PPWM_GetPolarity    (const PWM_HandleTypeDef* Instance);
-PWM_StateTypeDef    PPWM_GetState       (const PWM_HandleTypeDef* Instance);
+PWM_OpStatus_t PPWM_Create         (PWM_Handle_t* Instance, void* Context, PWM_Channel_t Channel);
+PWM_OpStatus_t PPWM_Init           (PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_Enable         (PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_Disable        (PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_SetDutyVal     (PWM_Handle_t* Instance, uint16_t Duty);
+PWM_OpStatus_t PPWM_SetDutyPercent (PWM_Handle_t* Instance, uint16_t Duty_Percent);
+uint16_t       PPWM_GetDutyVal     (const PWM_Handle_t* Instance);
+uint16_t       PPWM_GetDutyPercent (const PWM_Handle_t* Instance);
+uint16_t       PPWM_GetMaxDuty     (const PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_SetFrequency   (PWM_Handle_t* Instance, uint32_t Frequency);
+uint32_t       PPWM_GetFrequency   (const PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_SetPolarity    (PWM_Handle_t* Instance, PWM_Polarity_t Polarity);
+PWM_Polarity_t PPWM_GetPolarity    (const PWM_Handle_t* Instance);
+PWM_State_t    PPWM_GetState       (const PWM_Handle_t* Instance);
 
 
 #ifdef __cplusplus

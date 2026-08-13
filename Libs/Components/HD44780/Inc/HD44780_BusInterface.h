@@ -26,7 +26,6 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "stdint.h"
 #include "stdbool.h"
 /**********************************************************************************************************************************
@@ -46,7 +45,7 @@ typedef enum
     HD44780_BUS_OPERATION_OK,
     HD44780_BUS_OPERATION_FAIL
 
-}HD44780_BusOpStatusTypeDef;
+}HD44780_BusOpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Selects the target HD44780 internal register.
@@ -62,7 +61,7 @@ typedef enum
     HD44780_BUS_COMMAND = 0,
     HD44780_BUS_DATA
 
-}HD44780_RegisterSelectTypeDef;
+}HD44780_RegisterSelect_t;
 
 /**********************************************************************************************************************************
  * @brief   Abstract interface used by the HD44780 driver to access the display bus.
@@ -91,7 +90,7 @@ typedef struct
     * @return  HD44780_BUS_OPERATION_OK   - Indicates that HD44780 bus transfer operation has been succeed.
     * @return  HD44780_BUS_OPERATION_FAIL - Indicates that HD44780 bus transfer operation has been failed.
     **********************************************************************************************************************************/
-    HD44780_BusOpStatusTypeDef (*TransferNibble) (void* Context, uint8_t Nibble, HD44780_RegisterSelectTypeDef Rs);
+    HD44780_BusOpStatus_t (*TransferNibble) (void* Context, uint8_t Nibble, HD44780_RegisterSelect_t Rs);
 
    /**********************************************************************************************************************************
     * @brief   Pointer to the concrete bus adapter context.
@@ -102,7 +101,7 @@ typedef struct
     **********************************************************************************************************************************/
     void* Context;
 
-}HD44780_BusInterfaceTypeDef;
+}HD44780_BusInterface_t;
 
 /**********************************************************************************************************************************
  Data

@@ -27,11 +27,10 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
+#include "PWM_Platform_Interface.h"
 #include "stdint.h"
 #include "stdbool.h"
 #include "stddef.h"
-#include "PWM_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -50,7 +49,7 @@ typedef enum
     BUZZER_OPERATION_OK,
     BUZZER_OPERATION_FAIL
 
-}Buzzer_OpStatusTypeDef;
+}Buzzer_OpStatus_t;
 
 /**********************************************************************************************************************************
  * @brief   Represents the buzzer device instance.
@@ -69,10 +68,10 @@ typedef enum
 typedef struct
 {
     /* << Private data. Do not read or modify >> */
-    /* << Pointer to the PWM platform handle used by the buzzer. >> */ PWM_HandleTypeDef* _context;
-    /* << Indicates wheter buzzer instance has been initialized. >> */ bool               _initialized;
+    /* << Pointer to the PWM platform handle used by the buzzer. >> */ PWM_Handle_t* _context;
+    /* << Indicates wheter buzzer instance has been initialized. >> */ bool          _initialized;
 
-}Buzzer_HandleTypeDef;
+}Buzzer_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -80,10 +79,10 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_Init         (Buzzer_HandleTypeDef* Device, PWM_HandleTypeDef* Context);
-Buzzer_OpStatusTypeDef Buzzer_SetFrequency (Buzzer_HandleTypeDef* Device, uint32_t Frequency);
-Buzzer_OpStatusTypeDef Buzzer_On           (Buzzer_HandleTypeDef* Device);
-Buzzer_OpStatusTypeDef Buzzer_Off          (Buzzer_HandleTypeDef* Device);
+Buzzer_OpStatus_t Buzzer_Init         (Buzzer_Handle_t* Device, PWM_Handle_t* Context);
+Buzzer_OpStatus_t Buzzer_SetFrequency (Buzzer_Handle_t* Device, uint32_t Frequency);
+Buzzer_OpStatus_t Buzzer_On           (Buzzer_Handle_t* Device);
+Buzzer_OpStatus_t Buzzer_Off          (Buzzer_Handle_t* Device);
 
 #ifdef __cplusplus
 }

@@ -205,7 +205,7 @@ typedef struct
     uint8_t _port_shadow;
     bool    _initialized;
 
-} PCF8574_HandleTypeDef;
+} PCF8574_Handle_t;
 ```
 
 | Member | Description |
@@ -227,7 +227,7 @@ typedef enum
     PCF8574_OPERATION_OK,
     PCF8574_OPERATION_FAIL
 
-} PCF8574_StatusTypeDef;
+} PCF8574_OpStatus_t;
 
 ```
 | Status	| Description |
@@ -248,8 +248,8 @@ typedef enum
 #### Function Signature
 
 ```c
-PCF8574_StatusTypeDef PCF8574_Init(
-    PCF8574_HandleTypeDef* Device,
+PCF8574_OpStatus_t PCF8574_Init(
+    PCF8574_Handle_t* Device,
     uint8_t Address,
     void* I2C_Context
 );
@@ -271,7 +271,7 @@ PCF8574_StatusTypeDef PCF8574_Init(
 #### Example
 
 ```c
-PCF8574_HandleTypeDef IO_Expander;
+PCF8574_Handle_t IO_Expander;
 
 PCF8574_Init(
     &IO_Expander,
@@ -288,8 +288,8 @@ PCF8574_Init(
 
 #### Function Signature
 ```c
-PCF8574_StatusTypeDef PCF8574_Deinit(
-    PCF8574_HandleTypeDef* Device
+PCF8574_OpStatus_t PCF8574_Deinit(
+    PCF8574_Handle_t* Device
 );
 ```
 #### Parameters
@@ -310,8 +310,8 @@ PCF8574_StatusTypeDef PCF8574_Deinit(
 #### Function Signature
 
 ```c
-PCF8574_StatusTypeDef PCF8574_WritePort(
-    PCF8574_HandleTypeDef* Device,
+PCF8574_OpStatus_t PCF8574_WritePort(
+    PCF8574_Handle_t* Device,
     uint8_t Mask
 );
 ```
@@ -345,8 +345,8 @@ The internal port shadow is updated only after a successful I2C transmission.
 #### Function Signature
 
 ```c
-PCF8574_StatusTypeDef PCF8574_ClearPort(
-    PCF8574_HandleTypeDef* Device,
+PCF8574_OpStatus_t PCF8574_ClearPort(
+    PCF8574_Handle_t* Device,
 );
 ```
 #### Parameters
@@ -378,8 +378,8 @@ The internal port shadow is updated only after a successful I2C transmission.
 #### Function Signature
 
 ```c
-PCF8574_StatusTypeDef PCF8574_ReadPort(
-    PCF8574_HandleTypeDef* Device,
+PCF8574_OpStatus_t PCF8574_ReadPort(
+    PCF8574_Handle_t* Device,
     uint8_t* Buffer
 );
 ```
@@ -415,8 +415,8 @@ New Port State = Current Shadow OR Bit Mask
 ```
 #### Function Signature
 ```c
-PCF8574_StatusTypeDef PCF8574_WriteBit(
-    PCF8574_HandleTypeDef* Device, 
+PCF8574_OpStatus_t PCF8574_WriteBit(
+    PCF8574_Handle_t* Device, 
     uint8_t Bit
 );
 
@@ -452,8 +452,8 @@ New Port State = Current Shadow AND (~Bit Mask)
 ```
 #### Function Signature
 ```c
-PCF8574_StatusTypeDef PCF8574_WriteBit(
-    PCF8574_HandleTypeDef* Device, 
+PCF8574_OpStatus_t PCF8574_WriteBit(
+    PCF8574_Handle_t* Device, 
     uint8_t Bit
 );
 
@@ -484,8 +484,8 @@ PCF8574_ClearBit(
 
 #### Function Signature
 ```c
-PCF8574_StatusTypeDef PCF8574_ReadBit(
-    PCF8574_HandleTypeDef* Device, 
+PCF8574_OpStatus_t PCF8574_ReadBit(
+    PCF8574_Handle_t* Device, 
     uint8_t Bit, 
     uint8_t* Buffer
 );
@@ -525,8 +525,8 @@ HIGH -> LOW
 ```
 #### Function Signature
 ```c
-PCF8574_StatusTypeDef PCF8574_ToggleBit(
-    PCF8574_HandleTypeDef* Device, 
+PCF8574_OpStatus_t PCF8574_ToggleBit(
+    PCF8574_Handle_t* Device, 
     uint8_t Bit
 );
 ```
@@ -639,7 +639,7 @@ The following example shows how to initialize and control a PCF8574 device.
 #include "PCF8574_Driver.h"
 #include "I2C_Platform_Interface.h"
 
-PCF8574_HandleTypeDef IO_Expander;
+PCF8574_Handle_t IO_Expander;
 
 const int16_t I2C_Address = 0x20;
 
@@ -719,7 +719,7 @@ Benefits:
 The driver uses a handle structure:
 
 ```c
-PCF8574_HandleTypeDef
+PCF8574_Handle_t
 ```
 
 instead of global variables.
@@ -733,9 +733,9 @@ Advantages:
 Example:
 
 ```c
-PCF8574_HandleTypeDef LCD_IO;
+PCF8574_Handle_t LCD_IO;
 
-PCF8574_HandleTypeDef KEYPAD_IO;
+PCF8574_Handle_t KEYPAD_IO;
 ```
 
 Both devices can coexist using independent instances.
@@ -827,7 +827,7 @@ Possible applications:
 The following constraints apply when using the PCF8574 driver:
 
 ### 15.1 Initialization Requirements
-- The `PCF8574_HandleTypeDef` must be initialized by calling `PCF8574_Init()` before using any other driver operation.
+- The `PCF8574_Handle_t` must be initialized by calling `PCF8574_Init()` before using any other driver operation.
 - The I2C context provided to `PCF8574_Init()` must be valid and properly initialized.
 - The I2C device address must be correct for the PCF8574 device.
 - The I2C context must remain valid for the entire lifetime of the driver instance.
