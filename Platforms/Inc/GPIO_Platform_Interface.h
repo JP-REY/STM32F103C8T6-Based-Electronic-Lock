@@ -22,7 +22,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Aug 3, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef INC_GPIO_PLATFORM_INTERFACE_H_
@@ -42,11 +42,10 @@ extern "C" {
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the operation status returned by the Platform GPIO interface.
  *
  * @details This enumeration represents the execution result of a Platform GPIO
@@ -56,15 +55,15 @@ extern "C" {
  * @note    Every Platform GPIO function returning this type shall return
  *          GPIO_OPERATION_OK when the requested operation completes
  *          successfully.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     GPIO_OPERATION_OK = 0U,
     GPIO_OPERATION_FAIL
 
-}GPIO_OpStatusTypeDef;
+}GPIO_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the logical level of a GPIO pin.
  *
  * @details This enumeration represents the current electrical state of a GPIO
@@ -75,18 +74,16 @@ typedef enum
  *
  * @note    GPIO_LEVEL_UNKNOWN may be returned when the pin level cannot be
  *          determined due to an invalid handle or a platform-specific error.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
-    GPIO_LEVEL_HIGH = 1U,
-    GPIO_LEVEL_LOW  = 0U,
-
+    GPIO_LEVEL_HIGH    = 1U,
+    GPIO_LEVEL_LOW     = 0U,
     GPIO_LEVEL_UNKNOWN = 0xFFU
 
-}GPIO_LevelTypeDef;
+}GPIO_Level_t;
 
-
-/**********************************************************************************************************************************
+/**
  * @brief   GPIO hardware configuration.
  *
  * @details This structure stores the minimum platform-specific information
@@ -95,15 +92,15 @@ typedef enum
  *          The GPIO port is intentionally stored as an opaque pointer to avoid
  *          exposing any vendor-specific peripheral types through the Platform
  *          Interface.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
     void*    _gpio_port;
     uint16_t _gpio_pin;
 
-}GPIO_ConfigTypeDef;
+}GPIO_Config_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Platform GPIO instance.
  *
  * @details This structure represents a single logical GPIO managed by the
@@ -116,27 +113,26 @@ typedef struct
  *          Application code shall never access or modify any member directly
  *          after initialization. Runtime operations shall always be performed
  *          through the Platform GPIO API.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /* << Private data. Do not read or modify!                >> */
-    /* << Platform GPIO hardware configuration                >> */ GPIO_ConfigTypeDef _gpio_config;
-    /* << Indicates whether the instance has been initialized >> */ bool               _initialized;
+                                /*< Private data. Do not read or modify!                 */ 
+    GPIO_Config_t _gpio_config; /*< Platform GPIO hardware configuration.                */ 
+    bool          _initialized; /*< Indicates whether the instance has been initialized. */ 
 
-}GPIO_HandleTypeDef;
+}GPIO_Handle_t;
 
 /**********************************************************************************************************************************
  Data
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-GPIO_OpStatusTypeDef PGPIO_Init     (GPIO_HandleTypeDef* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
-GPIO_OpStatusTypeDef PGPIO_Set      (GPIO_HandleTypeDef* Instance);
-GPIO_OpStatusTypeDef PGPIO_Reset    (GPIO_HandleTypeDef* Instance);
-GPIO_OpStatusTypeDef PGPIO_Toggle   (GPIO_HandleTypeDef* Instance);
-GPIO_LevelTypeDef    PGPIO_GetLevel (const GPIO_HandleTypeDef* Instance);
+GPIO_OpStatus_t PGPIO_Init     (GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
+GPIO_OpStatus_t PGPIO_Set      (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Reset    (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Toggle   (GPIO_Handle_t* Instance);
+GPIO_Level_t    PGPIO_GetLevel (const GPIO_Handle_t* Instance);
 
 #ifdef __cplusplus
 }

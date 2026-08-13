@@ -15,7 +15,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Aug 3, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_GPIO_SCANADAPTER_H_
@@ -37,7 +37,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   GPIO configuration context used by the Matrix Keyboard GPIO scan adapter.
  *
  * @details Holds the GPIO descriptors associated with the matrix rows and columns.
@@ -45,16 +45,16 @@ extern "C" {
  *          adapter to perform the hardware-specific scan operations.
  *
  *          The arrays shall remain valid for the entire lifetime of the adapter.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /* << Array containing the GPIO descriptors associated with the matrix columns. >> */ GPIO_HandleTypeDef *Columns;
-    /* << Number of GPIO descriptors available in the Columns array.                >> */ uint8_t             ColumnCount;
-    /* << Array containing the GPIO descriptors associated with the matrix rows.    >> */ GPIO_HandleTypeDef *Rows;
-    /* << Number of GPIO descriptors available in the Rows array.                   >> */ uint8_t             RowCount;
-    /* << Logic level that drives gpio into its active state                        >> */ GPIO_LevelTypeDef   ActiveLevel;
+    GPIO_Handle_t *Columns;     /*< Array containing the GPIO descriptors associated with the matrix columns. */ 
+    uint8_t        ColumnCount; /*< Number of GPIO descriptors available in the Columns array.                */ 
+    GPIO_Handle_t *Rows;        /*< Array containing the GPIO descriptors associated with the matrix rows.    */ 
+    uint8_t        RowCount;    /*< Number of GPIO descriptors available in the Rows array.                   */ 
+    GPIO_Level_t   ActiveLevel; /*< Logic level that drives gpio into its active state                        */ 
 
-} MK_GPIO_ScanAdapterContextTypeDef;
+}MK_GPIO_ScanAdapter_t;
 
 /**********************************************************************************************************************************
  Data
@@ -62,7 +62,7 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-MK_ScanOpStatusTypeDef MK_GPIO_ScanAdapterInit(MK_ScanInterfaceTypeDef* Scan, MK_GPIO_ScanAdapterContextTypeDef* Context);
+MK_ScanOpStatus_t MK_GPIO_ScanAdapterInit(MK_ScanInterface_t* Scan, MK_GPIO_ScanAdapter_t* Context);
 
 #ifdef __cplusplus
 }

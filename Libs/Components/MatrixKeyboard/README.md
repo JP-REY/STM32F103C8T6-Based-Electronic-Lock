@@ -323,17 +323,17 @@ This layered architecture allows:
 ## 8. Data Structures
 
 ### 8.1 Matrix Keyboard Handle
-The driver uses `MK_HandleTypeDef` to represent a matrix keyboard device instance.
+The driver uses `MK_Handle_t` to represent a matrix keyboard device instance.
 
 ```c
 typedef struct
 {
-    const MK_ConfigTypeDef* _config;
-    MK_KeyTypeDef*          _keys;
-    MK_ScanInterfaceTypeDef _scan_interface;
-    bool                    _is_initialized;
+    const MK_Config_t* _config;
+    MK_Key_t*          _keys;
+    MK_ScanInterface_t _scan_interface;
+    bool               _is_initialized;
 
-} MK_HandleTypeDef;
+} MK_Handle_t;
 ```
 | Member              | Description |
 |---------------------|-------------|
@@ -343,24 +343,24 @@ typedef struct
 | `_scan_interface` | The hardware scan interface implementation. |
 | `_is_initialized` | The internal initialization state of the keyboard. |
 
-The members of `MK_HandleTypeDef` are considered private data and shall not be accessed or modified directly by the application.
+The members of `MK_Handle_t` are considered private data and shall not be accessed or modified directly by the application.
 
 **Note:** 
 - The application shall interact with the keyboard through the public driver API.
 
 ### 8.2 Keyboard Configuration
-The driver uses `MK_ConfigTypeDef` to store all static configuration parameters required to initialize a keyboard instance.
+The driver uses `MK_Config_t` to store all static configuration parameters required to initialize a keyboard instance.
 
 ```c
 typedef struct
 {
-    MK_RowsQtyTypeDef        _rows_number;
-    MK_ColsQtyTypeDef        _cols_number;
-    const MK_KeyCodeTypeDef* _key_map;
-    MK_KeyActiveLevelTypeDef _row_active_level;
-    uint32_t                 _debounce_time_ms;
+    MK_RowsQty_t        _rows_number;
+    MK_ColsQty_t        _cols_number;
+    const MK_KeyCode_t* _key_map;
+    MK_KeyActiveLevel_t _row_active_level;
+    uint32_t            _debounce_time_ms;
 
-} MK_ConfigTypeDef;
+} MK_Config_t;
 ```
 | Member              | Description |
 |---------------------|-------------|
@@ -373,28 +373,28 @@ typedef struct
 The application must provide this configuration during initialization. The driver treats the configuration as read-only after a successful initialization.
 
 ### 8.3 Keyboard Output
-The driver uses `MK_OutputTypeDef` to report the result of a scan operation.
+The driver uses `MK_Output_t` to report the result of a scan operation.
 
 ```c
 typedef struct
 {
-    MK_KeyCodeTypeDef   OutputKey;
-    MK_KeyActionTypeDef OutputAction;
+    MK_KeyCode_t   Key;
+    MK_KeyAction_t Action;
 
-} MK_OutputTypeDef;
+} MK_Output_t;
 ```
 | Member              | Description |
 |---------------------|-------------|
-| `OutputKey`      | Logical identifier of the key associated with the generated action. |
-| `OutputAction`      | High-level action generated for the corresponding key. |
+| `Key`      | Logical identifier of the key associated with the generated action. |
+| `Action`      | High-level action generated for the corresponding key. |
 
-When a valid user action is detected, both fields are populated. If no new action is available, OutputAction is set to `MK_KEY_ACTION_NONE` and the value of `OutputKey` is unspecified.
+When a valid user action is detected, both fields are populated. If no new action is available, Action is set to `MK_KEY_ACTION_NONE` and the value of `Key` is unspecified.
 
 -------
 #### Key Code Type
 
 ```c
-typedef uint8_t MK_KeyCodeTypeDef;
+typedef uint8_t MK_KeyCode_t;
 ```
 
 Represents the logical identifier of a physical key. The application provides a key mapping table during initialization, which maps each physical key position to a logical code (e.g., ASCII character 'A', function code, or application-specific identifier).
@@ -407,7 +407,7 @@ typedef enum
     MK_KEY_ACTION_NONE,   
     MK_KEY_ACTION_CLICK  
 
-} MK_KeyActionTypeDef;
+} MK_KeyAction_t;
 ```
 
 | Action	| Description |
@@ -416,7 +416,7 @@ typedef enum
 | `MK_KEY_ACTION_CLICK`|	A complete press-and-release sequence was detected.|
 
 ### 8.4 Operation Status
-The driver uses `MK_OpStatusTypeDef` to report the result of each operation.
+The driver uses `MK_OpStatus_t` to report the result of each operation.
 
 ```c
 typedef enum
@@ -424,7 +424,7 @@ typedef enum
     MK_OPERATION_OK,
     MK_OPERATION_FAIL
 
-} MK_OpStatusTypeDef;
+} MK_OpStatus_t;
 ```
 
 | Status             | Description |
@@ -437,13 +437,13 @@ The driver provides additional enumerations to represent various aspects of keyb
 
 | Enumeration         | Description |
 |---------------------|-------------|
-| `MK_KeyLevelTypeDef`     | Debounced logical level of a key (PRESSED/RELEASED). |
-| `MK_KeyActiveLevelTypeDef`     | Electrical active level used by the keyboard hardware (LOW/HIGH). |
-| `MK_KeyStateTypeDef` | Stable logical state of a key (UNKNOWN/RELEASED/PRESSED). |
-| `MK_KeyStateEventTypeDef` | State transition event (PRESS/RELEASE/NONE/UNKNOWN). |
+| `MK_KeyLevel_t`     | Debounced logical level of a key (PRESSED/RELEASED). |
+| `MK_KeyActiveLevel_t`     | Electrical active level used by the keyboard hardware (LOW/HIGH). |
+| `MK_KeyState_t` | Stable logical state of a key (UNKNOWN/RELEASED/PRESSED). |
+| `MK_KeyStateEvent_t` | State transition event (PRESS/RELEASE/NONE/UNKNOWN). |
 
 **Note:** 
-- Structures such as `MK_KeyTypeDef` and `MK_DebounceContextTypeDef` contain private driver runtime data. 
+- Structures such as `MK_Key_t` and `MK_DebounceContext_t` contain private driver runtime data. 
 - Their contents are intended exclusively for internal use by the Matrix Keyboard driver and shall never be accessed or modified directly by the application.
 - The driver API shall be used exclusively for all interactions with the keyboard.
 
@@ -460,10 +460,10 @@ The driver provides additional enumerations to represent various aspects of keyb
 
 #### Function Signature
 ```c
-MK_OpStatusTypeDef MK_Init(
-    MK_HandleTypeDef*       Device,
-    const MK_ConfigTypeDef* Config,
-    MK_KeyTypeDef*          KeysTable
+MK_OpStatus_t MK_Init(
+    MK_Handle_t*       Device,
+    const MK_Config_t* Config,
+    MK_Key_t*          KeysTable
 );
 ```
 #### Parameters
@@ -490,9 +490,9 @@ The configuration and key table must remain valid for the entire lifetime of the
 
 #### Function Signature
 ```c
-MK_OpStatusTypeDef MK_Read(
-    MK_HandleTypeDef* Device,
-    MK_OutputTypeDef* Output
+MK_OpStatus_t MK_Read(
+    MK_Handle_t* Device,
+    MK_Output_t* Output
 );
 ```
 #### Parameters
@@ -509,7 +509,7 @@ MK_OpStatusTypeDef MK_Read(
 
 The Output structure is provided by the caller and represents the result of the current MK_Read() call. The caller is not responsible for clearing the internal pending action.
 
-If no key action is pending, `Output->OutputAction`is set to `MK_KEY_ACTION_NONE` and `Output->OutputKey` is set to zero.
+If no key action is pending, `Output->Action`is set to `MK_KEY_ACTION_NONE` and `Output->Key` is set to zero.
 
 **Note:**
 - This function should be called periodically to ensure proper keyboard scanning and event processing.
@@ -526,17 +526,17 @@ sequenceDiagram
     participant ADAPTER as GPIO Scan Adapter
     participant DRIVER as Matrix Keyboard Driver
 
-    APP->>APP: Create MK_HandleTypeDef instance
-    APP->>APP: Create MK_ConfigTypeDef with:
+    APP->>APP: Create MK_Handle_t instance
+    APP->>APP: Create MK_Config_t with:
     Note right of APP: Rows and columns count
     Note right of APP: Key map table
     Note right of APP: Active level
     Note right of APP: Debounce time
 
-    APP->>APP: Create MK_KeyTypeDef array
+    APP->>APP: Create MK_Key_t array
     Note right of APP: Size = Rows × Columns
 
-    APP->>APP: Create GPIO_HandleTypeDef arrays
+    APP->>APP: Create GPIO_Handle_t arrays
     Note right of APP: One for columns, one for rows
 
     APP->>GPIO: Initialize GPIO pins
@@ -652,11 +652,11 @@ The driver does not create tasks, interrupts or background processing.
 #include "MatrixKeyboard_Driver.h"
 #include "MatrixKeyboard_GPIO_ScanAdapter.h"
 
-MK_HandleTypeDef Keyboard;
+MK_Handle_t Keyboard;
 
-MK_KeyTypeDef Keys[16];
+MK_Key_t Keys[16];
 
-const MK_KeyCodeTypeDef KeyMap[16] =
+const MK_KeyCode_t KeyMap[16] =
 {
     '1', '2', '3', 'A',
     '4', '5', '6', 'B',
@@ -664,7 +664,7 @@ const MK_KeyCodeTypeDef KeyMap[16] =
     '*', '0', '#', 'D'
 };
 
-const MK_ConfigTypeDef Config =
+const MK_Config_t Config =
 {
     ._cols_number      = 4,
     ._rows_number      = 4,
@@ -673,11 +673,11 @@ const MK_ConfigTypeDef Config =
     ._debounce_time_ms = 20
 };
 
-static GPIO_HandleTypeDef Columns[4];
+static GPIO_Handle_t Columns[4];
 
-static GPIO_HandleTypeDef Rows[4];
+static GPIO_Handle_t Rows[4];
 
-static MK_GPIO_ScanAdapterContextTypeDef ScanContext;
+static MK_GPIO_ScanAdapterContext_t ScanContext;
 
 int main(void)
 {
@@ -729,7 +729,7 @@ int main(void)
     while(1)
     {
 
-        MK_OutputTypeDef Output;
+        MK_Output_t Output;
 
         MK_Read(
             &Keyboard,
@@ -872,7 +872,7 @@ Each generated action is returned only once.
 ---
 ## 13. Error Handling
 
-All public Matrix Keyboard operations return a `MK_OpStatusTypeDef` value.
+All public Matrix Keyboard operations return a `MK_OpStatus_t` value.
 
 The application should verify the returned status whenever the success of an operation is relevant to system behavior.
 
@@ -910,7 +910,7 @@ For operational failures:
 Example:
 
 ```c
-MK_OpStatusTypeDef status;
+MK_OpStatus_t status;
 
 status = MK_Init(&Keyboard, &Config, Keys);
 
@@ -925,7 +925,7 @@ if (status != MK_OPERATION_OK)
 
 while (1)
 {
-    MK_OutputTypeDef Output;
+    MK_Output_t Output;
 
     status = MK_Read(&Keyboard, &Output);
 
@@ -939,12 +939,12 @@ while (1)
         continue;
     }
 
-    if (Output.OutputAction != MK_KEY_ACTION_NONE)
+    if (Output.Action != MK_KEY_ACTION_NONE)
     {
         /*
          * Process the generated key action.
          */
-        ProcessKeyAction(Output.OutputKey, Output.OutputAction);
+        ProcessKeyAction(Output.Key, Output.Action);
     }
 }
 ```
@@ -966,8 +966,8 @@ The following constraints apply when using the Matrix Keyboard driver.
 
 ### 14.1 Initialization Requirements
 
-- The `MK_HandleTypeDef` must be initialized by calling `MK_Init()` before any other driver operation.
-- The `MK_ConfigTypeDef` structure must remain valid for the entire lifetime of the driver instance.
+- The `MK_Handle_t` must be initialized by calling `MK_Init()` before any other driver operation.
+- The `MK_Config_t` structure must remain valid for the entire lifetime of the driver instance.
 - The key mapping table (KeysTable) must remain valid for the entire lifetime of the driver instance.
 - The KeysTable must have exactly Rows × Columns entries.
 

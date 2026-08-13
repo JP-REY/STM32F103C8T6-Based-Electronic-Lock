@@ -15,7 +15,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 29, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_PWM_BACKLIGHTADAPTER_H_
@@ -29,7 +29,6 @@ extern "C" {
  Includes
  **********************************************************************************************************************************/
 #include "HD44780_BacklightInterface.h"
-#include "PWM_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -43,7 +42,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-HD44780_BacklightOpStatusTypeDef HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterfaceTypeDef* Backlight, void* Context);
+HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, void* Context);
 
 #ifdef __cplusplus
 }

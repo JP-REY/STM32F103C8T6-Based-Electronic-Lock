@@ -28,7 +28,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Aug 3, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_MATRIXKEYBOARD_INC_MATRIXKEYBOARD_SCANINTERFACE_H_
@@ -51,7 +51,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Matrix keyboard scan interface operation status.
  *
  * @details Defines the return status of every operation provided by the matrix scan
@@ -63,15 +63,15 @@ extern "C" {
  *
  * @note    Every callback defined by the scan interface shall return one of these values
  *          to indicate the execution status of the requested operation.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
-    MK_SCAN_OP_OK,      /* << Scan operation completed successfully. >> */
-    MK_SCAN_OP_FAIL     /* << Scan operation could not be completed. >> */
+    MK_SCAN_OP_OK,   /*< Scan operation completed successfully. */
+    MK_SCAN_OP_FAIL  /*< Scan operation could not be completed. */
 
-} MK_ScanOpStatusTypeDef;
+}MK_ScanOpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Matrix keyboard hardware scan abstraction.
  *
  * @details This interface isolates the keyboard driver from the underlying hardware used
@@ -91,10 +91,10 @@ typedef enum
  *
  *          Debounce filtering, key state transitions, click detection and event generation
  *          are intentionally outside the scope of this interface.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /**********************************************************************************************************************************
+    /**
      * @brief   Selects the matrix column to be scanned.
      *
      * @details Configures the underlying hardware so that the specified column becomes the
@@ -115,10 +115,10 @@ typedef struct
      *
      * @return  MK_SCAN_OP_OK   - Column successfully selected.
      * @return  MK_SCAN_OP_FAIL - Failed to select the requested column.
-     **********************************************************************************************************************************/
-    MK_ScanOpStatusTypeDef (*SelectColumn)(void* Context, uint8_t Column);
+     */
+    MK_ScanOpStatus_t (*SelectColumn) (void* Context, uint8_t Column);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Samples the logical state of all keyboard rows.
      *
      * @details Reads every row while the previously selected column remains active and returns
@@ -150,10 +150,10 @@ typedef struct
      *
      * @return  MK_SCAN_OP_OK   - Row states successfully sampled.
      * @return  MK_SCAN_OP_FAIL - Failed to acquire the row states.
-     **********************************************************************************************************************************/
-    MK_ScanOpStatusTypeDef (*ReadRows)(void* Context, uint32_t* RowsMask);
+     */
+    MK_ScanOpStatus_t (*ReadRows) (void* Context, uint32_t* RowsMask);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Pointer to the implementation-specific context.
      *
      * @details Stores any hardware-specific resources required by the scan adapter
@@ -170,10 +170,10 @@ typedef struct
      *
      *          The same pointer is supplied unchanged to every callback defined by this
      *          interface.
-     **********************************************************************************************************************************/
+     */
     void* Context;
 
-}MK_ScanInterfaceTypeDef;
+}MK_ScanInterface_t;
 
 /**********************************************************************************************************************************
  Data

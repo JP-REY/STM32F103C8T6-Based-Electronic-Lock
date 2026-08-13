@@ -13,7 +13,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 24, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_BUSINTERFACE_H_
@@ -26,29 +26,30 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "stdint.h"
 #include "stdbool.h"
+#include "stddef.h"
+
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Status returned by HD44780 bus interface operations.
  *
  * @note    Returned by bus interface implementations to indicate whether the
  *          requested transfer was successfully completed.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_BUS_OPERATION_OK,
     HD44780_BUS_OPERATION_FAIL
 
-}HD44780_BusOpStatusTypeDef;
+}HD44780_BusOpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Selects the target HD44780 internal register.
  *
  * @details Defines the state of the Register Select (RS) signal during a bus
@@ -56,15 +57,15 @@ typedef enum
  *
  * @note    HD44780_BUS_COMMAND selects the Instruction Register (RS = 0).
  *          HD44780_BUS_DATA selects the Data Register (RS = 1).
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_BUS_COMMAND = 0,
     HD44780_BUS_DATA
 
-}HD44780_RegisterSelectTypeDef;
+}HD44780_RegisterSelect_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Abstract interface used by the HD44780 driver to access the display bus.
  *
  * @details This structure provides the hardware abstraction layer between the
@@ -74,10 +75,10 @@ typedef enum
  *
  * @note    The HD44780 driver interacts exclusively through this interface and
  *          is independent of the underlying hardware implementation.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-   /**********************************************************************************************************************************
+   /**
     * @brief  	Transfer a 4-bit value to the display data bus (D4-D7).
     *
     * @details	Performs a complete nibble write transaction using the underlying
@@ -90,19 +91,19 @@ typedef struct
     *
     * @return  HD44780_BUS_OPERATION_OK   - Indicates that HD44780 bus transfer operation has been succeed.
     * @return  HD44780_BUS_OPERATION_FAIL - Indicates that HD44780 bus transfer operation has been failed.
-    **********************************************************************************************************************************/
-    HD44780_BusOpStatusTypeDef (*TransferNibble) (void* Context, uint8_t Nibble, HD44780_RegisterSelectTypeDef Rs);
+    */
+    HD44780_BusOpStatus_t (*TransferNibble) (void* Context, uint8_t Nibble, HD44780_RegisterSelect_t Rs);
 
-   /**********************************************************************************************************************************
+   /**
     * @brief   Pointer to the concrete bus adapter context.
     *
     * @details Opaque pointer owned by the adapter implementation. Its actual
     *          type depends on the selected hardware backend (e.g. PCF8574,
     *          direct GPIO, shift register, etc.).
-    **********************************************************************************************************************************/
+    */
     void* Context;
 
-}HD44780_BusInterfaceTypeDef;
+}HD44780_BusInterface_t;
 
 /**********************************************************************************************************************************
  Data

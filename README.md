@@ -878,11 +878,11 @@ void App_KeyboardTask(void* Argument)
 
     for(;;)
     {
-        MK_OutputTypeDef output;
+        MK_Output_t output;
 
         if(MK_Read(&Keyboard, &output) == MK_OPERATION_OK)
         {
-            if(output.OutputAction != MK_KEY_ACTION_NONE)
+            if(output.Action != MK_KEY_ACTION_NONE)
             {
                 App_PublishKeyboardEvent(&output);
             }
@@ -904,7 +904,7 @@ Keyboard Task rules:
 - one call to `MK_Read()` per period;
 - bounded work with no blocking wait other than the periodic delay;
 - no display, sound, authentication or actuator calls;
-- publish only `MK_KeyCodeTypeDef` plus `MK_KeyActionTypeDef` semantics;
+- publish only `MK_KeyCode_t` plus `MK_KeyAction_t` semantics;
 - do not modify the credential candidate;
 - do not block when the queue is full;
 - report scan/queue failures through a bounded application fault path.
@@ -923,7 +923,7 @@ void App_ApplicationTask(void* Argument)
 {
     for(;;)
     {
-        MK_OutputTypeDef keyboard_event;
+        MK_Output_t keyboard_event;
         const bool received = App_WaitKeyboardEvent(
             &keyboard_event,
             APP_UPDATE_PERIOD_MS
@@ -1015,13 +1015,13 @@ The inter-task message contains the existing Matrix Keyboard output semantics:
 ```c
 typedef struct
 {
-    MK_KeyCodeTypeDef   Key;
-    MK_KeyActionTypeDef Action;
+    MK_KeyCode_t   Key;
+    MK_KeyAction_t Action;
 
-}App_KeyboardEventTypeDef;
+}App_KeyboardEvent_t;
 ```
 
-The exact public type may reuse or adapt `MK_OutputTypeDef`, but the queue
+The exact public type may reuse or adapt `MK_Output_t`, but the queue
 payload shall remain a value object with no hardware information.
 
 ### Application Events
@@ -1757,10 +1757,10 @@ Naming follows the current module-oriented vocabulary:
 
 | Element | Pattern | Example |
 | --- | --- | --- |
-| Public type | `<Module>_<Role>TypeDef` | `MK_OutputTypeDef` |
-| Runtime instance | `<Module>_HandleTypeDef` | `LED_HandleTypeDef` |
-| Immutable initialization | `<Module>_ConfigTypeDef` | `MK_ConfigTypeDef` |
-| Operation status | `<Module>_OpStatusTypeDef` | `HD44780_OpStatusTypeDef` |
+| Public type | `<Module>_<Role>_t` | `MK_Output_t` |
+| Runtime instance | `<Module>_Handle_t` | `LED_Handle_t` |
+| Immutable initialization | `<Module>_Config_t` | `MK_Config_t` |
+| Operation status | `<Module>_OpStatus_t` | `HD44780_OpStatus_t` |
 | Enumeration value | Uppercase module prefix plus semantic value | `MK_KEY_ACTION_CLICK` |
 | Public function | Module prefix plus action | `MK_Read()` |
 | Unit-bearing value | Meaning followed by unit suffix | `debounce_time_ms` |
@@ -1794,8 +1794,9 @@ Example:
 /** @brief Immutable initialization data for one service instance. */
 typedef struct
 {
-    uint32_t entry_timeout_ms; /**< Credential inactivity timeout in milliseconds; must be nonzero. */
-    const Time_Platform *time; /**< Non-owning monotonic time dependency; must remain valid for the instance lifetime. */
+    uint32_t entry_timeout_ms; /*< Credential inactivity timeout in milliseconds; must be nonzero.                    */
+    const Time_Platform *time; /*< Non-owning monotonic time dependency; must remain valid for the instance lifetime. */
+
 } Example_Service_Config;
 ```
 
@@ -1810,18 +1811,20 @@ Every public function shall document:
 ```c
 /**
  * @brief   Concise action and result.
+ * 
  * @details Behavior, side effects and state transition, when needed.
  *
- * @param[in]     object  Valid initialized instance; must not be NULL.
- * @param[in,out] value   Meaning, unit, range, ownership and capacity.
+ * @param[in]     object  - Valid initialized instance; must not be NULL.
+ * @param[in,out] value   - Meaning, unit, range, ownership and capacity.
  *
  * @pre     Preconditions not enforceable by the type system.
+ * 
  * @note    Timing, task-context or reentrancy information.
+ * 
  * @warning Safety restriction or irreversible side effect, when applicable.
  *
- * @return MODULE_STATUS_OK on success.
- * @return MODULE_STATUS_INVALID_ARGUMENT when a mandatory argument is invalid.
- * @return MODULE_STATUS_DEVICE_ERROR when the dependency cannot complete.
+ * @return MODULE_STATUS_OK   - On success.
+ * @return MODULE_STATUS_FAIL - When a mandatory argument is invalid or the dependency cannot complete.
  */
 ```
 

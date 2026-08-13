@@ -4,12 +4,13 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 15, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
 #include "Led_Driver.h"
+#include "GPIO_Platform_Interface.h"
 #include "Time_Platform_Interface.h"
 
 /**********************************************************************************************************************************
@@ -32,7 +33,7 @@
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief    Checks whether the LED driver has been initialized.
  *
  * @details  Performs a NULL-pointer check and verifies the initialization
@@ -40,22 +41,22 @@
  *
  * @param    Device - Pointer to the LED driver handle.
  *
- * @return   true  - if Device isc valid and initialized.
- * @return   false - if Device is NULL or has not been initialized.
- **********************************************************************************************************************************/
-static inline bool LED_IsInit(LED_HandleTypeDef* Device)
+ * @return   true  - Whether Device is valid and initialized.
+ * @return   false - Whether Device is NULL or has not been initialized.
+ */
+static inline bool LED_IsInit(LED_Handle_t* Device)
 {
     return Device == NULL ? false : Device->_initialized;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Sets the currently active LED effect.
  *
  * @details  Updates the current effect stored in the LED driver handle and
  *           resets the effect timing reference using the platform millisecond
  *           time base.
  *
- *           The function only accepts effects defined by LED_EffectTypeDef.
+ *           The function only accepts effects defined by LED_Effect_t.
  *           It is intended for internal use by the LED driver.
  *
  *           LED_EFFECT_STATIC - selects static LED operation with no
@@ -67,10 +68,10 @@ static inline bool LED_IsInit(LED_HandleTypeDef* Device)
  * @param    Device - Pointer to the LED driver handle.
  * @param    Effect - Effect to be activated.
  *
- * @return   LED_OPERATION_OK   - if the effect was successfully selected.
- * @return   LED_OPERATION_FAIL - if Device is NULL or not initialized.
- **********************************************************************************************************************************/
-static inline LED_OpStatusTypeDef LED_SetEffect(LED_HandleTypeDef* Device, LED_EffectTypeDef Effect)
+ * @return   LED_OPERATION_OK   - Whether the effect was successfully selected.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL or not initialized.
+ */
+static inline LED_OpStatus_t LED_SetEffect(LED_Handle_t* Device, LED_Effect_t Effect)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
@@ -79,7 +80,7 @@ static inline LED_OpStatusTypeDef LED_SetEffect(LED_HandleTypeDef* Device, LED_E
     
     uint32_t now = Platform_GetMillis();
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     switch(Effect)
     {
@@ -102,7 +103,7 @@ static inline LED_OpStatusTypeDef LED_SetEffect(LED_HandleTypeDef* Device, LED_E
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief    Initializes an LED driver instance.
  *
  * @details  Associates the LED driver with a previously configured GPIO
@@ -128,10 +129,10 @@ static inline LED_OpStatusTypeDef LED_SetEffect(LED_HandleTypeDef* Device, LED_E
  * @note     The GPIO platform interface must be configured for output
  *           operation before the LED driver is initialized.
  * 
- * @return   LED_OPERATION_OK   - if the LED driver and GPIO were successfully initialized.
- * @return   LED_OPERATION_FAIL - if Device is NULL or GPIO initialization fails.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_Init(LED_HandleTypeDef* Device, GPIO_HandleTypeDef* Gpio, LED_ActiveLevelTypeDef ActiveLevel)
+ * @return   LED_OPERATION_OK   - Whether the LED driver and GPIO were successfully initialized.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL or GPIO initialization fails.
+ */
+LED_OpStatus_t LED_Init(LED_Handle_t* Device, void* Gpio, LED_ActiveLevel_t ActiveLevel)
 {
     if(Device == NULL || Gpio == NULL ||
       (ActiveLevel != LED_ACTIVE_HIGH &&
@@ -140,7 +141,7 @@ LED_OpStatusTypeDef LED_Init(LED_HandleTypeDef* Device, GPIO_HandleTypeDef* Gpio
         return LED_OPERATION_FAIL;
     }
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     Device->_gpio                    = Gpio;
     Device->_current_state           = LED_STATE_OFF;
@@ -160,7 +161,7 @@ LED_OpStatusTypeDef LED_Init(LED_HandleTypeDef* Device, GPIO_HandleTypeDef* Gpio
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Turns the LED on.
  *
  * @details  Drives the LED GPIO to its configured active electrical level
@@ -178,29 +179,29 @@ LED_OpStatusTypeDef LED_Init(LED_HandleTypeDef* Device, GPIO_HandleTypeDef* Gpio
  *           configured timed effect. LED_Update() may subsequently modify
  *           the LED state if an effect remains active.
  * 
- * @return   LED_OPERATION_OK   - if the GPIO was successfully set.
- * @return   LED_OPERATION_FAIL - if Device is NULL, not initialized, or the
- *                                GPIO operation fails.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_On(LED_HandleTypeDef* Device)
+ * @return   LED_OPERATION_OK   - Whether the GPIO was successfully set.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL, not initialized, 
+ *                                or the GPIO operation fails.
+ */
+LED_OpStatus_t LED_On(LED_Handle_t* Device)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
         return LED_OPERATION_FAIL;
     }
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     if(Device->_active_level == LED_ACTIVE_LOW)
     {
-        if(PGPIO_Reset(Device->_gpio) != GPIO_OPERATION_OK)
+        if(PGPIO_Reset((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
             return LED_OPERATION_FAIL;
     }
 
     else
     {
-        if(PGPIO_Set(Device->_gpio) != GPIO_OPERATION_OK)
+        if(PGPIO_Set((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
             return LED_OPERATION_FAIL;
     }
@@ -211,7 +212,7 @@ LED_OpStatusTypeDef LED_On(LED_HandleTypeDef* Device)
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Turns the LED off.
  *
  * @details  Drives the LED GPIO to its configured inactive electrical level
@@ -229,29 +230,29 @@ LED_OpStatusTypeDef LED_On(LED_HandleTypeDef* Device)
  *           configured timed effect. LED_Update() may subsequently modify
  *           the LED state if an effect remains active.
  * 
- * @return   LED_OPERATION_OK   - if the GPIO was successfully set.
- * @return   LED_OPERATION_FAIL - if Device is NULL, not initialized, or the
- *                                GPIO operation fails.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_Off(LED_HandleTypeDef* Device)
+ * @return   LED_OPERATION_OK   - Whether the GPIO was successfully set.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL, not initialized, 
+ *                                or the GPIO operation fails.
+ */
+LED_OpStatus_t LED_Off(LED_Handle_t* Device)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
         return LED_OPERATION_FAIL;
     }
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     if(Device->_active_level == LED_ACTIVE_LOW)
     {
-        if(PGPIO_Set(Device->_gpio) != GPIO_OPERATION_OK)
+        if(PGPIO_Set((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
             return LED_OPERATION_FAIL;
     }
 
     else
     {
-        if(PGPIO_Reset(Device->_gpio) != GPIO_OPERATION_OK)
+        if(PGPIO_Reset((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
             return LED_OPERATION_FAIL;
     }
@@ -262,7 +263,7 @@ LED_OpStatusTypeDef LED_Off(LED_HandleTypeDef* Device)
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Enables continuous LED blinking.
  *
  * @details  Configures the LED driver to execute the blink effect using
@@ -278,10 +279,10 @@ LED_OpStatusTypeDef LED_Off(LED_HandleTypeDef* Device)
  * @note     LED_Update() must be called periodically while the blink effect
  *           is active.
  *
- * @return   LED_OPERATION_OK   - if the blink effect was configured.
- * @return   LED_OPERATION_FAIL - if Device is NULL or not initialized.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_BlinkOn(LED_HandleTypeDef* Device, uint32_t BlinkTimeMs)
+ * @return   LED_OPERATION_OK   - Whether the blink effect was configured.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL or not initialized.
+ */
+LED_OpStatus_t LED_BlinkOn(LED_Handle_t* Device, uint32_t BlinkTimeMs)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
@@ -290,7 +291,7 @@ LED_OpStatusTypeDef LED_BlinkOn(LED_HandleTypeDef* Device, uint32_t BlinkTimeMs)
 
     uint32_t now = Platform_GetMillis();
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     Device->_blink_time_interval_ms  = BlinkTimeMs;
     Device->_last_update_time_ms   = now;
@@ -300,7 +301,7 @@ LED_OpStatusTypeDef LED_BlinkOn(LED_HandleTypeDef* Device, uint32_t BlinkTimeMs)
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Disables the continuous LED blink effect.
  *
  * @details  Clears the configured blink interval and changes the current
@@ -310,17 +311,17 @@ LED_OpStatusTypeDef LED_BlinkOn(LED_HandleTypeDef* Device, uint32_t BlinkTimeMs)
  *
  * @param    Device - Pointer to the LED driver handle.
  *
- * @return   LED_OPERATION_OK   - if the blink effect was disabled.
- * @return   LED_OPERATION_FAIL - if Device is NULL or not initialized.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_BlinkOff(LED_HandleTypeDef* Device)
+ * @return   LED_OPERATION_OK   - Whether the blink effect was disabled.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL or not initialized.
+ */
+LED_OpStatus_t LED_BlinkOff(LED_Handle_t* Device)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
         return LED_OPERATION_FAIL;
     }
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     Device->_blink_time_interval_ms  = 0;
     Device->_last_update_time_ms   = 0;
@@ -330,7 +331,7 @@ LED_OpStatusTypeDef LED_BlinkOff(LED_HandleTypeDef* Device)
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Triggers a finite LED effect.
  *
  * @details  Configures a finite pulse or flash sequence using the specified
@@ -357,18 +358,18 @@ LED_OpStatusTypeDef LED_BlinkOff(LED_HandleTypeDef* Device)
  * @note     The effect is non-blocking. LED_Update() must be called
  *           periodically while the effect is active.
  *
- * @return   LED_OPERATION_OK   - if the effect was successfully triggered.
- * @return   LED_OPERATION_FAIL - if Device is NULL, not initialized, or
- *                                the effect could not be configured.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_TriggerEffect(LED_HandleTypeDef* Device, LED_EffectTypeDef Effect, uint32_t Interval, uint16_t Repeats)
+ * @return   LED_OPERATION_OK   - Whether the GPIO was successfully set.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL, not initialized, 
+ *                                or the GPIO operation fails.
+ */
+LED_OpStatus_t LED_TriggerEffect(LED_Handle_t* Device, LED_Effect_t Effect, uint32_t Interval, uint16_t Repeats)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
         return LED_OPERATION_FAIL;
     }
 
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     Device->_effect_time_interval_ms   = Interval;
     Device->_effect_repeat    = Repeats;
@@ -388,7 +389,7 @@ LED_OpStatusTypeDef LED_TriggerEffect(LED_HandleTypeDef* Device, LED_EffectTypeD
     return LED_OPERATION_OK;
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief    Updates the currently active LED effect.
  *
  * @details  Executes the state transitions required by the currently active
@@ -417,12 +418,12 @@ LED_OpStatusTypeDef LED_TriggerEffect(LED_HandleTypeDef* Device, LED_EffectTypeD
  * @note     The function is intended for execution from the application's
  *           main loop or from a periodic task.
  *
- * @return   LED_OPERATION_OK   - if the effect update was processed
- *                               successfully.
- * @return   LED_OPERATION_FAIL - if Device is NULL, not initialized, or
- *                               an underlying GPIO operation fails.
- **********************************************************************************************************************************/
-LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
+ * @return   LED_OPERATION_OK   - Whether the effect update was processed
+ *                                successfully.
+ * @return   LED_OPERATION_FAIL - Whether Device is NULL, not initialized, 
+ *                                or an underlying GPIO operation fails.
+ */
+LED_OpStatus_t LED_Update(LED_Handle_t* Device)
 {
     if(Device == NULL || !LED_IsInit(Device))
     {
@@ -431,7 +432,7 @@ LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
     
     uint32_t now = Platform_GetMillis();
     
-    LED_EffectContextTypeDef* fx_ctx = &Device->_effect_context;
+    LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
     switch(fx_ctx->_current_effect)
     {
@@ -441,13 +442,13 @@ LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
             {
                 Device->_last_update_time_ms = now;
 
-                if(PGPIO_Toggle(Device->_gpio) != GPIO_OPERATION_OK)
+                if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
                     return LED_OPERATION_FAIL;
 
-                Device->_current_state  = PGPIO_GetLevel(Device->_gpio) == GPIO_LEVEL_HIGH ?
-                                                                           LED_STATE_ON    :
-                                                                           LED_STATE_OFF   ;
+                Device->_current_state  = PGPIO_GetLevel((GPIO_Handle_t*)Device->_gpio) == GPIO_LEVEL_HIGH ?
+                                                                                           LED_STATE_ON    :
+                                                                                           LED_STATE_OFF   ;
             }
         }
 
@@ -463,7 +464,7 @@ LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
 
                     Device->_effect_counter--;
 
-                    if(PGPIO_Toggle(Device->_gpio) != GPIO_OPERATION_OK)
+                    if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
                         return LED_OPERATION_FAIL;
 
@@ -494,7 +495,7 @@ LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
 
                     Device->_effect_counter--;
 
-                    if(PGPIO_Toggle(Device->_gpio) != GPIO_OPERATION_OK)
+                    if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
 
                         return LED_OPERATION_FAIL;
                 }
@@ -520,7 +521,7 @@ LED_OpStatusTypeDef LED_Update(LED_HandleTypeDef* Device)
         break;
 
         default:
-        break;
+            break;
     }
 
     return LED_OPERATION_OK;

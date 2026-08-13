@@ -16,14 +16,14 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Ago 07, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
 #include "I2C_Platform_Interface.h"
-#include "i2c.h"
+#include "stm32f4xx.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -46,7 +46,7 @@
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Transmits a sequence of bytes to an I2C slave device.
  *
  * @details This function provides the platform-independent I2C write operation required by higher-level drivers.
@@ -70,8 +70,8 @@
  * @return  I2C_OPERATION_ERROR    - An I2C communication error occurred.
  * @return  I2C_OPERATION_BUSY     - The I2C resource is currently unavailable.
  * @return  I2C_OPERATION_TIMEOUT  - The operation did not complete within the implementation-defined timeout.
- ********** ************************************************************************************************************************/
-PI2C_OpStatusTypeDef PI2C_Write(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
+ */
+I2C_OpStatus_t PI2C_Write(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
 {
     HAL_StatusTypeDef HAL_I2C_Status = HAL_I2C_Master_Transmit((I2C_HandleTypeDef*)(Context), (Address << 1), Data, Size, Timeout);
 
@@ -100,7 +100,7 @@ PI2C_OpStatusTypeDef PI2C_Write(void* Context, uint8_t Address, uint8_t *Data, u
     }
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Receives a sequence of bytes from an I2C slave device.
  *
  * @details This function provides the platform-independent I2C read operation required by higher-level drivers.
@@ -124,8 +124,8 @@ PI2C_OpStatusTypeDef PI2C_Write(void* Context, uint8_t Address, uint8_t *Data, u
  * @return  I2C_OPERATION_ERROR    - An I2C communication error occurred.
  * @return  I2C_OPERATION_BUSY     - The I2C resource is currently unavailable.
  * @return  I2C_OPERATION_TIMEOUT  - The operation did not complete within the implementation-defined timeout.
- ********** ************************************************************************************************************************/
-PI2C_OpStatusTypeDef PI2C_Read(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
+ */
+I2C_OpStatus_t PI2C_Read(void* Context, uint8_t Address, uint8_t *Data, uint16_t Size, uint32_t Timeout)
 {
     HAL_StatusTypeDef HAL_I2C_Status = HAL_I2C_Master_Receive((I2C_HandleTypeDef*)(Context), (Address << 1), Data, Size, Timeout);
 

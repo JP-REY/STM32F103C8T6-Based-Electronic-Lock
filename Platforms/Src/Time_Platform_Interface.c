@@ -4,13 +4,14 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 22, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
 #include "Time_Platform_Interface.h"
 #include "tim.h"
+#include "stm32f4xx.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -33,7 +34,7 @@
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Generates a blocking delay in milliseconds.
  *
  * @details Waits until the specified number of milliseconds has elapsed using the HAL system tick counter.
@@ -45,18 +46,16 @@
  *          This function should not be used in time-critical execution paths.
  *
  * @return  void
- **********************************************************************************************************************************/
+ */
 void Platform_DelayMs(uint32_t Delay)
 {
     uint32_t wait_time  = Delay;
     uint32_t tick_start = HAL_GetTick();
 
-    while((HAL_GetTick() - tick_start) < wait_time)
-    {
-    }
+    while((HAL_GetTick() - tick_start) < wait_time){}
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current system time in milliseconds.
  *
  * @param   void
@@ -64,13 +63,13 @@ void Platform_DelayMs(uint32_t Delay)
  * @details Retrieves the current HAL system tick value.
  *
  * @return  Current system uptime in milliseconds.
- **********************************************************************************************************************************/
+ */
 uint32_t Platform_GetMillis(void)
 {
     return HAL_GetTick();
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Generates a blocking delay in microseconds.
  *
  * @details Waits until the specified number of microseconds has elapsed using the hardware timer configured
@@ -84,19 +83,16 @@ uint32_t Platform_GetMillis(void)
  *          This function performs a busy wait and blocks the CPU until completion.
  *
  * @return  void
- **********************************************************************************************************************************/
+ */
 void Platform_DelayUs(uint32_t Delay)
 {
     uint32_t wait_time  = Delay;
     uint32_t tick_start = Platform_GetMicros();
 
-    while(Platform_GetMicros() - tick_start < wait_time)
-    {
-      /* Do nothing */
-    }
+    while(Platform_GetMicros() - tick_start < wait_time){}
 }
 
-/**********************************************************************************************************************************
+/**
  * @brief   Returns the current hardware timer counter value.
  *
  * @param   void
@@ -107,7 +103,7 @@ void Platform_DelayUs(uint32_t Delay)
  *          timer configuration.
  *
  * @return  Current timer counter value in microseconds.
- **********************************************************************************************************************************/
+ */
 uint32_t Platform_GetMicros(void)
 {
     return htim2.Instance->CNT;

@@ -14,7 +14,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Ago 08, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_BUZZER_INC_BUZZER_DRIVER_H_
@@ -27,11 +27,10 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
+#include "PWM_Platform_Interface.h"
 #include "stdint.h"
 #include "stdbool.h"
 #include "stddef.h"
-#include "PWM_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -39,20 +38,20 @@ extern "C" {
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Defines the operation status returned by the buzzer driver.
  *
  * @details This enumeration indicates whether a buzzer operation was
  *          successfully executed or failed.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     BUZZER_OPERATION_OK,
     BUZZER_OPERATION_FAIL
 
-}Buzzer_OpStatusTypeDef;
+}Buzzer_OpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Represents the buzzer device instance.
  *
  * @details This structure stores the runtime context required by the buzzer
@@ -65,14 +64,14 @@ typedef enum
  * @warning The structure members are private data and shall not be accessed
  *          or modified directly by the application. The buzzer driver API
  *          shall be used to manage the device state.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-    /* << Private data. Do not read or modify >> */
-    /* << Pointer to the PWM platform handle used by the buzzer. >> */ PWM_HandleTypeDef* _context;
-    /* << Indicates wheter buzzer instance has been initialized. >> */ bool               _initialized;
+                                  /*< Private data. Do not read or modify!                   */
+    PWM_Handle_t* _context;       /*< Pointer to the PWM platform handle used by the buzzer. */
+    bool          _initialized;   /*< Indicates wheter buzzer instance has been initialized. */
 
-}Buzzer_HandleTypeDef;
+}Buzzer_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -80,13 +79,16 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-Buzzer_OpStatusTypeDef Buzzer_Init         (Buzzer_HandleTypeDef* Device, PWM_HandleTypeDef* Context);
-Buzzer_OpStatusTypeDef Buzzer_SetFrequency (Buzzer_HandleTypeDef* Device, uint32_t Frequency);
-Buzzer_OpStatusTypeDef Buzzer_On           (Buzzer_HandleTypeDef* Device);
-Buzzer_OpStatusTypeDef Buzzer_Off          (Buzzer_HandleTypeDef* Device);
+Buzzer_OpStatus_t Buzzer_Init         (Buzzer_Handle_t* Device, PWM_Handle_t* Context);
+Buzzer_OpStatus_t Buzzer_SetFrequency (Buzzer_Handle_t* Device, uint32_t Frequency);
+Buzzer_OpStatus_t Buzzer_On           (Buzzer_Handle_t* Device);
+Buzzer_OpStatus_t Buzzer_Off          (Buzzer_Handle_t* Device);
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* LIBS_COMPONENTS_BUZZER_INC_BUZZER_DRIVER_H_*/
+
+
+

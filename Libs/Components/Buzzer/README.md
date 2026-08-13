@@ -170,15 +170,15 @@ These responsibilities belong to the PWM platform layer.
 
 ### 8.1 Buzzer Handle
 
-The driver uses `Buzzer_HandleTypeDef` to represent a buzzer device instance.
+The driver uses `Buzzer_Handle_t` to represent a buzzer device instance.
 
 ```c
 typedef struct
 {
-    PWM_HandleTypeDef* _context;
-    bool               _initialized;
+    PWM_Handle_t* _context;
+    bool          _initialized;
 
-} Buzzer_HandleTypeDef;
+} Buzzer_Handle_t;
 ```
 
 The handle stores the PWM platform context required by the driver and the internal initialization state of the buzzer.
@@ -188,14 +188,14 @@ The handle stores the PWM platform context required by the driver and the intern
 |`_context`    | PWM platform context.|
 |`initialized` | Internal initialization state of the buzzer.|
 
-The members of `Buzzer_HandleTypeDef` are considered private data and shall not be accessed or modified directly by the application.
+The members of `Buzzer_Handle_t` are considered private data and shall not be accessed or modified directly by the application.
 
 The application shall interact with the buzzer through the public driver API.
 
 
 ### 8.2 Operation Status
 
-The driver uses `Buzzer_OpStatusTypeDef` to report the result of each operation.
+The driver uses `Buzzer_OpStatus_t` to report the result of each operation.
 
 ```c
 typedef enum
@@ -203,7 +203,7 @@ typedef enum
     BUZZER_OPERATION_OK,
     BUZZER_OPERATION_FAIL
 
-} Buzzer_OpStatusTypeDef;
+} Buzzer_OpStatus_t;
 ```
 
 | Status | Description |
@@ -222,9 +222,9 @@ typedef enum
 #### Function Signature
 
 ```c
-Buzzer_OpStatusTypeDef Buzzer_Init(
-    Buzzer_HandleTypeDef* Device,
-    PWM_HandleTypeDef*    Context
+Buzzer_OpStatus_t Buzzer_Init(
+    Buzzer_Handle_t* Device,
+    PWM_Handle_t*    Context
 );
 ```
 #### Parameters
@@ -250,8 +250,8 @@ Buzzer_OpStatusTypeDef Buzzer_Init(
 
 #### Function Signature
 ```c
-Buzzer_OpStatusTypeDef Buzzer_SetFrequency(
-    Buzzer_HandleTypeDef* Device,
+Buzzer_OpStatus_t Buzzer_SetFrequency(
+    Buzzer_Handle_t* Device,
     uint32_t              Frequency
 );
 ```
@@ -278,8 +278,8 @@ Enables the PWM output associated with the buzzer.
 
 #### Function Signature
 ```c
-Buzzer_OpStatusTypeDef Buzzer_On(
-    Buzzer_HandleTypeDef* Device
+Buzzer_OpStatus_t Buzzer_On(
+    Buzzer_Handle_t* Device
 );
 ```
 #### Parameters
@@ -303,8 +303,8 @@ Buzzer_OpStatusTypeDef Buzzer_On(
 
 #### Function Signature
 ```c
-Buzzer_OpStatusTypeDef Buzzer_Off(
-    Buzzer_HandleTypeDef* Device
+Buzzer_OpStatus_t Buzzer_Off(
+    Buzzer_Handle_t* Device
 );
 ```
 
@@ -393,8 +393,8 @@ The following example demonstrates a basic buzzer operation using a `440 Hz` ton
 #include "tim.h"
 #include "Buzzer_Driver.h"
 
-static PWM_HandleTypeDef    PwmHandle;
-static Buzzer_HandleTypeDef BuzzerHandle;
+static PWM_Handle_t    PwmHandle;
+static Buzzer_Handle_t BuzzerHandle;
 
 void BuzzerExample(void)
 {
@@ -470,7 +470,7 @@ This provides:
 
 ### 12.2 Handle-Based Architecture
 
-The driver uses `Buzzer_HandleTypeDef` to represent each buzzer device instance instead of relying on global driver state.
+The driver uses `Buzzer_Handle_t` to represent each buzzer device instance instead of relying on global driver state.
 
 This allows:
 
@@ -482,8 +482,8 @@ This allows:
 Example:
 
 ```c
-Buzzer_HandleTypeDef MainBuzzer;
-Buzzer_HandleTypeDef AlarmBuzzer;
+Buzzer_Handle_t MainBuzzer;
+Buzzer_Handle_t AlarmBuzzer;
 ```
 
 Each handle can reference a different PWM platform instance.
@@ -495,10 +495,10 @@ The buzzer handle stores internal driver state:
 ```c
 typedef struct
 {
-    PWM_HandleTypeDef* _context;
+    PWM_Handle_t* _context;
     bool               _initialized;
 
-} Buzzer_HandleTypeDef;
+} Buzzer_Handle_t;
 ```
 
 The `_context` and `_initialized` members are private driver data.
@@ -529,7 +529,7 @@ This separation prevents the driver from becoming coupled to a specific timer pe
 
 ## 13. Error Handling
 
-All public buzzer operations return a `Buzzer_OpStatusTypeDef` value.
+All public buzzer operations return a `Buzzer_OpStatus_t` value.
 
 The application should verify the returned status whenever the success of an operation is relevant to system behavior.
 
@@ -557,12 +557,12 @@ The driver shall propagate the failure status when the requested PWM operation c
 
 The following constraints apply when using the driver:
 
-- The `PWM_HandleTypeDef` passed to `Buzzer_Init()` must be valid and properly initialized.
-- The `Buzzer_HandleTypeDef` must be initialized before calling other buzzer operations.
+- The `PWM_Handle_t` passed to `Buzzer_Init()` must be valid and properly initialized.
+- The `Buzzer_Handle_t` must be initialized before calling other buzzer operations.
 - The PWM context referenced by the buzzer handle must remain valid while the buzzer is in use.
 - The requested frequency must be supported by the underlying PWM platform.
 - The buzzer output shall be controlled through `Buzzer_On()` and `Buzzer_Off()`.
-- The internal members of `Buzzer_HandleTypeDef` shall not be accessed or modified directly by the application.
+- The internal members of `Buzzer_Handle_t` shall not be accessed or modified directly by the application.
 - Application-specific timing, melodies, alarm patterns, and notification sequences shall be implemented outside the driver.
 
 ---

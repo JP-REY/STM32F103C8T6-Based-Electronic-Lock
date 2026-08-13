@@ -186,7 +186,7 @@ flowchart TD
 The communication between the HD44780 driver and the physical bus is abstracted through:
 
 ```c
-HD44780_BusInterfaceTypeDef
+HD44780_BusInterface_t
 ```
 
 Definition:
@@ -194,15 +194,15 @@ Definition:
 ```c
 typedef struct
 {
-    HD44780_BusOpStatusTypeDef (*TransferNibble)(
+    HD44780_BusOpStatus_t (*TransferNibble)(
         void* Context,
         uint8_t Nibble,
-        HD44780_RegisterSelectTypeDef Rs
+        HD44780_RegisterSelect_t Rs
     );
 
     void* Context;
 
-} HD44780_BusInterfaceTypeDef;
+} HD44780_BusInterface_t;
 ```
 
 The driver communicates only through the `TransferNibble()` callback.
@@ -232,8 +232,8 @@ Initialization:
 
 ```c
 HD44780_PCF8574_BusAdapterInit(
-    HD44780_BusInterfaceTypeDef* Bus,
-    PCF8574_HandleTypeDef* PCF8574_Instance
+    HD44780_BusInterface_t* Bus,
+    PCF8574_Handle_t* PCF8574_Instance
 );
 ```
 
@@ -244,7 +244,7 @@ The adapter stores the PCF8574 instance as context and exposes the required bus 
 Backlight control is abstracted through the:
 
 ```c
-HD44780_BacklightInterfaceTypeDef
+HD44780_BacklightInterface_t
 ```
 
 interface.
@@ -254,11 +254,11 @@ Definition:
 ```c
 typedef struct
 {
-    HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOn)(void* Context);
 
-    HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOff)(void* Context);
 
-    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(
+    HD44780_BacklightOpStatus_t (*SetBrightness)(
         void* Context,
         uint16_t Level
     );
@@ -267,7 +267,7 @@ typedef struct
 
     void* Context;
 
-} HD44780_BacklightInterfaceTypeDef;
+} HD44780_BacklightInterface_t;
 ```
 
 The HD44780 driver does not know how the backlight is physically controlled.
@@ -293,8 +293,8 @@ The adapter converts a brightness level into a PWM duty cycle.
 Initialization:
 
 ```c
-HD44780_BacklightOpStatusTypeDef HD44780_PWM_BacklightAdapterInit(
-    HD44780_BacklightInterfaceTypeDef* Backlight,
+HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(
+    HD44780_BacklightInterface_t* Backlight,
     void* Context
 );
 ```
@@ -302,13 +302,13 @@ HD44780_BacklightOpStatusTypeDef HD44780_PWM_BacklightAdapterInit(
 The context must point to a PWM instance:
 
 ```c
-PWM_HandleTypeDef
+PWM_Handle_t
 ```
 
 Example:
 
 ```c
-PWM_HandleTypeDef LCD_BacklightAdapter;
+PWM_Handle_t LCD_BacklightAdapter;
 
 HD44780_PWM_BacklightAdapterInit(
     &LCD._backlight,
@@ -397,20 +397,20 @@ These are required only when using the provided adapters.
 
 ### 7.1 HD44780 Handle
 
-The driver uses `HD44780_HandleTypeDef` to represent an HD44780 LCD device instance.
+The driver uses `HD44780_Handle_t` to represent an HD44780 LCD device instance.
 
 ```c
 typedef struct
 {
-    HD44780_BusInterfaceTypeDef       _bus;
-    HD44780_BacklightInterfaceTypeDef _backlight;
-    HD44780_LineNumberTypeDef         _rows;
-    uint8_t                           _cols;
-    HD44780_InterfaceModeTypeDef      _interface_mode;
-    HD44780_CharacterFontTypeDef      _font_dot_size;
-    bool                              _initialized;
+    HD44780_BusInterface_t       _bus;
+    HD44780_BacklightInterface_t _backlight;
+    HD44780_LineNumber_t         _rows;
+    uint8_t                      _cols;
+    HD44780_InterfaceMode_t      _interface_mode;
+    HD44780_CharacterFont_t      _font_dot_size;
+    bool                         _initialized;
 
-} HD44780_HandleTypeDef;
+} HD44780_Handle_t;
 ```
 
 | Member            | Description                                                    |
@@ -423,13 +423,13 @@ typedef struct
 | `_font_dot_size`  | Selected character font configuration.                         |
 | `_initialized`    | Internal initialization state of the driver instance.          |
 
-The members of `HD44780_HandleTypeDef` are considered private driver data and shall not be accessed or modified directly by the application after initialization.
+The members of `HD44780_Handle_t` are considered private driver data and shall not be accessed or modified directly by the application after initialization.
 
 The application shall interact with the LCD exclusively through the public driver API.
 
 ### 7.2 Operation Status
 
-The driver uses `HD44780_OpStatusTypeDef` to report the result of driver operations.
+The driver uses `HD44780_OpStatus_t` to report the result of driver operations.
 
 ```c
 typedef enum
@@ -437,7 +437,7 @@ typedef enum
     HD44780_OPERATION_OK,
     HD44780_OPERATION_FAIL
 
-} HD44780_OpStatusTypeDef;
+} HD44780_OpStatus_t;
 ```
 
 | Status                   | Description                       |
@@ -448,7 +448,7 @@ typedef enum
 
 ### 7.3 Interface Mode
 
-The `HD44780_InterfaceModeTypeDef` enumeration defines the controller data interface mode.
+The `HD44780_InterfaceMode_t` enumeration defines the controller data interface mode.
 
 ```c
 typedef enum
@@ -456,7 +456,7 @@ typedef enum
     HD44780_8BIT_MODE,
     HD44780_4BIT_MODE
 
-} HD44780_InterfaceModeTypeDef;
+} HD44780_InterfaceMode_t;
 ```
 
 | Mode                | Description                            |
@@ -468,7 +468,7 @@ Only `HD44780_4BIT_MODE` is currently implemented by the driver.
 
 ### 7.4 Character Font
 
-The `HD44780_CharacterFontTypeDef` enumeration defines the character font configuration.
+The `HD44780_CharacterFont_t` enumeration defines the character font configuration.
 
 ```c
 typedef enum
@@ -476,7 +476,7 @@ typedef enum
     HD44780_5X10_FONT,
     HD44780_5X8_FONT
 
-} HD44780_CharacterFontTypeDef;
+} HD44780_CharacterFont_t;
 ```
 
 | Font                | Description                                              |
@@ -488,7 +488,7 @@ The 5×10 font is supported only with single-line display configuration.
 
 ### 7.5 Display Line Configuration
 
-The `HD44780_LineNumberTypeDef` enumeration defines the number of display lines.
+The `HD44780_LineNumber_t` enumeration defines the number of display lines.
 
 ```c
 typedef enum
@@ -496,7 +496,7 @@ typedef enum
     HD44780_2LINE = 0x01,
     HD44780_1LINE = 0x00
 
-} HD44780_LineNumberTypeDef;
+} HD44780_LineNumber_t;
 ```
 
 | Configuration   | Description                        |
@@ -507,20 +507,20 @@ typedef enum
 
 ### 7.6 Bus Interface
 
-The HD44780 driver communicates with the physical display through `HD44780_BusInterfaceTypeDef`.
+The HD44780 driver communicates with the physical display through `HD44780_BusInterface_t`.
 
 ```c
 typedef struct
 {
-    HD44780_BusOpStatusTypeDef (*TransferNibble)(
+    HD44780_BusOpStatus_t (*TransferNibble)(
         void* Context,
         uint8_t Nibble,
-        HD44780_RegisterSelectTypeDef Rs
+        HD44780_RegisterSelect_t Rs
     );
 
     void* Context;
 
-} HD44780_BusInterfaceTypeDef;
+} HD44780_BusInterface_t;
 ```
 
 | Member           | Description                                                      |
@@ -541,16 +541,16 @@ The current project provides a PCF8574-based I2C bus adapter.
 
 ### 7.7 Backlight Interface
 
-The HD44780 driver controls the LCD backlight through `HD44780_BacklightInterfaceTypeDef`.
+The HD44780 driver controls the LCD backlight through `HD44780_BacklightInterface_t`.
 
 ```c
 typedef struct
 {
-    HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOn)(void* Context);
 
-    HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
+    HD44780_BacklightOpStatus_t (*TurnOff)(void* Context);
 
-    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(
+    HD44780_BacklightOpStatus_t (*SetBrightness)(
         void* Context,
         uint16_t Level
     );
@@ -559,7 +559,7 @@ typedef struct
 
     void* Context;
 
-} HD44780_BacklightInterfaceTypeDef;
+} HD44780_BacklightInterface_t;
 ```
 
 | Member          | Description                                             |
@@ -582,8 +582,8 @@ The brightness level is expressed as a percentage from `0` to `100`. The actual 
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_Init(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_Init(
+    HD44780_Handle_t* Device
 );
 ```
 #### Parameters
@@ -610,8 +610,8 @@ The initialization sequence configures the controller for the selected interface
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_Clear(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_Clear(
+    HD44780_Handle_t* Device
 );
 ```
 
@@ -636,8 +636,8 @@ HD44780_OpStatusTypeDef HD44780_Clear(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_Home(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_Home(
+    HD44780_Handle_t* Device
 );
 ```
 
@@ -661,28 +661,28 @@ HD44780_OpStatusTypeDef HD44780_Home(
 
 #### Function Signatures
 ```c
-HD44780_OpStatusTypeDef HD44780_DisplayOn(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_DisplayOn(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_DisplayOff(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_DisplayOff(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_CursorOn(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_CursorOn(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_CursorOff(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_CursorOff(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_BlinkOn(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_BlinkOn(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_BlinkOff(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_BlinkOff(
+    HD44780_Handle_t* Device
 );
 ```
 
@@ -703,20 +703,20 @@ Each function returns `HD44780_OPERATION_OK` when the requested command is succe
 
 #### Function Signatures
 ```c
-HD44780_OpStatusTypeDef HD44780_IncrementCursor(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_IncrementCursor(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_DecrementCursor(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_DecrementCursor(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_EnableShift(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_EnableShift(
+    HD44780_Handle_t* Device
 );
 
-HD44780_OpStatusTypeDef HD44780_DisableShift(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_DisableShift(
+    HD44780_Handle_t* Device
 );
 ```
 
@@ -736,8 +736,8 @@ Each function returns `HD44780_OPERATION_OK` when the requested command is succe
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_SetCursor(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_SetCursor(
+    HD44780_Handle_t* Device,
     uint8_t Row,
     uint8_t Col
 );
@@ -765,8 +765,8 @@ HD44780_OpStatusTypeDef HD44780_SetCursor(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_WriteChar(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_WriteChar(
+    HD44780_Handle_t* Device,
     uint8_t Char
 );
 ```
@@ -793,8 +793,8 @@ HD44780_OpStatusTypeDef HD44780_WriteChar(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_WriteString(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_WriteString(
+    HD44780_Handle_t* Device,
     const char* String
 );
 ```
@@ -820,8 +820,8 @@ HD44780_OpStatusTypeDef HD44780_WriteString(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_PrintLine(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_PrintLine(
+    HD44780_Handle_t* Device,
     uint8_t Row,
     const char* Text
 );
@@ -851,8 +851,8 @@ HD44780_OpStatusTypeDef HD44780_PrintLine(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_ClearLine(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_ClearLine(
+    HD44780_Handle_t* Device,
     uint8_t Row
 );
 ```
@@ -878,8 +878,8 @@ HD44780_OpStatusTypeDef HD44780_ClearLine(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_CreateChar(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_CreateChar(
+    HD44780_Handle_t* Device,
     uint8_t Position,
     const uint8_t* PatternBitMap
 );
@@ -913,8 +913,8 @@ The driver tracks programmed CGRAM positions and restores the cursor to row `0`,
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_WriteCustomChar(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_WriteCustomChar(
+    HD44780_Handle_t* Device,
     uint8_t CharPosition
 );
 ```
@@ -940,8 +940,8 @@ HD44780_OpStatusTypeDef HD44780_WriteCustomChar(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_BacklightOn(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_BacklightOn(
+    HD44780_Handle_t* Device
 );
 ```
 #### Parameters
@@ -964,8 +964,8 @@ If the configured brightness is `0`, the driver requests a brightness of `100` b
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_BacklightOff(
-    HD44780_HandleTypeDef* Device
+HD44780_OpStatus_t HD44780_BacklightOff(
+    HD44780_Handle_t* Device
 );
 ```
 #### Parameters
@@ -989,8 +989,8 @@ HD44780_OpStatusTypeDef HD44780_BacklightOff(
 
 #### Function Signature
 ```c
-HD44780_OpStatusTypeDef HD44780_SetBrightness(
-    HD44780_HandleTypeDef* Device,
+HD44780_OpStatus_t HD44780_SetBrightness(
+    HD44780_Handle_t* Device,
     uint16_t BrightPercent
 );
 ```
@@ -1092,13 +1092,13 @@ Required includes:
 ### 10.1 Driver Objects
 
 ```c
-PCF8574_HandleTypeDef LCD_BusAdapter;
+PCF8574_Handle_t LCD_BusAdapter;
 
 const int16_t LCD_BusAdapter_I2C_Address = 0x20;
 
-PWM_HandleTypeDef LCD_BacklightAdapter;
+PWM_Handle_t LCD_BacklightAdapter;
 
-HD44780_HandleTypeDef LCD =
+HD44780_Handle_t LCD =
 {
     ._cols           = 16,
     ._rows           = HD44780_2LINE,
@@ -1326,8 +1326,8 @@ The HD44780 driver does not access hardware peripherals directly.
 
 The driver communicates only through:
 
-- `HD44780_BusInterfaceTypeDef`
-- `HD44780_BacklightInterfaceTypeDef`
+- `HD44780_BusInterface_t`
+- `HD44780_BacklightInterface_t`
 
 This allows:
 
@@ -1460,7 +1460,7 @@ This allows portability between:
 
 ## 12. Error Handling
 
-The HD44780 driver uses a binary operation status model through `HD44780_OpStatusTypeDef`.
+The HD44780 driver uses a binary operation status model through `HD44780_OpStatus_t`.
 
 ```c
 typedef enum
@@ -1468,7 +1468,7 @@ typedef enum
     HD44780_OPERATION_OK,
     HD44780_OPERATION_FAIL
 
-} HD44780_OpStatusTypeDef;
+} HD44780_OpStatus_t;
 ```
 
 The application shall verify the returned status of driver operations whenever the result is relevant to subsequent execution.
@@ -1495,7 +1495,7 @@ Communication errors originating from the bus adapter are propagated to the HD44
 The bus interface itself provides:
 
 ```c
-HD44780_BusOpStatusTypeDef
+HD44780_BusOpStatus_t
 ```
 
 with:
@@ -1611,7 +1611,7 @@ The driver internally tracks programmed CGRAM positions and rejects attempts to 
 
 ### 13.7 Backlight Availability
 
-Backlight functions require a valid `HD44780_BacklightInterfaceTypeDef` implementation.
+Backlight functions require a valid `HD44780_BacklightInterface_t` implementation.
 
 The HD44780 controller itself does not provide native backlight control. Backlight behavior is therefore determined by the external adapter implementation.
 
@@ -1619,7 +1619,7 @@ The HD44780 controller itself does not provide native backlight control. Backlig
 
 The current implementation is primarily intended for single-display applications.
 
-Although each LCD is represented through an `HD44780_HandleTypeDef`, some runtime state variables are maintained at module scope. Consequently, simultaneous use of multiple LCD instances may result in shared-state conflicts.
+Although each LCD is represented through an `HD44780_Handle_t`, some runtime state variables are maintained at module scope. Consequently, simultaneous use of multiple LCD instances may result in shared-state conflicts.
 
 Complete multi-instance support requires moving all runtime state into the device handle.
 
@@ -1665,7 +1665,7 @@ SPI shift register
 Other I/O expander
 ```
 
-Likewise, the backlight implementation can be changed independently between GPIO, PWM or another hardware mechanism through `HD44780_BacklightInterfaceTypeDef`.
+Likewise, the backlight implementation can be changed independently between GPIO, PWM or another hardware mechanism through `HD44780_BacklightInterface_t`.
 
 
 ```mermaid
@@ -1730,7 +1730,7 @@ Entry mode shift configuration is supported, but advanced display shifting opera
 - Although the driver uses:
 
 ```c
-HD44780_HandleTypeDef
+HD44780_Handle_t
 ```
 
 to represent an instance, some internal state variables are still maintained at module level.
@@ -1742,7 +1742,7 @@ to represent an instance, some internal state variables are still maintained at 
     - Move all runtime state variables into:
 
 ```c
-HD44780_HandleTypeDef
+HD44780_Handle_t
 ```
 
 to achieve complete multi-instance support.
@@ -1757,9 +1757,9 @@ Currently provided adapters:
 - Additional adapters can be created by implementing the corresponding interfaces:
 
 ```c
-HD44780_BusInterfaceTypeDef
+HD44780_BusInterface_t
 
-HD44780_BacklightInterfaceTypeDef
+HD44780_BacklightInterface_t
 ```
 
 Examples:

@@ -14,7 +14,7 @@
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
- * @date    Jul 29, 2026
+ * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_
@@ -27,30 +27,29 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
-#include "stm32f4xx.h"
 #include "stdint.h"
 #include "stdbool.h"
+#include "stddef.h"
 
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
+/**
  * @brief   Status returned by a backlight control operation.
  *
  * @details Indicates whether a backlight operation completed successfully.
- **********************************************************************************************************************************/
+ */
 typedef enum
 {
     HD44780_BACKLIGHT_OP_OK,
     HD44780_BACKLIGHT_OP_FAIL
 
-}HD44780_BacklightOpStatusTypeDef;
+}HD44780_BacklightOpStatus_t;
 
-/**********************************************************************************************************************************
+/**
  * @brief   Generic backlight control interface.
  *
  * @details Provides a hardware-independent interface used by the HD44780 driver
@@ -67,10 +66,10 @@ typedef enum
  *
  * @note    The HD44780 driver interacts exclusively through this interface and
  *          remains completely independent of the underlying hardware implementation.
- **********************************************************************************************************************************/
+ */
 typedef struct
 {
-   /**********************************************************************************************************************************
+   /**
      * @brief   Turns the HD44780 module backlight on.
      *
      * @details Requests the underlying hardware implementation to enable the
@@ -80,10 +79,10 @@ typedef struct
      *                    by the backlight adapter.
      *
      * @return  Status indicating whether the operation completed successfully.
-    **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*TurnOn)(void* Context);
+     */
+    HD44780_BacklightOpStatus_t (*TurnOn) (void* Context);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Turns the HD44780 module backlight off.
      *
      * @details Requests the underlying hardware implementation to disable the
@@ -93,10 +92,10 @@ typedef struct
      *                    by the backlight adapter.
      *
      * @return  Status indicating whether the operation completed successfully.
-     **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*TurnOff)(void* Context);
+     */
+    HD44780_BacklightOpStatus_t (*TurnOff) (void* Context);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Sets the HD44780 module backlight brightness.
      *
      * @details Requests the underlying hardware implementation to adjust the
@@ -111,10 +110,10 @@ typedef struct
      *                            percentage in the range from 0 to 100.
      *
      * @return  Status indicating whether the operation completed successfully.
-     **********************************************************************************************************************************/
-    HD44780_BacklightOpStatusTypeDef (*SetBrightness)(void* Context, uint16_t Level);
+     */
+    HD44780_BacklightOpStatus_t (*SetBrightness) (void* Context, uint16_t Level);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Gets the HD44780 module backlight brightness level.
      *
      * @details Requests the underlying hardware implementation to return the
@@ -135,10 +134,10 @@ typedef struct
      *
      * @return  Current backlight brightness level expressed as a percentage from
      *          0 to 100.
-     **********************************************************************************************************************************/
+     */
     uint16_t (*GetBrightness)(void* Context);
 
-    /**********************************************************************************************************************************
+    /**
      * @brief   Implementation-specific backlight context.
      *
      * @details Opaque pointer forwarded unchanged to every interface callback.
@@ -146,10 +145,10 @@ typedef struct
      *          context, which may contain peripheral handles, GPIO information,
      *          timer configuration, or any other resources required to control the
      *          HD44780 module backlight.
-     **********************************************************************************************************************************/
+     */
     void* Context;
 
-}HD44780_BacklightInterfaceTypeDef;
+}HD44780_BacklightInterface_t;
 
 /**********************************************************************************************************************************
  Data
