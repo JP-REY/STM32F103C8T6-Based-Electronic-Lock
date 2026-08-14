@@ -1,2365 +1,1076 @@
-<h1 align="left">STM32F411-Based Electronic Lock</h1>
+<h1 align="left">Platform Interfaces</h1>
 
 <p align="left">
   <big>
-    Hardware-independent, event-driven electronic lock firmware<br>
-    built for the STM32F411CEU6 using STM32CubeIDE, the STM32 HAL and FreeRTOS.
+    Project-owned boundary between portable firmware modules and the<br>
+    STM32F411CEU6 HAL, generated peripheral handles and hardware registers.
   </big>
 </p>
 
 > [!IMPORTANT]
-> This document is the normative architecture baseline for the project. It
-> defines the V1 product scope, dependency rules, execution model, module
-> boundaries, state machines and safety invariants that shall govern the
-> implementation. Code changes shall conform to this baseline. Architecture
-> changes shall update this document before or together with the affected code.
+> The root [project README](../README.md) is the normative source for product
+> scope and system architecture. This document defines the module-level
+> contract of `Platforms/`. Public headers define the exact callable API; when
+> documentation and code disagree, the public headers take precedence until
+> both are corrected in the same change.
 
 ---
+
 ## Table of Contents
 
-* [1. Document Control](#1-document-control)
-
-  * [1.1 Authority and Conflict Resolution](#11-authority-and-conflict-resolution)
-* [2. Project Objective](#2-project-objective)
-* [3. Engineering Principles](#3-engineering-principles)
-
-  * [3.1 Separation of Time, Behavior and Hardware](#31-separation-of-time-behavior-and-hardware)
-  * [3.2 Dependency Direction](#32-dependency-direction)
-  * [3.3 Non-Blocking Product Behavior](#33-non-blocking-product-behavior)
-  * [3.4 Controlled Complexity](#34-controlled-complexity)
-  * [3.5 Explicit Ownership](#35-explicit-ownership)
-  * [3.6 Static Memory](#36-static-memory)
-* [4. V1 Product Scope](#4-v1-product-scope)
-
-  * [4.1 Included](#41-included)
-  * [4.2 Explicitly Excluded](#42-explicitly-excluded)
-  * [4.3 Initial V1 Parameters](#43-initial-v1-parameters)
-* [5. System Context](#5-system-context)
-
-  * [5.1 Actors and Boundaries](#51-actors-and-boundaries)
-* [6. Hardware Baseline](#6-hardware-baseline)
-
-  * [6.1 MCU and Clock](#61-mcu-and-clock)
-  * [6.2 Peripheral Allocation](#62-peripheral-allocation)
-  * [6.3 Electrical Safety Assumptions](#63-electrical-safety-assumptions)
-  * [6.4 Hardware Decisions Still Required](#64-hardware-decisions-still-required)
-* [7. Software Architecture](#7-software-architecture)
-
-  * [7.1 Layer Model](#71-layer-model)
-  * [7.2 Layer Responsibilities](#72-layer-responsibilities)
-  * [7.3 Allowed Dependency Rules](#73-allowed-dependency-rules)
-  * [7.4 Architectural Invariants](#74-architectural-invariants)
-* [8. Low-Level Architecture](#8-low-level-architecture)
-
-  * [8.1 Platform Layer](#81-platform-layer)
-    * [8.1.1 GPIO Platform Contract](#811-gpio-platform-contract)
-    * [8.1.2 I2C Platform Contract](#812-i2c-platform-contract)
-    * [8.1.3 PWM Platform Contract](#813-pwm-platform-contract)
-    * [8.1.4 Time Platform Contract](#814-time-platform-contract)
-  * [8.2 Component Drivers](#82-component-drivers)
-    * [8.2.1 Driver Rules](#821-driver-rules)
-  * [8.3 Adapter Pattern](#83-adapter-pattern)
-  * [8.4 LCD Data Path](#84-lcd-data-path)
-  * [8.5 Keyboard Data Path](#85-keyboard-data-path)
-  * [8.6 Output Paths](#86-output-paths)
-* [9. High-Level Architecture](#9-high-level-architecture)
-
-  * [9.1 Application Layer](#91-application-layer)
-    * [9.1.1 App Core](#911-app-core)
-    * [9.1.2 Lock Controller](#912-lock-controller)
-  * [9.2 Service Layer](#92-service-layer)
-    * [9.2.1 Credential Entry Service](#921-credential-entry-service)
-    * [9.2.2 Authentication Service](#922-authentication-service)
-    * [9.2.3 Display Render Service](#923-display-render-service)
-    * [9.2.4 Status Indication Service](#924-status-indication-service)
-    * [9.2.5 Sound Generator Service](#925-sound-generator-service)
-    * [9.2.6 Timeout Validation Service](#926-timeout-validation-service)
-    * [9.2.7 Lock Control Service and Lock Actuator Driver](#927-lock-control-service-and-lock-actuator-driver)
-* [10. FreeRTOS Execution Model](#10-freertos-execution-model)
-
-  * [10.1 V1 Task Set](#101-v1-task-set)
-  * [10.2 Scheduler Configuration Contracts](#102-scheduler-configuration-contracts)
-  * [10.3 Keyboard Task Contract](#103-keyboard-task-contract)
-  * [10.4 Application Task Contract](#104-application-task-contract)
-  * [10.5 Queue and Overflow Policy](#105-queue-and-overflow-policy)
-  * [10.6 Concurrency and Resource Ownership](#106-concurrency-and-resource-ownership)
-  * [10.7 ISR Policy](#107-isr-policy)
-* [11. Application Event Model](#11-application-event-model)
-
-  * [11.1 Keyboard-to-Application Message](#111-keyboard-to-application-message)
-  * [11.2 Application Events](#112-application-events)
-* [12. Electronic Lock State Machine](#12-electronic-lock-state-machine)
-
-  * [12.1 Operational Flow](#121-operational-flow)
-  * [12.2 Critical Fault Precedence](#122-critical-fault-precedence)
-  * [12.3 State Responsibilities](#123-state-responsibilities)
-  * [12.4 State Entry and Exit Actions](#124-state-entry-and-exit-actions)
-  * [12.5 Credential Entry Rules](#125-credential-entry-rules)
-  * [12.6 Mandatory FSM Invariants](#126-mandatory-fsm-invariants)
-* [13. End-to-End Behavior](#13-end-to-end-behavior)
-
-  * [13.1 Successful Access](#131-successful-access)
-  * [13.2 Failed Authentication and Lockout](#132-failed-authentication-and-lockout)
-  * [13.3 Peripheral Failure During Access](#133-peripheral-failure-during-access)
-* [14. Timing and Blocking Contracts](#14-timing-and-blocking-contracts)
-
-  * [14.1 V1 Timing Budget](#141-v1-timing-budget)
-  * [14.2 Timeout Evaluation](#142-timeout-evaluation)
-  * [14.3 Blocking Policy](#143-blocking-policy)
-  * [14.4 Measurements Required Before V1 Release](#144-measurements-required-before-v1-release)
-* [15. Initialization and Safe Startup](#15-initialization-and-safe-startup)
-
-  * [15.1 Initialization Sequence](#151-initialization-sequence)
-  * [15.2 Initialization Classification](#152-initialization-classification)
-  * [15.3 Scheduler Failure Hooks](#153-scheduler-failure-hooks)
-* [16. Error, Fault and Security Policy](#16-error-fault-and-security-policy)
-
-  * [16.1 Failure Classes](#161-failure-classes)
-  * [16.2 Status Propagation](#162-status-propagation)
-  * [16.3 Safe Fault Behavior](#163-safe-fault-behavior)
-  * [16.4 Credential Handling](#164-credential-handling)
-* [17. Power Management Architecture](#17-power-management-architecture)
-
-  * [17.1 Responsibilities](#171-responsibilities)
-  * [17.2 Power State Machine](#172-power-state-machine)
-  * [17.3 Operation Flow](#173-operation-flow)
-  * [17.4 Critical Fault Precedence](#174-critical-fault-precedence)
-  * [17.5 Mandatory Sleep Guards](#175-mandatory-sleep-guards)
-  * [17.6 Wake and Resume Contract](#176-wake-and-resume-contract)
-  * [17.7 Battery State Model](#177-battery-state-model)
-  * [17.8 Incremental Power Roadmap](#178-incremental-power-roadmap)
-* [18. Configuration and Ownership](#18-configuration-and-ownership)
-
-  * [18.1 Planned Configuration Boundaries](#181-planned-configuration-boundaries)
-  * [18.2 Compile-Time and Initialization Validation](#182-compile-time-and-initialization-validation)
-  * [18.3 Object Ownership Rules](#183-object-ownership-rules)
-* [19. Repository Organization](#19-repository-organization)
-
-  * [19.1 Generated-Code Boundary](#191-generated-code-boundary)
-  * [19.2 Include and Dependency Rules](#192-include-and-dependency-rules)
-* [20. Documentation Standard](#20-documentation-standard)
-
-  * [20.1 File Header Template](#201-file-header-template)
-  * [20.2 Source Layout and Naming](#202-source-layout-and-naming)
-  * [20.3 Type Documentation](#203-type-documentation)
-  * [20.4 Function Documentation](#204-function-documentation)
-  * [20.5 Component Driver README Topics](#205-component-driver-readme-topics)
-  * [20.6 Service README Topics](#206-service-readme-topics)
-  * [20.7 Documentation Quality Rules](#207-documentation-quality-rules)
-* [21. Verification Strategy](#21-verification-strategy)
-
-  * [21.1 Verification Levels](#211-verification-levels)
-  * [21.2 Required Unit Coverage](#212-required-unit-coverage)
-  * [21.3 Target Acceptance Scenarios](#213-target-acceptance-scenarios)
-  * [21.4 Definition of Done for a Module](#214-definition-of-done-for-a-module)
-  * [21.5 Traceability](#215-traceability)
-* [22. MVP Development Sequence](#22-mvp-development-sequence)
-
-  * [22.1 Phase 0 - Architecture Baseline](#221-phase-0---architecture-baseline)
-  * [22.2 Phase 1 - Stable Low-Level Baseline](#222-phase-1---stable-low-level-baseline)
-  * [22.3 Phase 2 - Services and Host Tests](#223-phase-2---services-and-host-tests)
-  * [22.4 Phase 3 - Actuator and FreeRTOS Execution](#224-phase-3---actuator-and-freertos-execution)
-  * [22.5 Phase 4 - Product FSM Integration](#225-phase-4---product-fsm-integration)
-  * [22.6 Phase 5 - V1 Qualification](#226-phase-5---v1-qualification)
-  * [22.7 Four-Week Planning Guardrail](#227-four-week-planning-guardrail)
-* [23. Architecture Governance](#23-architecture-governance)
-
-  * [23.1 Frozen Decisions](#231-frozen-decisions)
-  * [23.2 What Requires an Architecture Change](#232-what-requires-an-architecture-change)
-  * [23.3 Change Procedure](#233-change-procedure)
-* [24. Current Project Status](#24-current-project-status)
-
-  * [24.1 Implementation Inventory](#241-implementation-inventory)
-  * [24.2 Known Baseline Corrections Before Integration](#242-known-baseline-corrections-before-integration)
-  * [24.3 Import and Build](#243-import-and-build)
-  * [24.4 Reference Documentation](#244-reference-documentation)
-* [25. License](#25-license)
+* [1. Overview](#1-overview)
+  * [1.1 Purpose](#11-purpose)
+  * [1.2 Current Scope](#12-current-scope)
+* [2. Architectural Role](#2-architectural-role)
+  * [2.1 Layer Placement](#21-layer-placement)
+  * [2.2 Abstraction Boundary](#22-abstraction-boundary)
+  * [2.3 Dependency Direction](#23-dependency-direction)
+* [3. Directory Structure](#3-directory-structure)
+* [4. Responsibilities](#4-responsibilities)
+  * [4.1 Owned Responsibilities](#41-owned-responsibilities)
+  * [4.2 Explicit Non-Responsibilities](#42-explicit-non-responsibilities)
+* [5. Interface Summary](#5-interface-summary)
+* [6. GPIO Platform Interface](#6-gpio-platform-interface)
+  * [6.1 Contract](#61-contract)
+  * [6.2 Data Model](#62-data-model)
+  * [6.3 API](#63-api)
+  * [6.4 Preconditions and Behavior](#64-preconditions-and-behavior)
+* [7. I2C Platform Interface](#7-i2c-platform-interface)
+  * [7.1 Contract](#71-contract)
+  * [7.2 Status Translation](#72-status-translation)
+  * [7.3 API](#73-api)
+  * [7.4 Preconditions and Behavior](#74-preconditions-and-behavior)
+* [8. PWM Platform Interface](#8-pwm-platform-interface)
+  * [8.1 Contract](#81-contract)
+  * [8.2 Data Model](#82-data-model)
+  * [8.3 Lifecycle](#83-lifecycle)
+  * [8.4 API](#84-api)
+  * [8.5 Frequency and Duty-Cycle Rules](#85-frequency-and-duty-cycle-rules)
+* [9. Time Platform Interface](#9-time-platform-interface)
+  * [9.1 Contract](#91-contract)
+  * [9.2 API](#92-api)
+  * [9.3 Time-Base Requirements](#93-time-base-requirements)
+* [10. Initialization and Ownership](#10-initialization-and-ownership)
+  * [10.1 CubeMX Responsibilities](#101-cubemx-responsibilities)
+  * [10.2 Application Composition](#102-application-composition)
+  * [10.3 Runtime Ownership](#103-runtime-ownership)
+* [11. Integration with Component Drivers](#11-integration-with-component-drivers)
+  * [11.1 Current Consumers](#111-current-consumers)
+  * [11.2 Adapter Boundary](#112-adapter-boundary)
+* [12. Timing and Blocking Contracts](#12-timing-and-blocking-contracts)
+* [13. Error Handling](#13-error-handling)
+* [14. Concurrency and ISR Policy](#14-concurrency-and-isr-policy)
+* [15. Composition Example](#15-composition-example)
+* [16. Naming and Documentation Conventions](#16-naming-and-documentation-conventions)
+  * [16.1 File and Symbol Names](#161-file-and-symbol-names)
+  * [16.2 Public Header Documentation](#162-public-header-documentation)
+  * [16.3 README Style](#163-readme-style)
+* [17. Design Decisions](#17-design-decisions)
+  * [17.1 Project-Owned Status Types](#171-project-owned-status-types)
+  * [17.2 Opaque Native Contexts](#172-opaque-native-contexts)
+  * [17.3 Synchronous I2C](#173-synchronous-i2c)
+  * [17.4 Explicit PWM Handles](#174-explicit-pwm-handles)
+  * [17.5 Centralized Time Access](#175-centralized-time-access)
+  * [17.6 No Platform-Owned RTOS Objects](#176-no-platform-owned-rtos-objects)
+* [18. Usage Constraints](#18-usage-constraints)
+* [19. Testing and Validation](#19-testing-and-validation)
+  * [19.1 GPIO](#191-gpio)
+  * [19.2 I2C](#192-i2c)
+  * [19.3 PWM](#193-pwm)
+  * [19.4 Time](#194-time)
+* [20. Known Limitations and Baseline Corrections](#20-known-limitations-and-baseline-corrections)
+* [21. Future Improvements](#21-future-improvements)
+* [22. License](#22-license)
 
 ---
 
-## 1. Document Control
+## 1. Overview
 
-| Field | Value |
-| --- | --- |
-| Project | STM32F411-Based Electronic Lock |
-| Product baseline | V1 - functional and reliable engineering prototype |
-| Architecture baseline | 1.0 |
-| Architecture status | Frozen for V1 implementation |
-| Target MCU | STM32F411CEU6, Arm Cortex-M4F |
-| Development environment | STM32CubeIDE and STM32CubeMX |
-| MCU support package | STM32CubeF4 HAL/CMSIS |
-| Execution model | FreeRTOS, event-driven application with deterministic periodic input acquisition |
-| Memory policy | Static allocation; no application-owned dynamic allocation |
-| Primary UI | 4x4 matrix keyboard, 16x2 LCD, status LEDs and passive PWM buzzer |
-| Credential model | Fixed six-digit development PIN compiled into firmware |
-| Last architecture update | 2026-08-12 |
+### 1.1 Purpose
 
-### 1.1 Authority and Conflict Resolution
+`Platforms/` isolates microcontroller-specific access from the component
+drivers and all higher software layers. It exposes small project-owned
+interfaces for the hardware capabilities required by the electronic lock and
+translates those calls to the current STM32F411 backend.
 
-The project contains code, module documentation, STM32CubeMX configuration and
-historical architecture references. When two sources disagree, use the
-following authority order:
+The layer exists to keep vendor headers, HAL status codes, generated handle
+types and direct peripheral-register access out of reusable component APIs.
+It is a boundary, not a generic hardware framework.
 
-1. This root `README.md` defines product scope and software architecture.
-2. Public module headers define the exact API contract implemented by a module.
-3. `Electronic-Lock.ioc` defines the intended MCU peripheral and pin
-   configuration.
-4. Component and Platform READMEs describe module-specific behavior.
-5. Source files define the current implementation state.
-6. Documents under `References/` provide historical context and requirements
-   traceability, but do not override this baseline.
+### 1.2 Current Scope
 
-The original [Architecture V1 reference](References/Architecture/Architecture-V1.pdf)
-remains the source of the V1 functional scope and safety intent. Its former
-STM32F103 and superloop assumptions are superseded by the STM32F411 and FreeRTOS
-decisions recorded here.
+The current platform layer provides four interfaces:
 
-This baseline also consolidates the later *Electronic Lock - High-Level /
-Low-Level Architecture Reference* supplied during the architecture review. Its
-FreeRTOS guidance - periodic keyboard acquisition, event-driven application
-behavior, semantic inter-task messages and non-blocking effects - is resolved
-here into concrete V1 decisions. This README is self-contained and does not
-require that external review artifact to implement the project.
+* GPIO digital write, toggle and level read;
+* blocking I2C master transmit and receive;
+* PWM channel creation, control and runtime configuration;
+* millisecond and microsecond time services.
+
+The only implemented backend is STM32F411CEU6 with STM32CubeF4 HAL/CMSIS and
+CubeMX-generated peripheral handles. SPI, UART, ADC, flash, RTC and a second
+MCU backend are not part of the current platform contract.
 
 ---
 
-## 2. Project Objective
+## 2. Architectural Role
 
-The V1 firmware shall implement a deterministic and testable electronic lock
-that:
-
-- starts and remains in a safe locked condition after power-on or reset;
-- accepts a six-digit PIN using a 4x4 matrix keyboard;
-- masks the entered credential on a 16x2 character LCD;
-- authenticates the candidate credential against a fixed development PIN;
-- energizes the lock actuator only after successful authentication;
-- automatically returns the actuator to its safe state after a bounded time;
-- provides non-blocking visual and audible feedback;
-- temporarily blocks authentication after repeated failures;
-- contains peripheral failures without compromising the actuator safe state;
-- keeps application policy independent from STM32 HAL and hardware details.
-
-This is an engineering prototype, not a certified physical-security product.
-The fixed firmware credential, absence of tamper protection and absence of a
-mechanical door-position sensor are explicit V1 limitations.
-
----
-
-## 3. Engineering Principles
-
-### 3.1 Separation of Time, Behavior and Hardware
-
-The architecture separates three concerns:
-
-- **FreeRTOS determines when code executes.**
-- **The application and services determine what the product does.**
-- **Drivers and Platform interfaces determine how hardware is controlled.**
-
-FreeRTOS is an execution mechanism, not a business-logic layer. A software
-module does not receive a dedicated task merely because it exists.
-
-### 3.2 Dependency Direction
-
-Dependencies shall point from higher-level policy toward lower-level
-capabilities. Lower layers shall never depend on product workflow.
-
-```mermaid
-flowchart TB
-    APP["Application and Lock FSM"]
-    SERVICES["Domain and UI Services"]
-    DRIVERS["Component Drivers<br/> and Adapters"]
-    PLATFORM["Platform Interfaces"]
-    VENDOR["STM32 HAL, CMSIS and<br/> Hardware"]
-
-    APP --> SERVICES
-    SERVICES --> DRIVERS
-    DRIVERS --> PLATFORM
-    PLATFORM --> VENDOR
-```
-
-### 3.3 Non-Blocking Product Behavior
-
-Human-scale durations shall be represented by state and timestamps. Credential
-timeouts, LED effects, sound patterns, lockout duration and unlock duration
-shall never be implemented as blocking delays.
-
-Short hardware protocol delays are permitted only when required by the
-electrical protocol and when their worst-case duration is bounded. The HD44780
-enable pulse and instruction execution waits are examples of bounded low-level
-delays.
-
-### 3.4 Controlled Complexity
-
-An abstraction, task, queue or interface shall exist only when it:
-
-- protects a required variation;
-- defines ownership or a stable contract;
-- isolates hardware or vendor dependencies;
-- improves host-side testability;
-- or satisfies a demonstrated timing/concurrency requirement.
-
-The V1 architecture deliberately avoids one task per service, speculative
-plugin systems, dynamic polymorphism and generalized resource managers.
-
-### 3.5 Explicit Ownership
-
-Every mutable state and hardware resource shall have one owner. Data may cross
-execution contexts only through documented RTOS communication mechanisms.
-Shared mutable globals are not an accepted synchronization strategy.
-
-### 3.6 Static Memory
-
-Application objects, driver handles, task stacks, queues and RTOS control
-blocks shall use static allocation. The V1 application shall not use `malloc`,
-`free` or application-owned heap allocation.
-
----
-
-## 4. V1 Product Scope
-
-### 4.1 Included
-
-- STM32F411CEU6 as the main controller.
-- 4x4 matrix keyboard directly connected to MCU GPIOs.
-- HD44780-compatible 16x2 LCD in 4-bit mode.
-- PCF8574 I/O expander dedicated to the LCD data/control bus.
-- PWM-controlled LCD backlight.
-- Fixed six-digit PIN compiled into firmware configuration.
-- Numeric input through keys `0` to `9`.
-- Credential confirmation through `#`.
-- Credential clear/cancel through `*`.
-- Masked credential rendering; raw PIN digits shall never be displayed.
-- Input timeout and automatic credential erasure.
-- Three consecutive invalid attempts followed by a temporary lockout.
-- Red/blue status indication through non-blocking LED patterns.
-- Audible key, success, denial and lockout feedback.
-- Timed lock-actuator command with a redundant local safety deadline.
-- FreeRTOS execution with deterministic keyboard acquisition.
-- Host-side unit tests for pure services and state machines.
-- Target integration tests for peripherals, timing and fail-safe behavior.
-
-### 4.2 Explicitly Excluded
-
-- User-configurable PIN.
-- Flash, EEPROM or external credential persistence.
-- Multiple users, permissions or access history.
-- Bluetooth, Wi-Fi, cloud, mobile application or remote control.
-- RFID, NFC, biometrics or external identity providers.
-- Cryptographic credential storage or physical extraction resistance.
-- Mechanical door/trinco position sensing.
-- OTA, custom bootloader or remote firmware update.
-- Product certification or functional-safety certification.
-- A universal framework for arbitrary locks or user-interface devices.
-
-### 4.3 Initial V1 Parameters
-
-These values are the initial architecture contracts. They may be tuned only
-after measurement and shall remain centralized in application configuration.
-
-| Parameter | Initial value | Contract |
-| --- | ---: | --- |
-| PIN length | 6 digits | Fixed for V1 |
-| Credential-entry timeout | 15 s | Restarted after each accepted digit |
-| Unlock duration | 3 s | Must remain below the actuator thermal limit |
-| Maximum failed attempts | 3 | Consecutive; successful authentication resets the counter |
-| Lockout duration | 30 s | Credential input is ignored while active |
-| Keyboard task period | 1 ms | Stable periodic acquisition using `vTaskDelayUntil()` |
-| Keyboard debounce interval | 40 ms | Timestamp-based; adjustable after hardware measurement |
-| Application heartbeat | 10 ms | Maximum nominal interval between service/deadline updates |
-| I2C transaction timeout | 20 ms maximum | No unbounded polling or retry loop |
-| Application event queue | 8 entries initially | Occupancy shall be measured during integration |
-
-The actual credential value shall not be documented, logged or committed to a
-public repository. A demonstration credential shall never be reused as a real
-security credential.
-
----
-
-## 5. System Context
-
-```mermaid
-flowchart LR
-    USER["User"]
-    LOCK["Electronic Lock Firmware"]
-    UI["Keyboard, LCD, LEDs<br/> and Buzzer"]
-    ACTUATOR["Lock Actuator<br/> and Power Stage"]
-    POWER["Battery or Power Supply"]
-
-    USER -->|"PIN and commands"| UI
-    UI -->|"Semantic input"| LOCK
-    LOCK -->|"Feedback"| UI
-    LOCK -->|"Bounded command"| ACTUATOR
-    POWER --> LOCK
-```
-
-### 5.1 Actors and Boundaries
-
-| Actor or subsystem | Interaction | V1 boundary |
-| --- | --- | --- |
-| User | Enters PIN, confirms, cancels and observes feedback | Cannot configure credentials |
-| Firmware | Applies access policy and commands the actuator | Knows commanded state, not mechanical state |
-| Lock mechanism | Converts the electrical command into mechanical action | No feedback sensor in V1 |
-| Power source | Supplies MCU, UI and actuator | Brownout/reset shall lead to a safe output |
-| Developer | Programs, diagnoses and validates the target | Debug interface is not a user interface |
-
----
-
-## 6. Hardware Baseline
-
-### 6.1 MCU and Clock
-
-- MCU: STM32F411CEU6.
-- Core: Arm Cortex-M4F.
-- System clock: 100 MHz.
-- STM32 HAL and CMSIS are generated/managed through STM32CubeIDE.
-- The hardware configuration source is `Electronic-Lock.ioc`.
-
-### 6.2 Peripheral Allocation
-
-| Resource | Assignment | Owner |
-| --- | --- | --- |
-| GPIO PA0-PA3 | Matrix keyboard rows 3-0 | Keyboard Task through Matrix Keyboard stack |
-| GPIO PA4-PA7 | Matrix keyboard columns 3-0 | Keyboard Task through Matrix Keyboard stack |
-| GPIO PA12 | Red status LED | Status Indication Service through LED Driver |
-| GPIO PA15 | Blue status LED | Status Indication Service through LED Driver |
-| GPIO PB8 | Lock actuator command | Lock Control Service through Lock Actuator Driver |
-| I2C1 PB6/PB7 | PCF8574 LCD bus at Fast Mode | Display Render Service through LCD stack |
-| TIM2 | Microsecond time base | Time Platform Interface |
-| TIM3 CH1 PB4 | Passive buzzer PWM | Sound Generator Service through Buzzer Driver |
-| TIM4 CH4 PB9 | LCD backlight PWM | Display Render Service through Backlight Adapter |
-| GPIO PC13 | On-board diagnostic LED | Platform/diagnostic use only |
-
-### 6.3 Electrical Safety Assumptions
-
-- The lock output shall have a hardware-defined safe level.
-- PB8 shall be driven to the safe level before application initialization.
-- The power stage shall include the protection required by the selected load,
-  including flyback protection for an inductive actuator.
-- The actuator supply shall not inject reset-inducing noise into the MCU.
-- Firmware deadlines supplement hardware protection; they do not replace it.
-- Without a position sensor, `LOCKED` and `UNLOCKED` describe commanded states,
-  never confirmed mechanical states.
-
-### 6.4 Hardware Decisions Still Required
-
-| Decision | Required before |
-| --- | --- |
-| Exact actuator and electrical safe polarity | Lock Actuator Driver implementation |
-| Actuator current and maximum continuous energization | Final unlock-duration validation |
-| Power-stage schematic and flyback strategy | Hardware integration |
-| PCF8574 I2C address and backpack pin mapping verification | LCD integration release |
-| Battery chemistry, voltage range and sensing circuit | Power Management implementation |
-
----
-
-## 7. Software Architecture
-
-### 7.1 Layer Model
-
-```mermaid
-flowchart LR
-    subgraph HIGH["High-Level Software"]
-        APP["App Core and<br/> Lock Controller"]
-        SVC["Authentication, Credential,<br/> UI, Lock and Time Services"]
-    end
-
-    subgraph LOW["Low-Level Software"]
-        CMP["Device Drivers<br/> and Component Adapters"]
-        PAL["GPIO, I2C, PWM and<br/> Time Platform Interfaces"]
-    end
-
-    RTOS["FreeRTOS Execution<br/> and Synchronization"]
-    HAL["STM32 HAL, CMSIS and<br/> CubeMX Core"]
-
-    APP --> SVC
-    SVC --> CMP
-    CMP --> PAL
-    PAL --> HAL
-    RTOS -.-> APP
-    RTOS -.-> SVC
-```
-
-FreeRTOS is orthogonal to the dependency layers. Drivers and services shall not
-include FreeRTOS headers. RTOS calls are restricted to the application
-composition/execution boundary unless an approved architecture change states
-otherwise.
-
-### 7.2 Layer Responsibilities
-
-| Layer | Shall know | Shall not know |
-| --- | --- | --- |
-| Application | Product states, events, policy and service contracts | HAL types, pins, I2C addresses, registers |
-| Services | Domain concepts and abstract driver contracts | Complete application FSM, RTOS primitives, STM32 HAL |
-| Component Drivers | Device behavior and Platform contracts | Credentials, access policy, lockout rules, RTOS |
-| Adapters | Translation between two explicit contracts | Product workflow |
-| Platform | STM32 HAL/LL, native peripherals and board execution details | Product semantics |
-| CubeMX/Vendor | Startup, clocks, peripheral setup and vendor implementation | Application policy |
-
-### 7.3 Allowed Dependency Rules
-
-1. `App` may include public service headers and application-owned event types.
-2. Services may include only the component interfaces they directly require.
-3. Component drivers may include Platform interfaces and component-level
-   adapters, but no STM32 HAL header.
-4. Platform headers shall expose portable types whenever possible. Native HAL
-   types shall remain inside Platform source files or opaque contexts.
-5. No service or driver shall include `FreeRTOS.h`, `task.h`, `queue.h` or
-   CMSIS-RTOS headers.
-6. `Core/Src/main.c` shall contain only generated initialization, minimal
-   application bootstrap and scheduler start integration.
-7. Business logic shall never be implemented inside CubeMX `USER CODE`
-   regions.
-8. Dependency inversion shall be introduced only for a concrete variation or
-   test seam; wrappers that merely rename HAL calls are insufficient.
-
-### 7.4 Architectural Invariants
-
-- The actuator is safe outside `ACCESS_GRANTED`.
-- Authentication has no hardware side effects.
-- Drivers never decide whether access is granted.
-- The candidate credential never exceeds its fixed storage.
-- Candidate credential data is erased on completion, cancellation, timeout,
-  denial, success, lockout and fault.
-- LCD or buzzer failure cannot extend actuator energization.
-- Keyboard sampling continues while the Application Task performs bounded
-  synchronous peripheral operations.
-- All human-scale timing uses rollover-safe timestamp arithmetic.
-- Application and service code remain testable without STM32 headers.
-
----
-
-## 8. Low-Level Architecture
-
-The low-level architecture comprises Platform interfaces, hardware-independent
-component drivers and the adapters that bind component contracts together.
-The existing low-level direction is retained as the V1 foundation.
-
-### 8.1 Platform Layer
-
-The Platform Layer is the only project-owned layer allowed to translate STM32
-HAL types and statuses into portable project contracts.
-
-| Interface | Responsibility | Execution behavior | Current backend |
-| --- | --- | --- | --- |
-| GPIO Platform | Create a logical pin handle, set/reset/toggle and read level | Immediate and bounded | STM32 HAL GPIO |
-| I2C Platform | Transfer bounded byte sequences and translate HAL status | Synchronous with finite timeout in V1 | STM32 HAL I2C1 |
-| PWM Platform | Create/control a PWM channel, duty, frequency and polarity | Immediate register/HAL operations | STM32 TIM3/TIM4 |
-| Time Platform | Provide monotonic milliseconds/microseconds and protocol delays | Timestamp reads are non-blocking; delays are low-level only | HAL tick and TIM2 |
-
-Detailed Platform documentation is available in
-[Platforms/README.md](Platforms/README.md).
-
-#### 8.1.1 GPIO Platform Contract
-
-- `PGPIO_Init()` associates a logical handle with a platform port and pin.
-- GPIO peripheral mode, pull, speed and alternate function remain CubeMX
-  responsibilities.
-- `PGPIO_Set()`, `PGPIO_Reset()` and `PGPIO_Toggle()` operate only on initialized
-  handles.
-- `PGPIO_GetLevel()` returns the actual sampled level, not a cached logical
-  device state.
-- Electrical polarity belongs to the consuming driver, not the generic GPIO
-  interface.
-
-#### 8.1.2 I2C Platform Contract
-
-- Addresses are represented in 7-bit form above the Platform implementation.
-- The Platform implementation performs any HAL-specific address shifting.
-- Every transfer has a finite timeout.
-- HAL statuses are translated into `OK`, `ERROR`, `BUSY` or `TIMEOUT`.
-- The V1 implementation may be synchronous because LCD transactions are short
-  and the higher-priority Keyboard Task can preempt the Application Task.
-- Repeated retries, bus recovery and DMA are outside the initial implementation
-  unless measurement or fault testing requires them.
-
-#### 8.1.3 PWM Platform Contract
-
-- A PWM handle represents one logical channel.
-- The native timer handle remains opaque to component drivers.
-- Frequency is a timer-wide property; channels sharing a timer share frequency.
-- Duty ratio shall be preserved when frequency changes, within integer/timer
-  resolution.
-- The implementation shall validate channel, representable frequency and
-  peripheral context before register access.
-- TIM3 is reserved for the buzzer and TIM4 for LCD backlight, preventing
-  unintended frequency coupling in V1.
-
-#### 8.1.4 Time Platform Contract
-
-- `Platform_GetMillis()` returns a wrapping unsigned millisecond counter.
-- `Platform_GetMicros()` returns the TIM2-based microsecond counter.
-- Application durations shall use unsigned subtraction:
-
-```c
-bool TimeoutValidation_HasElapsed(
-    uint32_t NowMs,
-    uint32_t StartMs,
-    uint32_t DurationMs
-)
-{
-    return (uint32_t)(NowMs - StartMs) >= DurationMs;
-}
-```
-
-- Services shall receive or read timestamps; they shall not block waiting for a
-  future timestamp.
-- `Platform_DelayMs()` and `Platform_DelayUs()` are restricted to bounded
-  low-level protocol/initialization behavior.
-- Long application delays using these APIs are prohibited.
-
-### 8.2 Component Drivers
-
-| Component | Responsibility | Explicit non-responsibility | Documentation |
-| --- | --- | --- | --- |
-| PCF8574 | Port/bit I/O, address/context and port shadow | LCD protocol and UI policy | [README](Libs/Components/PCF8574/README.md) |
-| HD44780 | LCD commands, DDRAM/CGRAM, geometry and display control | I2C transactions and product messages | [README](Libs/Components/HD44780/README.md) |
-| Matrix Keyboard | Scan pipeline, debounce, per-key FSM and logical actions | Credential semantics and RTOS event transport | [README](Libs/Components/MatrixKeyboard/README.md) |
-| LED | Logical state and non-blocking blink/pulse/flash effects | Product indication patterns | [README](Libs/Components/Led/README.md) |
-| Buzzer | Frequency and output control through PWM | Sound sequences and duration policy | [README](Libs/Components/Buzzer/README.md) |
-| Lock Actuator | Electrical polarity, safe output and redundant maximum-on deadline | Authentication, attempts and UI policy | Planned V1 component |
-
-#### 8.2.1 Driver Rules
-
-- Drivers expose device-level concepts, not application policy.
-- Drivers are handle based and support statically allocated instances.
-- Drivers do not create tasks, queues, timers or interrupts.
-- Drivers never allocate memory dynamically.
-- Runtime state is private and modified only through the public API.
-- External buffers/configuration are caller-owned and have documented lifetime.
-- Public operations validate pointers, initialization and value ranges.
-- A failed lower-level operation is propagated without silently corrupting the
-  driver's software state.
-- Hardware-independent driver headers shall not expose STM32 types.
-
-### 8.3 Adapter Pattern
-
-Adapters translate one stable component contract into another. They shall not
-contain product policy.
-
-Current adapters:
-
-- `HD44780_PCF8574_BusAdapter` implements the HD44780 nibble-transfer contract
-  using PCF8574 port writes.
-- `HD44780_PWM_BacklightAdapter` implements the LCD backlight contract using a
-  Platform PWM instance.
-- `MatrixKeyboard_GPIO_ScanAdapter` implements matrix column/row acquisition
-  using Platform GPIO handles.
-
-### 8.4 LCD Data Path
-
-```mermaid
-flowchart TB
-    DISPLAY["Display Render Service"]
-    LCD["HD44780 Driver"]
-    BUS["HD44780 Bus Interface"]
-    ADAPTER["PCF8574 Bus Adapter"]
-    PCF["PCF8574 Driver"]
-    I2C["I2C Platform and<br/> STM32 HAL"]
-
-    DISPLAY --> LCD
-    LCD --> BUS
-    BUS --> ADAPTER
-    ADAPTER --> PCF
-    PCF --> I2C
-```
-
-The PCF8574 is an I/O expander. It does not translate LCD commands. The bus
-adapter owns the mapping between HD44780 signals and PCF8574 bits.
-
-The current V1 mapping is:
-
-| HD44780 signal | PCF8574 bit |
-| --- | ---: |
-| RS | 0 |
-| RW | 1 |
-| E | 2 |
-| D4 | 3 |
-| D5 | 4 |
-| D6 | 5 |
-| D7 | 6 |
-
-The backlight does not use the remaining PCF8574 bit in this hardware baseline;
-it is controlled independently through TIM4 CH4 PWM.
-
-### 8.5 Keyboard Data Path
-
-```mermaid
-flowchart TB
-    TASK["Keyboard Task"]
-    DRIVER["Matrix Keyboard Driver"]
-    SCAN["Matrix Scan Interface"]
-    ADAPTER["GPIO Scan Adapter"]
-    GPIO["GPIO Platform and<br/> STM32 HAL"]
-
-    TASK -->|"MK_Read"| DRIVER
-    DRIVER --> SCAN
-    SCAN --> ADAPTER
-    ADAPTER --> GPIO
-```
-
-The scan adapter normalizes electrical levels:
-
-```text
-bit = 1  -> physical key is pressed
-bit = 0  -> physical key is released
-```
-
-The driver returns device-level output containing a logical key code and key
-action. It does not know whether a key is a PIN digit, confirmation or
-cancellation.
-
-### 8.6 Output Paths
-
-```mermaid
-flowchart TB
-    STATUS["Status Indication Service"]
-    SOUND["Sound Generator Service"]
-    LOCK["Lock Control Service"]
-    COMPONENTS["LED, Buzzer and<br/> Lock Actuator Drivers"]
-    PLATFORM["GPIO, PWM and<br/> Time Platform"]
-
-    STATUS --> COMPONENTS
-    SOUND --> COMPONENTS
-    LOCK --> COMPONENTS
-    COMPONENTS --> PLATFORM
-```
-
-The Status and Sound services translate domain concepts such as `SUCCESS`,
-`DENIED` and `LOCKOUT` into device-level effects. Component drivers remain
-unaware of those domain meanings.
-
----
-
-## 9. High-Level Architecture
-
-The high-level architecture contains the application composition root, the
-central lock state machine and services that express product/domain behavior.
-It shall remain independent from STM32 and FreeRTOS types.
-
-### 9.1 Application Layer
-
-#### 9.1.1 App Core
-
-`App_Core` is the composition and execution boundary of the product.
-
-Responsibilities:
-
-- statically allocate application, service, driver and RTOS objects;
-- connect handles, configuration and adapters;
-- initialize modules in the defined safe order;
-- record initialization results;
-- create the application queue and static tasks;
-- expose only the minimal bootstrap called by `main.c`;
-- own the FreeRTOS-specific task entry functions.
-
-Non-responsibilities:
-
-- authentication policy;
-- credential parsing;
-- application state transitions;
-- direct manipulation of HAL peripherals during normal operation.
-
-#### 9.1.2 Lock Controller
-
-`Lock_Controller` owns the authoritative electronic-lock state machine and V1
-access policy.
-
-Responsibilities:
-
-- own the current application state;
-- dispatch semantic events according to that state;
-- own the consecutive failed-attempt counter;
-- coordinate Credential Entry and Authentication;
-- request display, status and sound behavior;
-- request bounded lock/unlock operations;
-- own application-level entry, denial, unlock and lockout deadlines;
-- prioritize critical faults over user input;
-- define state entry and exit actions.
-
-Non-responsibilities:
-
-- scan the keyboard matrix;
-- compare raw GPIO levels;
-- render HD44780 commands;
-- generate PWM frequencies;
-- store the valid credential;
-- call FreeRTOS primitives;
-- access HAL types, GPIO pins or peripheral addresses.
-
-### 9.2 Service Layer
-
-```mermaid
-flowchart TB
-    CONTROLLER["Lock Controller"]
-    ACCESS["Credential Entry<br/> and Authentication"]
-    UI["Display, Status and<br/> Sound Services"]
-    LOCK["Lock Control Service"]
-    TIME["Timeout Validation Service"]
-
-    CONTROLLER --> ACCESS
-    CONTROLLER --> UI
-    CONTROLLER --> LOCK
-    CONTROLLER --> TIME
-```
-
-Services are synchronous modules called from the Application Task. A service
-may maintain internal non-blocking state, but it shall not own an RTOS task.
-
-| Service | Owns | Uses | Must not own |
-| --- | --- | --- | --- |
-| Credential Entry | Candidate buffer, length, session state and entry timestamp | Semantic key codes and timeout validation | Valid PIN, attempt count, lockout policy |
-| Authentication | Fixed V1 credential comparison contract | Read-only configured credential | UI, attempt count, hardware side effects |
-| Display Render | Current logical screen/model and render coalescing | HD44780 Driver | Application transitions or raw credential storage |
-| Status Indication | Logical LED mode and non-blocking indication selection | LED Driver | Authentication policy |
-| Sound Generator | Current sound pattern, phase and timing | Buzzer Driver | Product state transitions |
-| Timeout Validation | Rollover-safe elapsed/deadline calculations | Unsigned time values | Threads, hardware timers or mutable global deadlines |
-| Lock Control | Requested commanded state and actuator-operation result | Lock Actuator Driver | Authentication and failed-attempt policy |
-| Power Management | Power-mode policy and sleep eligibility | Application state and Platform power hooks | Access decisions or unlock commands |
-
-#### 9.2.1 Credential Entry Service
-
-The service converts logical key codes into a bounded candidate credential and
-semantic outcomes.
-
-Required behavior:
-
-- accept only digits `0` through `9` as credential content;
-- limit the candidate to exactly four stored digits;
-- expose the number of entered digits for masked display rendering;
-- treat `#` as confirmation only when four digits are present;
-- report incomplete confirmation without authenticating;
-- clear a non-empty candidate when `*` is pressed;
-- cancel the entry session when `*` is pressed with an empty candidate;
-- detect the 15-second inactivity timeout using rollover-safe arithmetic;
-- erase storage whenever the session ends for any reason;
-- never expose the candidate through logs or display strings.
-
-The service does not read the keyboard driver directly. It receives keys from
-the Lock Controller inside the Application Task.
-
-#### 9.2.2 Authentication Service
-
-Authentication is a pure domain operation for V1:
-
-- receive a candidate pointer and explicit length;
-- require exactly four digits;
-- compare against the configured development credential;
-- return `AUTH_SUCCESS`, `AUTH_FAILURE` or an operation error;
-- produce no hardware, UI, timing or attempt-counter side effect.
-
-The valid credential shall be located in a controlled configuration source and
-shall never appear in this README, diagnostic output or test reports intended
-for publication.
-
-#### 9.2.3 Display Render Service
-
-The service translates product state into short LCD views:
-
-- locked prompt;
-- masked credential entry;
-- incomplete credential;
-- access granted;
-- access denied with remaining attempts;
-- lockout and optional remaining time;
-- degraded/fault indication.
-
-It shall coalesce unchanged views so that the same content is not repeatedly
-transmitted over I2C. The service may perform a bounded synchronous LCD update,
-but shall not wait for human-scale display durations.
-
-LCD failure is recoverable by default: the lock remains operational only if
-the keyboard, time base and actuator safety path are valid. The Lock Controller
-shall receive a display error status so the degraded-mode policy remains
-explicit.
-
-#### 9.2.4 Status Indication Service
-
-The service maps product modes to logical LED behavior. Initial logical modes
-shall include:
-
-- `STATUS_MODE_BOOT`;
-- `STATUS_MODE_LOCKED`;
-- `STATUS_MODE_ENTRY`;
-- `STATUS_MODE_GRANTED`;
-- `STATUS_MODE_DENIED`;
-- `STATUS_MODE_LOCKOUT`;
-- `STATUS_MODE_FAULT`;
-- `STATUS_MODE_LOW_BATTERY` for the later power-management increment.
-
-Exact colors and temporal patterns belong to service configuration. Patterns
-shall be progressed by `StatusIndication_Update()` and the non-blocking LED
-Driver; the service shall not call a task delay.
-
-Fault indication has higher priority than normal UI patterns. Low-battery
-indication shall never obscure a critical fault.
-
-#### 9.2.5 Sound Generator Service
-
-The service maps logical sound requests to non-blocking PWM phases. Initial
-patterns shall include:
-
-- valid key click;
-- access granted;
-- access denied;
-- lockout;
-- optional fault diagnostic pattern.
-
-Each phase contains frequency, duration and output state. `Sound_Update()`
-advances the active phase from timestamps. A new request follows an explicit
-replacement/priority policy; no unbounded sound queue is required for V1.
-
-The buzzer shall be disabled when no pattern is active and before entering a
-low-power stop state.
-
-#### 9.2.6 Timeout Validation Service
-
-This service is a small stateless temporal utility, not a scheduler. It
-centralizes rollover-safe operations so application and service modules do not
-reimplement absolute-deadline comparisons incorrectly.
-
-It shall:
-
-- operate on explicit unsigned timestamps and durations;
-- define all public units in function/field names;
-- contain no blocking delay;
-- create no task or software timer;
-- remain host-testable without HAL or FreeRTOS.
-
-#### 9.2.7 Lock Control Service and Lock Actuator Driver
-
-Two safety boundaries are used deliberately:
-
-- The **Lock Control Service** represents domain commands and reports logical
-  completion/failure to the Lock Controller.
-- The **Lock Actuator Driver** represents electrical control, polarity and a
-  redundant maximum energization deadline.
-
-The Lock Actuator Driver shall provide a `ForceSafe` operation that does not
-depend on the application state machine. Any initialization failure, critical
-fault or inconsistent state shall invoke the safe path.
-
-An unlock request shall always include a finite duration. A public unlimited
-`Unlock()` operation is prohibited.
-
-```mermaid
-flowchart TB
-    FSM["Lock Controller FSM"]
-    SERVICE["Lock Control Service"]
-    DRIVER["Lock Actuator Driver"]
-    GPIO["GPIO and Time Platform"]
-    STAGE["Power Stage and Actuator"]
-
-    FSM -->|"Unlock for bounded duration"| SERVICE
-    SERVICE --> DRIVER
-    DRIVER --> GPIO
-    GPIO --> STAGE
-```
-
----
-
-## 10. FreeRTOS Execution Model
-
-### 10.1 V1 Task Set
-
-The MVP has exactly two project-owned runtime tasks.
-
-| Task | Activation | Responsibility | Relative priority |
-| --- | --- | --- | ---: |
-| Keyboard Task | Periodic every 1 ms | Scan/process keyboard and publish logical key actions | Higher |
-| Application Task | Event-driven with 10 ms maximum wait | Run lock FSM and update all services/deadlines | Lower |
-
-The FreeRTOS Idle Task remains kernel-owned. No dedicated task shall be created
-for LCD, LED, buzzer, authentication, credential entry, lock control or power
-management in V1.
-
-```mermaid
-flowchart TB
-    KEYBOARD["Keyboard Task<br/> Periodic 1 ms"]
-    QUEUE["Keyboard Event Queue<br/>8 Entries"]
-    APP["Application Task<br/> Event plus heartbeat"]
-    FSM["Lock Controller FSM"]
-    SERVICES["Synchronous non-blocking<br/> Services"]
-
-    KEYBOARD -->|"MK key action"| QUEUE
-    QUEUE --> APP
-    APP --> FSM
-    FSM --> SERVICES
-```
-
-### 10.2 Scheduler Configuration Contracts
-
-- FreeRTOS tick frequency shall initially be 1000 Hz.
-- The Keyboard Task shall use a periodic-delay-until mechanism, not cumulative
-  relative delays.
-- The Keyboard Task priority shall be higher than the Application Task so
-  bounded synchronous LCD/I2C work cannot disrupt keyboard sampling.
-- Task control blocks and stacks shall be statically allocated.
-- The keyboard queue shall use static storage.
-- Domain timing shall use timestamps, not FreeRTOS software timers.
-- Native FreeRTOS primitives shall be used consistently inside the App
-  execution boundary; native and CMSIS-RTOS APIs shall not be mixed in one
-  communication path.
-- Tickless idle is deferred to the Power Management increment.
-- Stack sizes shall be established from call-depth analysis and verified using
-  high-water marks; arbitrary oversized stacks are not an architectural
-  substitute for measurement.
-
-### 10.3 Keyboard Task Contract
-
-Conceptual task loop:
-
-```c
-void App_KeyboardTask(void* Argument)
-{
-    TickType_t last_wake_time = xTaskGetTickCount();
-
-    for(;;)
-    {
-        MK_OutputTypeDef output;
-
-        if(MK_Read(&Keyboard, &output) == MK_OPERATION_OK)
-        {
-            if(output.OutputAction != MK_KEY_ACTION_NONE)
-            {
-                App_PublishKeyboardEvent(&output);
-            }
-        }
-        else
-        {
-            App_ReportKeyboardFault();
-        }
-
-        vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(1U));
-    }
-}
-```
-
-The pseudocode expresses execution intent, not a frozen symbol-level API.
-
-Keyboard Task rules:
-
-- one call to `MK_Read()` per period;
-- bounded work with no blocking wait other than the periodic delay;
-- no display, sound, authentication or actuator calls;
-- publish only `MK_KeyCodeTypeDef` plus `MK_KeyActionTypeDef` semantics;
-- do not modify the credential candidate;
-- do not block when the queue is full;
-- report scan/queue failures through a bounded application fault path.
-
-V1 supports single-key interaction. Electrically ambiguous simultaneous keys
-or ghosting patterns shall not be interpreted as valid credential digits.
-
-### 10.4 Application Task Contract
-
-The Application Task owns all high-level mutable state.
-
-Conceptual loop:
-
-```c
-void App_ApplicationTask(void* Argument)
-{
-    for(;;)
-    {
-        MK_OutputTypeDef keyboard_event;
-        const bool received = App_WaitKeyboardEvent(
-            &keyboard_event,
-            APP_UPDATE_PERIOD_MS
-        );
-
-        const uint32_t now_ms = Platform_GetMillis();
-
-        if(received)
-        {
-            LockController_HandleKeyboardEvent(
-                &LockController,
-                &keyboard_event,
-                now_ms
-            );
-        }
-
-        LockController_Update(&LockController, now_ms);
-        StatusIndication_Update(&StatusIndicator, now_ms);
-        Sound_Update(&SoundGenerator, now_ms);
-        LockControl_Update(&LockControl, now_ms);
-        PowerManagement_Update(&PowerManagement, now_ms);
-    }
-}
-```
-
-The 10 ms queue wait provides a periodic heartbeat even when no key arrives.
-Therefore LED/sound phases and safety deadlines progress without requiring a
-third periodic task.
-
-### 10.5 Queue and Overflow Policy
-
-The keyboard queue initially stores eight complete logical key-action objects.
-
-- Producer: Keyboard Task only.
-- Consumer: Application Task only.
-- Send operation: non-blocking.
-- Receive operation: blocks for at most the application heartbeat period.
-- Ordering: FIFO.
-- Payloads contain values, never pointers to task-local storage.
-
-Queue overflow is not a reason to block or delay keyboard acquisition. An
-overflow shall be latched as an input-path error. The Application Task shall
-erase any candidate credential, return the product to a safe input state and
-request the user to retry. Queue occupancy and overflow count shall be measured
-during integration.
-
-### 10.6 Concurrency and Resource Ownership
-
-| Resource/state | Owner | Other access |
-| --- | --- | --- |
-| Matrix Keyboard Driver and row/column GPIO handles | Keyboard Task | Initialization by App Core before scheduler |
-| Keyboard event queue write side | Keyboard Task | None |
-| Keyboard event queue read side | Application Task | None |
-| Lock Controller state and failed-attempt counter | Application Task | Tests through public API |
-| Credential candidate | Credential Entry Service, called by Application Task | Masked length only to Display Service |
-| LCD, PCF8574 and I2C1 | Application Task | Initialization by App Core |
-| LED drivers and GPIOs | Application Task | Initialization by App Core |
-| Buzzer and TIM3 PWM | Application Task | Initialization by App Core |
-| Backlight and TIM4 PWM | Application Task | Initialization by App Core |
-| Lock actuator and PB8 | Application Task after safe startup | Emergency `ForceSafe` path only |
-| Millisecond/microsecond time reads | Read-only, multi-context | Platform implementation owns counters |
-
-The single Application Task ownership model intentionally eliminates service
-mutexes in the MVP.
-
-### 10.7 ISR Policy
-
-- ISRs perform only minimal hardware acknowledgement and event capture.
-- No ISR writes to the LCD, authenticates, scans the full keyboard or changes
-  the application FSM.
-- Keyboard row EXTI is not used for normal acquisition in the V1 runtime; it is
-  reserved as a possible future low-power wake source.
-- Any ISR that calls a FreeRTOS `FromISR` API shall obey the configured interrupt
-  priority ceiling.
-- Interrupt priority zero shall not be used for an interrupt that needs to call
-  FreeRTOS APIs.
-
----
-
-## 11. Application Event Model
-
-Events express semantic facts. Electrical row/column levels never cross into
-the Application Layer.
-
-### 11.1 Keyboard-to-Application Message
-
-The inter-task message contains the existing Matrix Keyboard output semantics:
-
-```c
-typedef struct
-{
-    MK_KeyCodeTypeDef   Key;
-    MK_KeyActionTypeDef Action;
-
-}App_KeyboardEventTypeDef;
-```
-
-The exact public type may reuse or adapt `MK_OutputTypeDef`, but the queue
-payload shall remain a value object with no hardware information.
-
-### 11.2 Application Events
-
-| Event | Origin | Payload | Meaning |
-| --- | --- | --- | --- |
-| `EV_INIT_OK` | App Core | Initialization summary | Critical startup dependencies are valid |
-| `EV_INIT_FAIL` | App Core | Module/fault code | Startup cannot enter normal operation |
-| `EV_KEY_DIGIT` | Credential input mapping | Digit 0-9 | Append candidate digit if capacity permits |
-| `EV_KEY_CONFIRM` | Credential input mapping | None | Request completion/authentication |
-| `EV_KEY_CANCEL` | Credential input mapping | None | Clear or cancel candidate entry |
-| `EV_ENTRY_TIMEOUT` | Credential Entry/Lock Controller | None | Input inactivity limit elapsed |
-| `EV_AUTH_SUCCESS` | Authentication Service | None | Candidate matches configured credential |
-| `EV_AUTH_FAILURE` | Authentication Service | None | Candidate does not match |
-| `EV_DENIED_TIMEOUT` | Lock Controller | None | Denial feedback interval elapsed |
-| `EV_UNLOCK_TIMEOUT` | Lock Controller/Lock Control | None | Authorized unlock interval elapsed |
-| `EV_LOCKOUT_TIMEOUT` | Lock Controller | None | Temporary lockout elapsed |
-| `EV_INPUT_OVERFLOW` | Keyboard event transport | Count/status | Input ordering cannot be trusted |
-| `EV_CRITICAL_FAULT` | Any subsystem through App boundary | Fault code | Immediate transition to safe fault handling |
-| `EV_PM_SLEEP_REQUEST` | Power Management | None | Later power increment requests sleep evaluation |
-| `EV_PM_WAKE` | Platform wake integration | Wake reason | Later power increment resumes active execution |
-
-Events produced synchronously inside the Application Task do not need to be
-placed in the RTOS queue. The queue is the ownership boundary between Keyboard
-Task and Application Task, not a mandatory transport for every internal state
-transition.
-
----
-
-## 12. Electronic Lock State Machine
-
-The Lock Controller shall implement one explicit state machine. Distributed
-service conditionals shall not become an implicit second product FSM.
-
-### 12.1 Operational Flow
-```mermaid
-flowchart TB
-    START((Start)) --> BOOT[BOOT]
-    BOOT -->|EV_INIT_OK| LOCKED_IDLE[LOCKED_IDLE]
-    LOCKED_IDLE -->|EV_KEY_DIGIT| CREDENTIAL_ENTRY[CREDENTIAL_ENTRY]
-    CREDENTIAL_ENTRY -->|EV_KEY_CONFIRM<br/> and complete| AUTHENTICATING[AUTHENTICATING]
-
-    AUTHENTICATING -->|EV_AUTH_SUCCESS| ACCESS_GRANTED[ACCESS_GRANTED]
-    AUTHENTICATING -->|EV_AUTH_FAILURE| ACCESS_DENIED[ACCESS_DENIED]
-    ACCESS_DENIED -->|Denial feedback complete| ATTEMPT_LIMIT{Attempt limit reached?}
-
-    ACCESS_GRANTED -->|EV_UNLOCK_TIMEOUT| RETURN_IDLE[Return to locked idle]
-    ATTEMPT_LIMIT -->|No| RETURN_IDLE
-    ATTEMPT_LIMIT -->|Yes| LOCKOUT[LOCKOUT]
-    LOCKOUT -->|EV_LOCKOUT_TIMEOUT| RETURN_IDLE
-    CREDENTIAL_ENTRY -->|Cancel when empty or entry timeout| RETURN_IDLE
-
-    classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
-    classDef processing fill:#f0f8f8,stroke:#1f7a75,color:#17324d
-    classDef denied fill:#fff2e5,stroke:#e58a3a,color:#17324d
-    classDef connector fill:#f4f6f7,stroke:#667681,color:#263642
-
-    class BOOT,LOCKED_IDLE secure
-    class CREDENTIAL_ENTRY,AUTHENTICATING,ACCESS_GRANTED processing
-    class ACCESS_DENIED,ATTEMPT_LIMIT,LOCKOUT denied
-    class RETURN_IDLE connector
-```
-
-### 12.2 Critical Fault Precedence
-```mermaid
-flowchart LR
-    BOOT[BOOT] -->|EV_INIT_FAIL| FAULT[FAULT]
-    OPERATIONAL[Operational states] -->|EV_CRITICAL_FAULT| FAULT
-    FAULT -->|Controlled reset| RESET((Reset))
-
-    classDef source fill:#f4f6f7,stroke:#667681,color:#263642
-    classDef fault fill:#fbecec,stroke:#b54040,color:#7a2525
-    classDef reset fill:#eaf5ed,stroke:#3d7e57,color:#17324d
-
-    class BOOT,OPERATIONAL source
-    class FAULT fault
-    class RESET reset
-```
-
-A critical fault from any operational state has precedence over all normal
-events and transitions to `FAULT`, even when an individual arrow is omitted
-from the diagram for readability.
-
-### 12.3 State Responsibilities
-
-| State | Purpose | Actuator command | Accepted input |
-| --- | --- | --- | --- |
-| `BOOT` | Establish safe output, inspect initialization results and prepare UI | Safe/off | None |
-| `LOCKED_IDLE` | Normal secure idle state and prompt for a new credential | Safe/off | Digit starts entry; other keys do not authenticate |
-| `CREDENTIAL_ENTRY` | Collect, mask, clear and time the candidate PIN | Safe/off | Digits, `*`, `#` |
-| `AUTHENTICATING` | Perform side-effect-free credential validation | Safe/off | None |
-| `ACCESS_GRANTED` | Maintain authorized bounded unlock and success indication | Energized only within deadline | Ignored/limited |
-| `ACCESS_DENIED` | Report failure and select retry or lockout path | Safe/off | Ignored during denial interval |
-| `LOCKOUT` | Reject authentication until lockout deadline expires | Safe/off | System events only |
-| `FAULT` | Latch critical failure and preserve safe output | Safe/off | Controlled reset/recovery only |
-
-### 12.4 State Entry and Exit Actions
-
-| State | Entry actions | Exit actions/conditions |
-| --- | --- | --- |
-| `BOOT` | Force actuator safe; clear credential; evaluate init bitmap | `EV_INIT_OK` only when all critical dependencies are valid |
-| `LOCKED_IDLE` | Force safe; clear credential; show locked prompt; set locked indication | First digit is forwarded as the first candidate digit |
-| `CREDENTIAL_ENTRY` | Start/restart 15 s inactivity timing; show masked count | Always erase candidate when leaving the state |
-| `AUTHENTICATING` | Validate exactly four digits; immediately erase candidate after comparison | Emit success/failure inside Application Task |
-| `ACCESS_GRANTED` | Reset failed attempts; request 3 s unlock; start success UI | Force safe when deadline expires or on any fault |
-| `ACCESS_DENIED` | Saturating increment of failed attempts; start denial UI and bounded denial interval | Go to lockout at three attempts; otherwise return idle |
-| `LOCKOUT` | Force safe; clear credential; show lockout; start 30 s deadline | Reset failed-attempt counter when lockout completes |
-| `FAULT` | Force safe; clear credential; stop normal sound/UI; latch fault; show limited fault indication | Hardware reset or explicitly approved recovery only |
-
-### 12.5 Credential Entry Rules
-
-| Current condition | Input | Behavior |
-| --- | --- | --- |
-| `LOCKED_IDLE` | Digit | Enter `CREDENTIAL_ENTRY` and store it as digit 1 |
-| `LOCKED_IDLE` | `#` | Do not authenticate; optional incomplete feedback |
-| `LOCKED_IDLE` | `*` | Remain idle |
-| Entry length below 4 | Digit | Append digit and restart entry timeout |
-| Entry length equal to 4 | Digit | Ignore/reject without buffer overflow |
-| Entry length equal to 4 | `#` | Enter `AUTHENTICATING` |
-| Entry length below 4 | `#` | Report incomplete; remain in entry |
-| Non-empty entry | `*` | Erase candidate; remain in entry with length zero |
-| Empty entry | `*` | Cancel session and return to `LOCKED_IDLE` |
-| Active entry | 15 s inactivity | Erase candidate and return to `LOCKED_IDLE` |
-
-### 12.6 Mandatory FSM Invariants
-
-1. The actuator is electrically safe in every state except bounded
-   `ACCESS_GRANTED` operation.
-2. `FAULT` preempts user-interface events.
-3. `LOCKOUT` never accepts or authenticates a credential.
-4. The failed-attempt counter saturates and never wraps.
-5. Authentication success resets the failed-attempt counter.
-6. A candidate buffer never contains more than four digits.
-7. Candidate data is erased on every terminal path.
-8. Unlock timeout is independent from LCD, LED and buzzer completion.
-9. Reset during unlock immediately returns the output to its hardware safe
-   state.
-10. The firmware reports commanded actuator state only; it does not claim
-    mechanical confirmation.
-
----
-
-## 13. End-to-End Behavior
-
-### 13.1 Successful Access
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant Keyboard as Keyboard Task
-    participant App as Application Task
-    participant Services as Domain and UI Services
-    participant Hardware as Drivers and Hardware
-
-    User->>Keyboard: Enter six digits
-    Keyboard->>App: Six ordered key-action events
-    App->>Services: Build masked candidate
-    Services->>Hardware: Update masked LCD view
-    User->>Keyboard: Press confirmation key
-    Keyboard->>App: Confirmation action
-    App->>Services: Authenticate complete candidate
-    Services-->>App: Authentication success
-    App->>Services: Start success UI and bounded unlock
-    Services->>Hardware: LED, sound and actuator commands
-    App->>App: Monitor timestamps while remaining responsive
-    App->>Services: Unlock duration elapsed
-    Services->>Hardware: Force actuator safe
-    App->>App: Return locked idle
-```
-
-### 13.2 Failed Authentication and Lockout
-
-1. The user submits a complete but invalid credential.
-2. Authentication returns failure without hardware side effects.
-3. The candidate is erased immediately.
-4. The Lock Controller increments the consecutive-failure counter using a
-   saturating operation.
-5. Display, LED and buzzer services start non-blocking denial feedback.
-6. If the counter is below three, the application returns to `LOCKED_IDLE`
-   after the bounded denial interval.
-7. On the third failure, the application enters `LOCKOUT` for 30 seconds.
-8. Keyboard scanning continues, but credential events are ignored while
-   locked out.
-9. After the lockout deadline, the failed-attempt counter is reset and the
-   application returns to `LOCKED_IDLE`.
-
-### 13.3 Peripheral Failure During Access
-
-If LCD, LED or buzzer operation fails while access is granted:
-
-- the failure is reported to the Lock Controller;
-- the actuator deadline remains active and independent;
-- unlock is not extended;
-- the actuator is forced safe at the original deadline;
-- the failure is classified as recoverable or critical according to the fault
-  table below.
-
----
-
-## 14. Timing and Blocking Contracts
-
-Time is part of the product behavior. Every duration in the application shall
-be represented by a start timestamp or deadline and evaluated from the
-monotonic Platform Time source. Delays may be used only inside a task to define
-its scheduling period or inside a low-level driver for a short, documented
-hardware pulse. They shall never represent an application state.
-
-### 14.1 V1 Timing Budget
-
-| Contract | Initial value | Owner | Enforcement |
-| --- | ---: | --- | --- |
-| FreeRTOS tick | 1 ms | RTOS configuration | Build-time configuration |
-| Keyboard scan period | 1 ms | Keyboard Task | `vTaskDelayUntil()` |
-| Key debounce interval | 40 ms | Matrix Keyboard component | Monotonic timestamps |
-| Application heartbeat | 10 ms maximum | Application Task | Bounded queue wait |
-| Credential-entry timeout | 15 s | Timeout Validation service | Application timestamp |
-| Actuator unlock interval | 3 s | Lock Control service | Independent deadline |
-| Lockout interval | 30 s | Lock Controller | Application timestamp |
-| Single I2C transaction | 20 ms maximum | I2C Platform | HAL timeout plus status |
-| LED pattern update | 10 ms maximum cadence | Status Indication service | Application heartbeat |
-| Sound pattern update | 10 ms maximum cadence | Sound Generator service | Application heartbeat |
-
-The values above are architecture defaults, not scattered literals. They shall
-be defined once in application or board configuration and passed explicitly to
-the modules that own them.
-
-### 14.2 Timeout Evaluation
-
-All elapsed-time comparisons shall remain correct across unsigned counter
-rollover. The required form is equivalent to:
-
-```c
-if ((uint32_t)(now_ms - start_ms) >= duration_ms)
-{
-    /* Deadline reached. */
-}
-```
-
-Code shall not compare absolute timestamps with `now_ms >= deadline_ms` unless
-the implementation proves rollover safety. Application modules shall not read
-`HAL_GetTick()` or a FreeRTOS tick directly; they receive the Platform Time
-contract or a timestamp supplied by their owner.
-
-### 14.3 Blocking Policy
-
-| Operation | Policy | Rationale |
-| --- | --- | --- |
-| Wait for an application event | Allowed, bounded to the next heartbeat | Preserves 10 ms service updates |
-| Keyboard Task period | Allowed through `vTaskDelayUntil()` | Produces deterministic scanning |
-| HAL I2C transfer | Allowed only in Application Task and with finite timeout | One owner, bounded failure |
-| HD44780 enable pulse | Short bounded low-level wait allowed | Required by the device protocol |
-| LED, buzzer or backlight effect | Never implemented as a blocking loop | Effects are timestamp-driven |
-| Credential-entry, unlock or lockout duration | Never implemented with `HAL_Delay()` or task delay | State must remain responsive |
-| Queue send from Keyboard Task | Never block | Input must not stall scanning |
-| Mutex wait | Not required in V1 | Every peripheral has a single task owner |
-
-The 20 ms I2C timeout is a failure ceiling, not an expected execution time.
-Normal LCD transactions shall be much shorter. Repeated I2C failures shall be
-detected by policy rather than repeatedly consuming the entire timeout.
-
-### 14.4 Measurements Required Before V1 Release
-
-The following shall be measured on the target, using the release-equivalent
-build and worst supported peripheral conditions:
-
-- worst-case execution time and jitter of the Keyboard Task;
-- maximum Application Task event latency;
-- I2C transaction duration and timeout behavior with the expander disconnected;
-- actuator lock latency after its deadline;
-- queue high-water mark during aggressive key input;
-- stack high-water mark for both project-owned tasks;
-- CPU idle percentage in idle and active product states;
-- debounce behavior over at least 100 deliberate key presses;
-- deadline behavior across the 32-bit time-source rollover boundary.
-
-Any measured violation must be fixed or recorded as an approved architecture
-change. Increasing a timeout without identifying its cause is not a fix.
-
----
-
-## 15. Initialization and Safe Startup
-
-Startup is a controlled transition from unknown silicon state to a known,
-locked product state. The actuator safety path takes precedence over the user
-interface.
-
-### 15.1 Initialization Sequence
+### 2.1 Layer Placement
 
 ```mermaid
 flowchart TD
-    Reset["Reset"] --> SafeGPIO["Establish safe GPIO levels"]
-    SafeGPIO --> HAL["HAL and system clock"]
-    HAL --> Peripherals["GPIO, I2C and<br/> timer initialization"]
-    Peripherals --> Platform["Construct Platform objects"]
-    Platform --> Actuator["Initialize actuator and<br/> force LOCKED"]
-    Actuator --> Components["Initialize keyboard, LCD,<br/> LEDs and buzzer"]
-    Components --> Services["Initialize services and<br/> Lock Controller"]
-    Services --> RTOS["Create static queue<br/> and tasks"]
-    RTOS --> Scheduler["Start scheduler"]
-    Scheduler --> Boot["BOOT state self-check<br/> summary"]
-    Boot -->|Critical path valid| Locked["LOCKED_IDLE"]
-    Boot -->|Critical failure| Fault["FAULT"]
+    A["Application and Services"] --> B["Component Drivers and Adapters"]
+    B --> C["Platform Interfaces"]
+    C --> D["STM32 HAL, CMSIS and Generated Handles"]
+    D --> E["STM32F411CEU6 Hardware"]
 ```
 
-The detailed order is:
+Component drivers depend on project-owned platform headers or on narrow
+component interfaces implemented by adapters. They shall not include STM32
+HAL headers directly.
 
-1. Reset-visible GPIO configuration shall make the actuator electrically safe.
-2. `HAL_Init()` and system clock configuration establish the MCU baseline.
-3. Cube-generated GPIO initialization applies safe output levels before
-   enabling dependent timers or buses.
-4. I2C and timer peripherals are initialized.
-5. Platform objects are constructed from generated HAL handles and board
-   constants.
-6. The Lock Actuator is initialized first among component drivers and is
-   explicitly commanded to its safe, locked state.
-7. The monotonic time source is initialized and validated.
-8. Keyboard, PCF8574, LCD, backlight, LED and buzzer components are initialized.
-9. Services and the Lock Controller are initialized with validated dependency
-   pointers and configuration.
-10. The event queue and both tasks are created from static memory.
-11. The scheduler starts; the Application Task evaluates the collected startup
-    results while in `BOOT`.
+### 2.2 Abstraction Boundary
 
-No startup animation or sound may delay the actuator-safe operation.
+Each platform module separates a public contract from a target-specific
+implementation:
 
-### 15.2 Initialization Classification
+| Side | Location | Content |
+|:---|:---|:---|
+| Public contract | `Platforms/Inc/` | project-owned types, status values and function declarations |
+| STM32 implementation | `Platforms/Src/` | HAL calls, native handle casts, register access and target-specific translation |
 
-| Dependency | Classification | Required behavior on failure |
-| --- | --- | --- |
-| Lock actuator safe command | Critical | Remain or enter `FAULT`; never authorize access |
-| Monotonic time source | Critical | Enter `FAULT`; bounded unlock cannot be guaranteed |
-| Keyboard scan path | Critical for normal operation | Enter `FAULT`; no credential can be trusted |
-| Queue or task creation | Critical | Do not start normal product operation |
-| LCD/PCF8574 | Degradable | Continue locked with LED/sound feedback if available |
-| Status LED | Degradable | Continue locked using remaining feedback channels |
-| Buzzer | Degradable | Continue locked using visual feedback |
-| Backlight PWM | Degradable | Continue without dimming/backlight control |
+Opaque `void *` contexts allow the composition root to provide generated
+native handles without making those native types part of most public APIs.
+GPIO follows the same intent by accepting an opaque port pointer during
+initialization and storing it inside its project-owned handle.
 
-Degraded operation never relaxes authentication, lockout or actuator safety.
-If the remaining feedback is insufficient to communicate normal use safely,
-the Lock Controller may escalate the condition to `FAULT`.
+The public surface is intended to minimize target coupling. It does not yet
+guarantee drop-in portability: the current PWM channel values mirror STM32 HAL
+channel encodings and are tracked as portability debt.
 
-### 15.3 Scheduler Failure Hooks
+### 2.3 Dependency Direction
 
-Stack overflow, allocation failure and unrecoverable RTOS assertion hooks shall:
+The allowed dependency direction is:
 
-1. force the actuator to its safe state through the shortest valid path;
-2. stop issuing normal application commands;
-3. record a diagnosable fault indication when safe to do so; and
-4. remain in a controlled failure loop or perform an explicitly approved reset.
-
-Because V1 statically allocates all application RTOS objects, allocation failure
-after startup is not part of normal behavior.
-
----
-
-## 16. Error, Fault and Security Policy
-
-### 16.1 Failure Classes
-
-| Class | Examples | Product response |
-| --- | --- | --- |
-| User input rejection | Incomplete credential, extra digit, invalid action | Keep locked, provide bounded feedback, preserve valid state |
-| Authentication failure | Complete credential does not match | Erase candidate, increment failure counter, deny or lock out |
-| Recoverable peripheral failure | LCD NACK, buzzer unavailable | Report, degrade feedback, preserve deadlines and locked safety |
-| Critical functional failure | Time source invalid, keyboard contract broken | Force locked and enter `FAULT` |
-| Actuator safety failure | Unlock deadline missed, safe command reports failure | Reassert safe command, enter `FAULT`, require service/reset policy |
-| RTOS integrity failure | Stack overflow, assertion, impossible queue state | Use failure hook and force safe state |
-| Configuration failure | Invalid pin, duplicate binding, zero critical duration | Reject initialization and remain safe |
-
-### 16.2 Status Propagation
-
-- Platform functions return transport or hardware-operation status.
-- Component drivers translate Platform status into component-level status
-  without hiding the original failure class.
-- Services return domain-level results such as success, denied, busy, invalid
-  argument or device failure.
-- Only the Lock Controller decides whether a reported failure is ignored,
-  retried, degraded or promoted to `FAULT`.
-- A function that cannot complete its contract shall not return success.
-- Failed output updates must not silently extend a product deadline.
-
-Retries, when justified by a device protocol, shall be finite and documented.
-There is no unbounded retry loop in V1.
-
-### 16.3 Safe Fault Behavior
-
-On entry to `FAULT`, the application shall:
-
-1. erase any credential candidate;
-2. cancel pending authentication and normal UI sequences;
-3. command the actuator to the locked state;
-4. stop all nonessential PWM outputs;
-5. expose a distinct, non-blocking fault indication when a feedback path is
-   still operational; and
-6. reject all unlock requests.
-
-Leaving `FAULT` requires an explicitly defined recovery condition. For V1, the
-default recovery is a controlled reset after the underlying cause has been
-removed; an automatic recovery path must be approved separately.
-
-### 16.4 Credential Handling
-
-- The application stores only the current candidate and configured reference
-  needed for V1 authentication.
-- The candidate is fixed-length, bounds-checked and erased after success,
-  failure, cancellation, timeout, lockout, fault and reset.
-- The display shows masking characters only; raw digits are never rendered.
-- Raw credentials shall not be printed, traced or included in fault telemetry.
-- Authentication shall use an exact-length comparison and shall not partially
-  authorize a prefix.
-- The consecutive-failure counter shall saturate instead of wrapping.
-- V1 hardcoded credential storage is accepted only as an MVP limitation. It is
-  not a production credential-storage design.
-
-Physical tamper resistance, cryptographic storage and side-channel hardening
-remain outside V1 scope, but the architecture must not prevent later replacement
-of the Authentication service.
-
----
-
-## 17. Power Management Architecture
-
-Power management is an explicit architectural extension point, but deep-sleep
-operation is not required to complete the first functional MVP. V1 shall avoid
-design choices that prevent later low-power operation and shall provide a
-testable service skeleton before STOP mode is enabled.
-
-The Power Management service does not own a task in V1. It is updated by the
-Application Task at the same bounded heartbeat used by the other services. It
-observes product activity and requests power transitions; it never authenticates
-a credential and can never command the lock to unlock.
-
-### 17.1 Responsibilities
-
-The Power Management service shall eventually:
-
-- collect activity from keyboard events, display changes, feedback patterns and
-  state transitions;
-- maintain inactivity timing without blocking the application;
-- request backlight dimming or shutdown through the Display Render service;
-- coordinate tickless idle and, later, MCU STOP entry;
-- validate all sleep guards before changing power state;
-- restore clocks, time accounting and peripherals after wakeup;
-- expose current power state and diagnostic transition reason;
-- classify battery state when battery-measurement hardware becomes available.
-
-It shall not:
-
-- drive GPIO, I2C or PWM directly;
-- bypass the Lock Controller;
-- enter deep sleep while the actuator may be unlocked;
-- silently discard a pending application event;
-- use low battery as a reason to relax authentication or safety behavior.
-
-### 17.2 Power State Machine
-
-### 17.3 Operation Flow
-```mermaid
-flowchart LR
-    START((Start)) --> PM_ACTIVE[PM_ACTIVE]
-    PM_ACTIVE -->|Inactivity threshold| PM_IDLE[PM_IDLE]
-    PM_IDLE -->|Sleep requested| PM_PREPARE_STOP[PM_PREPARE_STOP]
-
-    PM_PREPARE_STOP -->|Guards valid / suspend| PM_STOP[PM_STOP]
-    PM_STOP -->|Wake source| PM_RESUME[PM_RESUME]
-    PM_RESUME -->|Clocks and peripherals valid| PM_ACTIVE
-
-    PM_IDLE -->|Activity detected| PM_ACTIVE
-    PM_PREPARE_STOP -->|Sleep guard rejected| PM_IDLE
-
-    classDef active fill:#eaf5ed,stroke:#3d7e57,color:#17324d
-    classDef idle fill:#f0f8f8,stroke:#1f7a75,color:#17324d
-    classDef transition fill:#fff2e5,stroke:#e58a3a,color:#17324d
-    classDef stop fill:#f4f6f7,stroke:#667681,color:#263642
-
-    class PM_ACTIVE active
-    class PM_IDLE idle
-    class PM_PREPARE_STOP,PM_RESUME transition
-    class PM_STOP stop
+```text
+Application -> Services -> Components/Adapters -> Platform -> HAL/CMSIS
 ```
 
-### 17.4 Critical Fault Precedence
-```mermaid
-flowchart LR
-    ACTIVE_STATES[PM_ACTIVE or PM_IDLE] -->|Critical PM failure| PM_FAULT[PM_FAULT]
-    PM_RESUME[PM_RESUME] -->|Restore failure| PM_FAULT
-    PM_FAULT -->|Controlled reset| RESET((Reset))
+The following reverse dependencies are forbidden:
 
-    classDef source fill:#f4f6f7,stroke:#667681,color:#263642
-    classDef fault fill:#fbecec,stroke:#b54040,color:#7a2525
-    classDef reset fill:#eaf5ed,stroke:#3d7e57,color:#17324d
+* platform modules depending on application or service logic;
+* platform modules depending on product state or credentials;
+* HAL/CMSIS code calling component or application modules;
+* component public headers exposing `GPIO_TypeDef`, `I2C_HandleTypeDef`,
+  `TIM_HandleTypeDef` or other vendor-owned types.
 
-    class ACTIVE_STATES,PM_RESUME source
-    class PM_FAULT fault
-    class RESET reset
+Only the application composition boundary may know both the generated native
+handles and the portable modules that receive them.
+
+---
+
+## 3. Directory Structure
+
+```text
+Platforms/
+├── Inc/
+│   ├── GPIO_Platform_Interface.h
+│   ├── I2C_Platform_Interface.h
+│   ├── PWM_Platform_Interface.h
+│   └── Time_Platform_Interface.h
+├── Src/
+│   ├── GPIO_Platform_Interface.c
+│   ├── I2C_Platform_Interface.c
+│   ├── PWM_Platform_Interface.c
+│   └── Time_Platform_Interface.c
+└── README.md
 ```
 
-| Power state | Meaning | Required behavior |
-| --- | --- | --- |
-| `PM_ACTIVE` | Product is active or recent activity exists | Full required UI and normal scheduling |
-| `PM_IDLE` | Product is locked and inactive | Dim or disable nonessential outputs; remain immediately responsive |
-| `PM_PREPARE_STOP` | Candidate transition to deep sleep | Recheck guards, drain/retain state and prepare wake sources |
-| `PM_STOP` | MCU deep low-power mode | Only approved wake sources remain active |
-| `PM_RESUME` | Hardware and timebase restoration | Restore clocks, peripherals and debounce input before use |
-| `PM_FAULT` | Safe power transition cannot be guaranteed | Keep or force lock safe and report critical failure |
-
-Power state is orthogonal to the Electronic Lock FSM. For example,
-`LOCKED_IDLE` may be either `PM_ACTIVE` or `PM_IDLE`; `ACCESS_GRANTED` is always
-`PM_ACTIVE`. The two state machines exchange explicit requests and conditions
-rather than sharing internal state.
-
-### 17.5 Mandatory Sleep Guards
-
-Deep sleep may be entered only when all of the following are true:
-
-1. the product FSM is in an approved locked state, initially `LOCKED_IDLE` or
-   `LOCKOUT`;
-2. the lock actuator is commanded safe and no unlock deadline is active;
-3. the application event queue is empty at the final guard check;
-4. no I2C transfer or PWM transition is in progress;
-5. no critical fault response is pending;
-6. every active deadline can be preserved by a valid low-power wake source or
-   reconciled after wakeup;
-7. keyboard wake configuration is armed and validated; and
-8. the application has committed a consistent state for resume.
-
-If any guard fails, the transition returns to `PM_IDLE`. Guard failure is not by
-itself a product fault; it becomes a fault only if the failed condition violates
-a safety contract.
-
-### 17.6 Wake and Resume Contract
-
-The intended wake design is:
-
-- one or more keyboard row signals configured as EXTI wake sources;
-- an RTC or other low-power timer for lockout and long application deadlines;
-- reset, watchdog or power-monitor events as safety wake sources;
-- a post-wake debounce window before a key is accepted as a credential action.
-
-On wakeup, the service shall restore the system clock first, then the required
-Platform peripherals, reconcile monotonic time, restore display/output policy,
-and only then emit `EV_PM_RESUMED`. The key transition that caused wakeup is a
-wake indication, not automatically an authenticated digit; it must pass normal
-matrix scanning and debounce after resume.
-
-The exact wake pins, RTC source, STOP submode and current targets remain hardware
-decisions. They must be measured on the real board before STOP mode is promoted
-from planned to implemented.
-
-### 17.7 Battery State Model
-
-Battery condition is deliberately kept separate from the operational power FSM:
-
-| Battery state | Intended policy |
-| --- | --- |
-| `BATTERY_NORMAL` | Normal product behavior |
-| `BATTERY_LOW` | Reduce nonessential UI energy and indicate maintenance need |
-| `BATTERY_CRITICAL` | Preserve safe locking, reject unsafe actuation and request service |
-| `BATTERY_UNKNOWN` | Use conservative policy until measurement is valid |
-
-Thresholds, filtering, hysteresis and whether an unlock is safe at critical
-voltage depend on the actuator, power stage, cell chemistry and measurement
-circuit. They shall not be guessed in firmware.
-
-### 17.8 Incremental Power Roadmap
-
-| Stage | Deliverable | V1 status |
-| --- | --- | --- |
-| PM0 | No busy waits; tasks block or delay deterministically | Required for MVP |
-| PM1 | Backlight and feedback inactivity policy | Planned in service skeleton |
-| PM2 | FreeRTOS tickless idle with measured wake latency | After functional integration |
-| PM3 | STM32 STOP mode, keyboard wake and time reconciliation | After board validation |
-| PM4 | Battery measurement, hysteresis and critical-voltage policy | Requires hardware definition |
-
-This staged approach keeps the MVP focused while preserving a clean path to
-battery optimization.
+Public users include headers from `Inc/`. Target-specific includes and native
+peripheral access belong in `Src/`.
 
 ---
 
-## 18. Configuration and Ownership
+## 4. Responsibilities
 
-Configuration is split by meaning, not by convenience.
+### 4.1 Owned Responsibilities
 
-### 18.1 Planned Configuration Boundaries
+The platform layer owns:
 
-| Configuration owner | Examples | Must not contain |
-| --- | --- | --- |
-| `Board_Config.h` | Pins, ports, I2C address, timer channels, electrical polarity | PIN value, lockout policy, UI text |
-| `App_Config.h` | PIN length, timeouts, retry limit, queue length, task cadence | HAL handles, GPIO ports, timer instances |
-| Component `*_Config` types | Dependencies and physical options for one driver instance | Product state or cross-service policy |
-| Service `*_Config` types | Domain policy and injected driver/service references | STM32 HAL types |
-| FreeRTOS configuration | Tick rate, assertion hooks, static-allocation settings | Product PIN or hardware pin map |
+* translation from project-owned operations to STM32 HAL/CMSIS operations;
+* translation from HAL return values to project-owned status types;
+* storage of the minimum native context required by a platform handle;
+* validation of parameters and handle lifecycle where the current contract
+  defines it;
+* low-level GPIO, I2C, PWM and time mechanics;
+* documentation of target-specific constraints that affect callers;
+* preservation of the dependency boundary between components and vendor code.
 
-The exact filenames may be introduced with their modules, but these ownership
-boundaries are normative.
+### 4.2 Explicit Non-Responsibilities
 
-### 18.2 Compile-Time and Initialization Validation
+The platform layer does not own:
 
-Compile-time assertions shall be used where a condition is knowable at build
-time, including array capacities, credential length, queue item size and valid
-enumeration ranges. Initialization shall reject:
+* PIN validation, lock states, retry limits or security policy;
+* keyboard scanning policy, key debouncing or key mapping;
+* LCD commands, PCF8574 bit mapping or display rendering;
+* LED patterns, buzzer melodies or backlight effects;
+* task creation, queues, mutexes or scheduling policy;
+* peripheral pin mode, alternate function, clock tree or NVIC configuration;
+* retries and recovery decisions for higher-level device protocols;
+* dynamic memory allocation;
+* speculative support for peripherals or targets that the product does not
+  currently use.
 
-- null mandatory dependencies;
-- zero or out-of-range critical durations;
-- unsupported timer channels;
-- duplicate keyboard row/column bindings;
-- invalid LCD geometry or expander mapping;
-- an unlock polarity that has not been explicitly configured;
-- a task stack or queue length below the architecture minimum.
-
-### 18.3 Object Ownership Rules
-
-- Configuration data is immutable after successful initialization unless the
-  module contract explicitly provides a reconfiguration operation.
-- Runtime state belongs to exactly one module instance.
-- The module that creates an object owns its storage lifetime.
-- Public handles may be passed by pointer, but ownership is not transferred.
-- Hardware dependencies are injected during initialization; they are not found
-  through hidden globals.
-- Private implementation fields use the existing leading-underscore naming
-  convention and shall not be manipulated outside the owning module.
-- Application state is not stored inside Platform or component drivers.
+Those responsibilities remain with CubeMX, the application composition root,
+component drivers, adapters, services or the lock controller as defined by the
+root architecture.
 
 ---
 
-## 19. Repository Organization
+## 5. Interface Summary
 
-The current structure is retained. New modules shall complete the intended
-layers instead of triggering a broad repository reorganization during the MVP.
+| Interface | Public header | Current STM32 backend | Primary consumers |
+|:---|:---|:---|:---|
+| GPIO | [`GPIO_Platform_Interface.h`](Inc/GPIO_Platform_Interface.h) | `HAL_GPIO_WritePin`, `HAL_GPIO_TogglePin`, `HAL_GPIO_ReadPin` | LED driver and matrix-keyboard GPIO adapter |
+| I2C | [`I2C_Platform_Interface.h`](Inc/I2C_Platform_Interface.h) | blocking `HAL_I2C_Master_Transmit` and `HAL_I2C_Master_Receive` | PCF8574 driver |
+| PWM | [`PWM_Platform_Interface.h`](Inc/PWM_Platform_Interface.h) | STM32 TIM HAL plus timer-register access | buzzer driver and HD44780 PWM backlight adapter |
+| Time | [`Time_Platform_Interface.h`](Inc/Time_Platform_Interface.h) | HAL tick for milliseconds and TIM2 for microseconds | protocol initialization and time-aware component logic |
 
-| Path | Responsibility |
-| --- | --- |
-| `App/Core/` | Composition root and FreeRTOS task entry points |
-| `App/Lock_Controller/` | Product FSM and application policy |
-| `Core/` | STM32Cube-generated startup, HAL glue and IRQ code |
-| `Drivers/` | STM32Cube HAL and CMSIS packages |
-| `Libs/Components/Buzzer/` | Passive-buzzer component driver |
-| `Libs/Components/HD44780/` | LCD driver and bus/backlight adapters |
-| `Libs/Components/Led/` | Status LED component driver |
-| `Libs/Components/MatrixKeyboard/` | Matrix keyboard driver and scan adapter |
-| `Libs/Components/PCF8574/` | I2C I/O-expander driver |
-| `Libs/Services/` | Hardware-independent product capabilities |
-| `Platforms/` | STM32 HAL-backed GPIO, I2C, PWM and Time contracts |
-| `References/` | Scope, architecture and component references |
-| `Electronic-Lock.ioc` | STM32CubeMX hardware configuration |
-| `README.md` | Normative project architecture |
-
-The following additions are expected, without changing the layer model:
-
-- a Lock Actuator component under `Libs/Components/`;
-- Lock Control and Power Management services under `Libs/Services/`;
-- static RTOS objects and task entry points under `App/Core/`;
-- host and target verification assets under a clearly named test directory;
-- board and application configuration headers at their respective composition
-  boundary.
-
-### 19.1 Generated-Code Boundary
-
-`Core/`, `Drivers/`, the `.ioc` file and STM32Cube-generated build metadata are
-tool-owned integration surfaces. Product behavior shall live in `App/`,
-`Libs/` and `Platforms/`. Manual changes inside generated files shall be limited
-to Cube-preserved user sections and thin calls into the application composition
-root.
-
-Regenerating the `.ioc` project must not erase architecture code. After every
-CubeMX regeneration, the build, pin map, timer allocation and generated diff
-shall be reviewed before merging.
-
-### 19.2 Include and Dependency Rules
-
-- Public include directories shall expose module APIs without exposing their
-  source directories indiscriminately.
-- Application code may include service and public component headers, but not
-  component private headers.
-- Services shall not include files from `App/` or `Core/`.
-- Components shall not include service or application headers.
-- Platform implementation files may include STM32 HAL headers; Platform public
-  contracts and all upper-layer public headers shall remain HAL-independent.
-- A module shall not reach into a sibling module's private data structure.
-- Circular includes or link dependencies are architecture violations.
+All four interfaces are synchronous. None creates a task, starts a scheduler,
+allocates memory or serializes concurrent access.
 
 ---
 
-## 20. Documentation Standard
+## 6. GPIO Platform Interface
 
-All source documentation and repository README files are written in English.
-This keeps public identifiers, tool output and documentation vocabulary
-consistent. Every new module must follow the established Doxygen style and the
-README structures below before it is considered complete.
+### 6.1 Contract
 
-### 20.1 File Header Template
+The GPIO interface represents one configured MCU pin with a project-owned
+`GPIO_Handle_t`. The current operations are intentionally limited to basic
+digital access:
 
-Each public header and source file shall provide:
+* bind a handle to a native port and pin;
+* drive the output HIGH;
+* drive the output LOW;
+* toggle the output;
+* read the electrical level reported by the peripheral.
+
+Pin mode, pull resistor, speed, output type and alternate-function setup are
+outside this API and remain CubeMX responsibilities.
+
+### 6.2 Data Model
+
+| Type | Meaning |
+|:---|:---|
+| `GPIO_OpStatus_t` | `GPIO_OPERATION_OK` or `GPIO_OPERATION_FAIL` |
+| `GPIO_Level_t` | `GPIO_LEVEL_LOW`, `GPIO_LEVEL_HIGH` or `GPIO_LEVEL_UNKNOWN` |
+| `GPIO_Config_t` | opaque native port plus the stored STM32 pin mask |
+| `GPIO_Handle_t` | GPIO configuration plus initialization state |
+
+Members prefixed with `_` are private implementation state. Callers shall not
+read or modify them directly.
+
+### 6.3 API
 
 ```c
-/**
- * @file    Module_Name.h
- * @brief   One-sentence purpose of the file.
- * @details Architectural role, dependencies, ownership and relevant behavior.
- *
- * @author  Project author or maintainer
- * @version 1.0.0
- * @date    2026-08-12
- */
+GPIO_OpStatus_t PGPIO_Init(
+    GPIO_Handle_t *Instance,
+    void *GPIO_Port,
+    uint16_t GPIO_Pin);
+
+GPIO_OpStatus_t PGPIO_Set(GPIO_Handle_t *Instance);
+GPIO_OpStatus_t PGPIO_Reset(GPIO_Handle_t *Instance);
+GPIO_OpStatus_t PGPIO_Toggle(GPIO_Handle_t *Instance);
+GPIO_Level_t PGPIO_GetLevel(const GPIO_Handle_t *Instance);
 ```
 
-The filename, capitalization and include guard shall match. Dates use an
-unambiguous English month or ISO `YYYY-MM-DD`; mixed-language abbreviations are
-not used.
+| Function | Result |
+|:---|:---|
+| `PGPIO_Init` | binds a software handle to one already-configured hardware pin |
+| `PGPIO_Set` | writes logical HIGH |
+| `PGPIO_Reset` | writes logical LOW |
+| `PGPIO_Toggle` | inverts the current output latch |
+| `PGPIO_GetLevel` | reads the actual pin level and may differ from the last value written |
 
-### 20.2 Source Layout and Naming
+### 6.4 Preconditions and Behavior
 
-Public headers retain the established section order:
+For the current STM32 backend:
 
-1. file Doxygen block;
-2. include guard and `extern "C"` boundary;
-3. `Includes`;
-4. `Macros`;
-5. `Types`;
-6. `Data`, only when the public contract genuinely exposes data;
-7. `Function Prototypes`;
-8. closing C++ boundary and include guard.
+* `GPIO_Port` shall point to a valid STM32 `GPIO_TypeDef` instance;
+* `GPIO_Pin` is a zero-based pin index from `0` through `15`, not a
+  `GPIO_PIN_x` bit mask;
+* `PGPIO_Init` converts that index to the STM32 mask `1U << GPIO_Pin`;
+* CubeMX shall configure the pin before `PGPIO_Init` is called;
+* write and toggle operations reject a null or uninitialized handle;
+* all operations require a valid initialized handle, including
+  `PGPIO_GetLevel`.
 
-Source files use the corresponding order of includes, private macros/types,
-private data, private prototypes and function definitions. The existing long
-asterisk separators may continue to label these sections, but consistency
-inside a file is more important than an exact separator width.
+> [!WARNING]
+> Passing `GPIO_PIN_x` as the `GPIO_Pin` argument is invalid for the current
+> implementation because the function expects the numeric pin index. For
+> example, use `12U` for PA12, not `GPIO_PIN_12`.
 
-Naming follows the current module-oriented vocabulary:
+---
+
+## 7. I2C Platform Interface
+
+### 7.1 Contract
+
+The I2C interface provides blocking master transfers through an opaque native
+context. It does not expose an I2C handle type because the current PCF8574 path
+only needs two stateless operations.
+
+The current STM32 implementation:
+
+* uses 7-bit slave addresses at the public boundary;
+* shifts the address left once before calling STM32 HAL;
+* performs synchronous polling transfers;
+* interprets `Timeout` in milliseconds, following STM32 HAL semantics;
+* returns a project-owned status rather than `HAL_StatusTypeDef`.
+
+### 7.2 Status Translation
+
+| STM32 HAL result | Platform result |
+|:---|:---|
+| `HAL_OK` | `I2C_OPERATION_OK` |
+| `HAL_ERROR` | `I2C_OPERATION_ERROR` |
+| `HAL_BUSY` | `I2C_OPERATION_BUSY` |
+| `HAL_TIMEOUT` | `I2C_OPERATION_TIMEOUT` |
+| any unexpected value | `I2C_OPERATION_ERROR` |
+
+The platform reports the transport result. A component driver decides whether
+to propagate, translate or recover from that result; the application decides
+the product-level fault response.
+
+### 7.3 API
+
+```c
+I2C_OpStatus_t PI2C_Write(
+    void *Context,
+    uint8_t Address,
+    uint8_t *Data,
+    uint16_t Size,
+    uint32_t Timeout);
+
+I2C_OpStatus_t PI2C_Read(
+    void *Context,
+    uint8_t Address,
+    uint8_t *Data,
+    uint16_t Size,
+    uint32_t Timeout);
+```
+
+| Parameter | Contract |
+|:---|:---|
+| `Context` | valid initialized `I2C_HandleTypeDef *` supplied as `void *` |
+| `Address` | unshifted 7-bit slave address |
+| `Data` | valid transmit or receive buffer for the requested size |
+| `Size` | number of bytes to transfer; shall be nonzero for product calls |
+| `Timeout` | finite per-call timeout in milliseconds |
+
+### 7.4 Preconditions and Behavior
+
+The current implementation forwards arguments directly to STM32 HAL after the
+address conversion. It does not validate `Context`, `Data` or `Size` before
+the HAL call. Valid arguments are therefore mandatory caller preconditions.
+
+Product runtime calls shall use a bounded timeout. The architecture baseline
+sets `20 ms` as the maximum normal I2C transaction timeout; the platform API
+does not clamp a larger value automatically.
+
+No platform-level retries, bus recovery, mutexes, DMA transfers or interrupt
+callbacks are implemented. Adding any of those behaviors requires an explicit
+architecture decision because they change timing and ownership contracts.
+
+---
+
+## 8. PWM Platform Interface
+
+### 8.1 Contract
+
+The PWM interface represents one logical PWM output channel backed by an STM32
+timer. It supports:
+
+* binding a project-owned handle to a native timer and channel;
+* synchronizing the handle with the current timer configuration;
+* idempotent enable and disable operations;
+* raw compare-value and percentage duty-cycle control;
+* frequency updates that preserve the current prescaler;
+* active-polarity control;
+* cached state queries.
+
+CubeMX remains responsible for GPIO alternate functions, timer clock enable,
+base timer mode and initial PWM channel configuration.
+
+### 8.2 Data Model
+
+| Type | Values or purpose |
+|:---|:---|
+| `PWM_OpStatus_t` | `PWM_OPERATION_OK`, `PWM_OPERATION_FAIL` |
+| `PWM_Channel_t` | `PWM_CHANNEL_1` through `PWM_CHANNEL_4` |
+| `PWM_Polarity_t` | `PWM_POLARITY_HIGH`, `PWM_POLARITY_LOW` |
+| `PWM_State_t` | `PWM_STATE_ENABLED`, `PWM_STATE_DISABLED` |
+| `PWM_Handle_t` | native context plus channel, polarity, duty, maximum duty, frequency and lifecycle state |
+
+`PWM_Handle_t::Ctx` contains the native timer handle as an opaque pointer.
+Members prefixed with `_` are private and shall be accessed only through the
+public API.
+
+The numeric values of `PWM_Channel_t` currently match STM32 HAL `TIM_CHANNEL_x`
+encodings. Callers shall use the named enumerators and shall not depend on their
+numeric representation.
+
+### 8.3 Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unbound
+    Unbound --> Created: PPWM_Create
+    Created --> Initialized: PPWM_Init
+    Initialized --> Enabled: PPWM_Enable
+    Enabled --> Initialized: PPWM_Disable
+```
+
+The required sequence is:
+
+1. CubeMX-generated initialization configures and initializes the timer.
+2. `PPWM_Create` binds the project handle and reads current timer configuration
+   values.
+3. `PPWM_Init` marks the handle ready for runtime operations.
+4. Duty, frequency and polarity may be configured through the public API.
+5. `PPWM_Enable` starts output generation when the product needs it.
+6. `PPWM_Disable` stops output generation and is safe to call repeatedly.
+
+Runtime calls before a successful `PPWM_Init` fail, except for the creation
+step itself.
+
+### 8.4 API
+
+```c
+PWM_OpStatus_t PPWM_Create(
+    PWM_Handle_t *Instance,
+    void *Context,
+    PWM_Channel_t Channel);
+
+PWM_OpStatus_t PPWM_Init(PWM_Handle_t *Instance);
+PWM_OpStatus_t PPWM_Enable(PWM_Handle_t *Instance);
+PWM_OpStatus_t PPWM_Disable(PWM_Handle_t *Instance);
+
+PWM_OpStatus_t PPWM_SetDutyVal(
+    PWM_Handle_t *Instance,
+    uint16_t Duty);
+
+PWM_OpStatus_t PPWM_SetDutyPercent(
+    PWM_Handle_t *Instance,
+    uint16_t Duty_Percent);
+
+uint16_t PPWM_GetDutyVal(const PWM_Handle_t *Instance);
+uint16_t PPWM_GetDutyPercent(const PWM_Handle_t *Instance);
+uint16_t PPWM_GetMaxDuty(const PWM_Handle_t *Instance);
+
+PWM_OpStatus_t PPWM_SetFrequency(
+    PWM_Handle_t *Instance,
+    uint32_t Frequency);
+
+uint32_t PPWM_GetFrequency(const PWM_Handle_t *Instance);
+
+PWM_OpStatus_t PPWM_SetPolarity(
+    PWM_Handle_t *Instance,
+    PWM_Polarity_t Polarity);
+
+PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t *Instance);
+PWM_State_t PPWM_GetState(const PWM_Handle_t *Instance);
+```
+
+| Operation group | Behavior |
+|:---|:---|
+| Create and initialize | bind context/channel, inspect hardware and enable platform operations |
+| Enable and disable | call STM32 HAL only when a state transition is required |
+| Duty setters | clamp out-of-range input and update the channel compare register |
+| Duty getters | return the cached value or percentage represented by the current handle |
+| Frequency setter | update timer ARR, issue an update event and preserve duty ratio |
+| Polarity setter | update the channel polarity bit and cached state |
+| State getters | report the handle's cached configuration and running state |
+
+### 8.5 Frequency and Duty-Cycle Rules
+
+The current frequency calculation is:
+
+```text
+PWM frequency = timer clock / ((PSC + 1) * (ARR + 1))
+```
+
+`PPWM_SetFrequency` preserves `PSC` and modifies only `ARR`. The requested
+frequency is rejected when it is zero, greater than the assumed timer clock,
+or not representable with the current prescaler and a 16-bit period. After an
+ARR update, the compare value is recalculated with integer arithmetic to
+preserve the previous duty ratio as closely as timer resolution permits.
+
+The following timer-wide rule is mandatory:
+
+> [!WARNING]
+> Channels on the same hardware timer share one frequency. Changing the
+> frequency through one `PWM_Handle_t` affects every channel on that timer,
+> even though each channel has an independent compare value and polarity.
+
+The V1 allocation avoids a buzzer/backlight conflict by using TIM3 for the
+passive buzzer and TIM4 for the LCD backlight PWM path.
+
+Duty percentages above `100` are clamped to `100`. Raw values above the
+current ARR-derived maximum are clamped to that maximum. Getter value `0` may
+mean either a valid zero configuration or an invalid/uninitialized handle;
+callers shall use lifecycle discipline and operation results rather than treat
+all zero getter values as faults.
+
+---
+
+## 9. Time Platform Interface
+
+### 9.1 Contract
+
+The time interface centralizes timestamp and short delay access so component
+modules do not call HAL tick functions or timer registers directly.
+
+It exposes two distinct operation classes:
+
+* non-blocking timestamp reads used for elapsed-time comparisons;
+* blocking delays allowed only for bounded low-level initialization or
+  protocol timing.
+
+Application behavior, state dwell times, LED patterns, buzzer sequences and
+lock timing shall use timestamp-driven state machines or RTOS scheduling, not
+the blocking delay functions.
+
+### 9.2 API
+
+```c
+void Platform_DelayMs(uint32_t Delay);
+uint32_t Platform_GetMillis(void);
+
+void Platform_DelayUs(uint32_t Delay);
+uint32_t Platform_GetMicros(void);
+```
+
+| Function | Current source | Behavior |
+|:---|:---|:---|
+| `Platform_DelayMs` | HAL system tick | busy-waits for the requested milliseconds |
+| `Platform_GetMillis` | `HAL_GetTick()` | returns the current 32-bit millisecond tick |
+| `Platform_DelayUs` | TIM2 counter | busy-waits for the requested counter interval |
+| `Platform_GetMicros` | `htim2.Instance->CNT` | returns the current TIM2 counter value |
+
+### 9.3 Time-Base Requirements
+
+Correct millisecond operation requires a running HAL tick with a 1 ms base.
+Correct microsecond operation requires TIM2 to:
+
+* be initialized before the first time call;
+* run continuously;
+* increment exactly once per microsecond;
+* provide a wrap model compatible with unsigned elapsed-time subtraction;
+* remain reserved for the platform time base.
+
+The microsecond requirements are not fully satisfied by the current baseline;
+see [Section 20](#20-known-limitations-and-baseline-corrections) before relying
+on `Platform_DelayUs` across a counter wrap.
+
+---
+
+## 10. Initialization and Ownership
+
+### 10.1 CubeMX Responsibilities
+
+[`Electronic-Lock.ioc`](../Electronic-Lock.ioc) and generated `Core/` code own:
+
+* GPIO mode, pull, speed, output type and initial electrical level;
+* I2C timing, addressing mode, peripheral clock and pin alternate functions;
+* PWM timer prescalers, periods, output channels and alternate functions;
+* TIM2 time-base configuration;
+* peripheral clock enable and generated native handles;
+* NVIC configuration where interrupts are actually used.
+
+Platform code shall not silently duplicate or override static CubeMX
+configuration unless a public runtime operation explicitly requires it.
+
+### 10.2 Application Composition
+
+The application composition root owns construction and dependency injection.
+It may include both generated peripheral declarations and platform headers,
+then bind:
+
+* generated `GPIOx` ports and numeric pin indexes to `GPIO_Handle_t` objects;
+* `hi2c1` to the PCF8574 transport path;
+* `htim3` and its configured channel to the buzzer PWM handle;
+* `htim4` and its configured channel to the LCD backlight PWM handle;
+* project-owned handles and adapter operations to component instances.
+
+No component driver shall discover global HAL handles by itself.
+
+### 10.3 Runtime Ownership
+
+| Resource | V1 runtime owner | Rule |
+|:---|:---|:---|
+| keyboard row/column GPIO handles | Matrix Keyboard Task | no concurrent use by Application Task |
+| I2C1 and PCF8574/LCD path | Application Task | one owner; no platform mutex required |
+| status LED GPIO handles | Application Task | effects advance from application events/time |
+| TIM3 buzzer PWM | Application Task | no direct access from other tasks or ISR |
+| TIM4 backlight PWM | Application Task | no direct access from other tasks or ISR |
+| TIM2 and HAL time reads | read-only multi-context access where safe | no module may reconfigure the time base |
+
+Ownership is the primary concurrency mechanism. If a future design introduces
+multiple writers to one peripheral, its synchronization and failure behavior
+shall be designed above the platform layer before the ownership rule changes.
+
+---
+
+## 11. Integration with Component Drivers
+
+### 11.1 Current Consumers
+
+| Component or adapter | Platform dependency | Integration purpose |
+|:---|:---|:---|
+| [LED driver](../Libs/Components/Led/README.md) | GPIO and time | active-level output and time-aware blinking |
+| [Matrix Keyboard GPIO Scan Adapter](../Libs/Components/MatrixKeyboard/README.md) | GPIO | column drive and row sampling |
+| Matrix Keyboard driver | time | scan and debounce timing |
+| [PCF8574 driver](../Libs/Components/PCF8574/README.md) | I2C | expander byte transfers |
+| [HD44780 driver](../Libs/Components/HD44780/README.md) | time | bounded controller protocol delays |
+| HD44780 PCF8574 Bus Adapter | PCF8574 component | converts LCD bus operations to expander writes |
+| [Buzzer driver](../Libs/Components/Buzzer/README.md) | PWM | tone frequency, duty and output state |
+| HD44780 PWM Backlight Adapter | PWM | converts normalized backlight level to PWM duty |
+
+The table describes the intended dependency path. Component-specific details
+belong in each component README and public header.
+
+### 11.2 Adapter Boundary
+
+An adapter is used when a component contract is narrower or semantically
+different from the raw platform capability. For example:
+
+```mermaid
+flowchart LR
+    A["HD44780 Driver"] --> B["HD44780 Bus Interface"]
+    B --> C["PCF8574 Bus Adapter"]
+    C --> D["PCF8574 Driver"]
+    D --> E["I2C Platform"]
+```
+
+This prevents the HD44780 core driver from depending on an I2C expander and
+prevents the keyboard core driver from depending directly on STM32 GPIO.
+
+Adapters shall translate mechanics only. They shall not own product state,
+tasks, queues or user-visible policy.
+
+---
+
+## 12. Timing and Blocking Contracts
+
+| Operation | Blocking | Normal runtime rule |
+|:---|:---:|:---|
+| GPIO set/reset/toggle/read | no intentional wait | permitted in the owning task |
+| I2C read/write | yes | Application Task only; finite timeout, normally no more than `20 ms` per transaction |
+| PWM control/configuration | no intentional wait | Application Task only; keep updates bounded |
+| millisecond timestamp read | no | permitted for elapsed-time checks |
+| microsecond timestamp read | no | permitted only after the TIM2 baseline is corrected and validated |
+| millisecond/microsecond delay | yes, busy wait | bounded component protocol/init timing only |
+
+The platform layer does not make blocking calls non-blocking merely by hiding
+HAL. Callers shall preserve the execution-model contract defined by the root
+README.
+
+Elapsed-time checks shall use unsigned subtraction:
+
+```c
+if ((uint32_t)(now - started_at) >= interval)
+{
+    /* Interval elapsed. */
+}
+```
+
+This pattern is wrap-safe only when the timestamp source and subtraction width
+represent the same natural counter domain. The current TIM2 configuration does
+not yet meet that requirement for microsecond timing.
+
+---
+
+## 13. Error Handling
+
+Platform functions follow three error-reporting forms:
+
+| Interface | Error form | Caller behavior |
+|:---|:---|:---|
+| GPIO | `GPIO_OPERATION_FAIL` or `GPIO_LEVEL_UNKNOWN` | reject invalid setup; component translates only when needed |
+| I2C | explicit `OK`, `ERROR`, `BUSY`, `TIMEOUT` | preserve meaningful transport failure for component/application policy |
+| PWM | `PWM_OPERATION_FAIL`; default getter values | trust lifecycle and setter results; do not infer validity from a getter alone |
+| Time | no status return | startup validation and configuration correctness are mandatory |
+
+Rules:
+
+* the platform translates vendor status, not product policy;
+* platform code shall not retry indefinitely;
+* blocking operations shall always have a finite bound;
+* component drivers may map platform failures to component-owned statuses;
+* the application decides retry, degraded behavior, fault state or safe output;
+* errors shall never be silently converted into successful product behavior.
+
+Initialization failures shall leave actuators and user outputs in their
+CubeMX-defined safe startup state and shall prevent dependent runtime behavior
+from starting.
+
+---
+
+## 14. Concurrency and ISR Policy
+
+Platform interfaces provide no internal locking and are not generally
+reentrant. Safe use relies on the ownership table in Section 10.
+
+The following rules apply:
+
+* one task owns each mutable peripheral and its platform handle;
+* a platform handle shall not be mutated concurrently;
+* I2C and PWM calls shall not run from ISRs in V1;
+* platform callbacks shall not call application logic;
+* an ISR, if later introduced for wake-up, shall capture minimal information
+  and defer all device work to a task;
+* timestamp reads may be shared only when the underlying counter read is safe
+  and no caller can reconfigure the source;
+* adding DMA or interrupt-driven transfers requires an explicit completion,
+  buffer-lifetime and ownership contract.
+
+Platform-level mutexes shall not be added merely as defensive wrappers. If
+ownership changes, synchronization belongs in the architecture that introduced
+the shared resource.
+
+---
+
+## 15. Composition Example
+
+The following example belongs at the STM32 application composition boundary.
+It demonstrates native-handle injection without exposing those types through a
+component public API.
+
+```c
+#include <stdbool.h>
+
+#include "gpio.h"
+#include "i2c.h"
+#include "tim.h"
+
+#include "GPIO_Platform_Interface.h"
+#include "I2C_Platform_Interface.h"
+#include "PWM_Platform_Interface.h"
+#include "Time_Platform_Interface.h"
+
+static GPIO_Handle_t red_led_gpio = {0};
+static PWM_Handle_t buzzer_pwm = {0};
+
+bool AppPlatform_Init(void)
+{
+    if (PGPIO_Init(&red_led_gpio, GPIOA, 12U) != GPIO_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if (PPWM_Create(&buzzer_pwm, &htim3, PWM_CHANNEL_1) !=
+        PWM_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if (PPWM_Init(&buzzer_pwm) != PWM_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if (PPWM_SetDutyPercent(&buzzer_pwm, 50U) != PWM_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+```
+
+The exact GPIO port, pin index, timer and channel shall match
+[`Electronic-Lock.ioc`](../Electronic-Lock.ioc) and the generated headers. The
+example does not replace board-specific mapping constants in the composition
+module.
+
+For I2C, the injected context remains the generated handle and the public
+address remains unshifted:
+
+```c
+uint8_t output_state = 0U;
+
+I2C_OpStatus_t status = PI2C_Write(
+    &hi2c1,
+    0x27U,
+    &output_state,
+    1U,
+    20U);
+```
+
+In normal product code, the PCF8574 driver owns this transport call; the
+application shall not bypass the component driver to write the expander.
+
+---
+
+## 16. Naming and Documentation Conventions
+
+### 16.1 File and Symbol Names
+
+New platform modules shall follow the established pattern unless a repository-
+wide refactor changes it consistently:
 
 | Element | Pattern | Example |
-| --- | --- | --- |
-| Public type | `<Module>_<Role>TypeDef` | `MK_OutputTypeDef` |
-| Runtime instance | `<Module>_HandleTypeDef` | `LED_HandleTypeDef` |
-| Immutable initialization | `<Module>_ConfigTypeDef` | `MK_ConfigTypeDef` |
-| Operation status | `<Module>_OpStatusTypeDef` | `HD44780_OpStatusTypeDef` |
-| Enumeration value | Uppercase module prefix plus semantic value | `MK_KEY_ACTION_CLICK` |
-| Public function | Module prefix plus action | `MK_Read()` |
-| Unit-bearing value | Meaning followed by unit suffix | `debounce_time_ms` |
-| Private runtime field | Leading underscore plus descriptive name | `_is_initialized` |
-| Compile-time macro | Uppercase module prefix plus name | `APP_EVENT_QUEUE_LENGTH` |
+|:---|:---|:---|
+| Public header | `<Peripheral>_Platform_Interface.h` | `GPIO_Platform_Interface.h` |
+| Implementation | `<Peripheral>_Platform_Interface.c` | `GPIO_Platform_Interface.c` |
+| Operation prefix | `P<PERIPHERAL>_` | `PGPIO_Set`, `PI2C_Read`, `PPWM_Enable` |
+| Public type | descriptive PascalCase plus `_t` | `GPIO_Handle_t`, `PWM_OpStatus_t` |
+| Enumeration value | uppercase domain and meaning | `I2C_OPERATION_TIMEOUT` |
+| Opaque native pointer | `Context` or `Ctx` as already established by that API | `void *Context` |
+| Private handle member | leading underscore | `_initialized`, `_frequency` |
 
-New names shall use complete domain meaning and the existing prefix of their
-module. Renaming an established public API only for cosmetic uniformity is not
-part of the MVP; inconsistent names may be corrected when a contract is already
-changing and all call sites, examples and documentation change together.
+Do not introduce abbreviations that are not already standard for the
+peripheral or project. Existing public names are compatibility contracts;
+renaming them requires updating every caller and the relevant documentation in
+the same change.
 
-### 20.3 Type Documentation
+### 16.2 Public Header Documentation
 
-Every public enumeration, alias, callback, configuration type and runtime
-structure shall document its semantic role. Structure fields require more than
-a restatement of the field name. Each field description shall identify, where
-applicable:
+Public headers shall use technical English and Doxygen-compatible comments.
+For every public function, document:
 
-- what the value represents;
-- unit and valid range;
-- ownership and storage lifetime;
-- whether the value is configuration or mutable runtime state;
-- nullability for pointers;
-- electrical polarity or active level;
-- buffer capacity versus current length;
-- callback execution context and blocking restriction.
+* one concise `@brief` statement;
+* behavior and side effects in `@details` when they are not obvious;
+* every parameter and its units or representation;
+* lifecycle and configuration preconditions;
+* every meaningful return value;
+* blocking behavior and timeout units;
+* shared-resource or timer-wide effects;
+* target-specific limitations that change correct caller behavior.
 
-Example:
+Documentation shall describe implemented behavior, not hypothetical DMA,
+interrupt or multi-target variants. Private helpers may be documented when
+their arithmetic or register behavior is non-obvious.
 
-```c
-/** @brief Immutable initialization data for one service instance. */
-typedef struct
-{
-    uint32_t entry_timeout_ms; /**< Credential inactivity timeout in milliseconds; must be nonzero. */
-    const Time_Platform *time; /**< Non-owning monotonic time dependency; must remain valid for the instance lifetime. */
-} Example_Service_Config;
-```
+### 16.3 README Style
 
-Public configuration fields remain readable and are copied or referenced
-according to the module contract. Mutable fields are private implementation
-state and follow the existing leading-underscore convention.
+Platform documentation follows the repository standard:
 
-### 20.4 Function Documentation
+* technical English;
+* numeric major and subsection headings;
+* a navigable table of contents;
+* `---` separators primarily between major numbered topics;
+* tables for exact mappings and ownership rules;
+* code blocks for public signatures and short integration examples;
+* explicit sections for responsibilities, constraints, testing and known
+  limitations;
+* relative links to source files, component READMEs and the root architecture;
+* concise statements that distinguish current behavior from future work.
 
-Every public function shall document:
-
-```c
-/**
- * @brief   Concise action and result.
- * @details Behavior, side effects and state transition, when needed.
- *
- * @param[in]     object  Valid initialized instance; must not be NULL.
- * @param[in,out] value   Meaning, unit, range, ownership and capacity.
- *
- * @pre     Preconditions not enforceable by the type system.
- * @note    Timing, task-context or reentrancy information.
- * @warning Safety restriction or irreversible side effect, when applicable.
- *
- * @return MODULE_STATUS_OK on success.
- * @return MODULE_STATUS_INVALID_ARGUMENT when a mandatory argument is invalid.
- * @return MODULE_STATUS_DEVICE_ERROR when the dependency cannot complete.
- */
-```
-
-Only applicable tags are included; empty boilerplate is not. The public header
-is the single source of truth for public API contracts. Source files document
-private helpers, algorithms, non-obvious decisions and hardware protocol
-details without duplicating the entire public contract.
-
-### 20.5 Component Driver README Topics
-
-Component READMEs shall use this order, adapting a topic only when it is truly
-not applicable:
-
-1. Title and Concise Purpose;
-2. Overview;
-3. Features;
-4. Architecture, including interfaces/adapters when present;
-5. Directory Structure;
-6. Device Overview, when the module represents an external device;
-7. Driver Responsibilities;
-8. Dependencies;
-9. Data Structures;
-10. API Reference;
-11. Driver-specific runtime model, when needed, such as port shadow or effect state;
-12. Operation Flow, with Initialization Flow as a subsection;
-13. Usage Example;
-14. Design Decisions;
-15. Error Handling;
-16. Usage Constraints;
-17. Testing and Validation;
-18. Applications;
-19. Limitations;
-20. Future Improvements, when concrete extensions are known;
-21. License.
-
-Driver READMEs shall describe the abstract Platform dependency, adapter
-selection, electrical assumptions, active polarity, units, timeouts and error
-propagation. This order preserves the common skeleton already used by Buzzer,
-HD44780, LED, Matrix Keyboard and PCF8574 documentation; `Testing and
-Validation` becomes mandatory as those READMEs are next revised. Driver READMEs
-shall not prescribe the electronic-lock product policy.
-
-### 20.6 Service README Topics
-
-Service READMEs preserve the same visual and explanatory style but emphasize
-domain behavior:
-
-1. Title and Concise Purpose;
-2. Overview;
-3. Features;
-4. Architecture Context;
-5. Directory Structure;
-6. Service Responsibilities;
-7. Service Non-Responsibilities;
-8. Dependencies;
-9. Configuration and Data Structures;
-10. API Reference;
-11. Events, Commands and Results;
-12. Behavioral Rules and Operation Flow;
-13. Timing and Concurrency;
-14. Usage Example;
-15. Design Decisions;
-16. Error Handling;
-17. Usage Constraints;
-18. Testing and Acceptance Criteria;
-19. Applications;
-20. Limitations and Future Improvements;
-21. License.
-
-If a service participates in a state machine, its README links to this document
-and explains only the states or transitions it owns. It shall not redefine the
-global Lock Controller FSM.
-
-### 20.7 Documentation Quality Rules
-
-- Names in diagrams, examples and text shall match the real public API.
-- Units shall appear in field names or documentation and remain consistent.
-- Examples shall compile against the documented API or be clearly marked as
-  pseudocode.
-- Mermaid diagrams shall describe stable architecture, not line-by-line code.
-- Limitations and failure behavior shall be explicit.
-- A README is updated in the same change that modifies its public contract.
-- TODO text is not used to conceal an unresolved safety or architecture choice.
+Clarity and verifiability take precedence over abstraction vocabulary.
 
 ---
 
-## 21. Verification Strategy
+## 17. Design Decisions
 
-Verification follows the same dependency direction as the architecture. Pure
-logic is tested without the MCU; hardware contracts are then validated on the
-target; finally the product behavior is exercised end to end.
+### 17.1 Project-Owned Status Types
 
-### 21.1 Verification Levels
+Vendor return codes stop at the platform boundary. This keeps components from
+depending on STM32 HAL and gives each interface only the result states its
+callers need.
 
-| Level | Primary subjects | Method |
-| --- | --- | --- |
-| Host unit | Authentication, credential entry, timeout validation, Lock Controller FSM | Native C tests with fake time and fake services |
-| Host component | Driver logic that depends only on abstract interfaces | Fake GPIO, I2C, PWM and Time implementations |
-| Target component | GPIO polarity, PWM frequencies, I2C protocol, LCD timing, keyboard scan | Instrumented tests on STM32F411 board |
-| RTOS integration | Task cadence, queue behavior, ownership, stack margin | Trace points, counters and target stress tests |
-| Product integration | Full credential, lockout, fault and unlock flows | Real peripherals or controlled hardware fixture |
-| Release acceptance | Scope, reliability and safe recovery | Repeatable acceptance checklist on release build |
+### 17.2 Opaque Native Contexts
 
-### 21.2 Required Unit Coverage
+Generated handle types are injected as `void *` at the composition boundary
+and interpreted only by the target implementation. This is sufficient for the
+current single-target project without introducing function tables or a runtime
+backend registry.
 
-At minimum, host tests shall cover:
+### 17.3 Synchronous I2C
 
-- correct, incorrect, incomplete and overlength credentials;
-- credential clear, cancel, confirmation and entry timeout;
-- three consecutive failures and lockout expiry;
-- failure counter reset after successful authentication and lockout completion;
-- every valid FSM transition and rejection of invalid events;
-- candidate erasure on every terminal or safety transition;
-- timestamp rollover for all deadline-based services;
-- status/sound/display pattern completion without blocking;
-- queue-overflow recovery policy at the controller boundary;
-- power-management sleep guards and rejected transitions.
+The LCD path is owned by one Application Task, transfers are short and a finite
+timeout is mandatory. A synchronous API is therefore simpler and adequate for
+V1. DMA or asynchronous completion would add lifecycle and concurrency costs
+without a demonstrated current need.
 
-Generated test doubles shall implement the same public contracts as the real
-dependencies. A test must not reach into private runtime fields merely to make
-an assertion; observable outputs and explicit diagnostic accessors are used.
+### 17.4 Explicit PWM Handles
 
-### 21.3 Target Acceptance Scenarios
+PWM retains channel configuration and cached runtime state, so it uses a
+project-owned handle and a creation/initialization lifecycle. Separate TIM3 and
+TIM4 allocation prevents buzzer frequency changes from altering backlight PWM.
 
-The V1 release shall pass, at minimum:
+### 17.5 Centralized Time Access
 
-1. twenty cold boots and twenty resets with the actuator observed safe throughout;
-2. successful entry of the correct PIN from each physical key position used;
-3. denial of wrong, incomplete and extra-digit candidates;
-4. cancellation and inactivity timeout from every credential-entry length;
-5. three failures followed by a full 30-second lockout;
-6. correct input handling after aggressive press/release sequences without
-   duplicate accepted digits;
-7. automatic relock at the configured deadline with no dependence on LCD, LED
-   or buzzer success;
-8. reset during the unlocked interval with immediate return to electrical safe
-   state;
-9. LCD/PCF8574 disconnection during boot and normal operation;
-10. queue saturation or synthetic overflow with candidate invalidation and no
-    accidental authentication;
-11. time-source rollover tests for entry, unlock, lockout and feedback patterns;
-12. at least 24 hours of repeated operation without deadlock, stack overflow,
-    queue corruption or unintended unlock.
+Time access is project-owned so reusable components do not depend on HAL tick
+or a specific timer symbol. Blocking delay functions remain narrowly scoped to
+protocol mechanics; they are not an application scheduling mechanism.
 
-All safety-relevant observations shall be recorded with the firmware revision,
-board revision, build profile and test conditions.
+### 17.6 No Platform-Owned RTOS Objects
 
-### 21.4 Definition of Done for a Module
-
-A module is complete only when:
-
-- its responsibility and non-responsibility match this architecture;
-- its public header is fully documented;
-- arguments and configuration are validated;
-- all operations return meaningful status;
-- blocking and task-context behavior are explicit;
-- unit or target tests cover normal, boundary and failure paths;
-- the module README follows its required topic structure;
-- no prohibited dependency has been introduced;
-- the Debug and release-equivalent builds compile without warnings attributable
-  to the module.
-
-### 21.5 Traceability
-
-Architecture invariants and product acceptance criteria should receive stable
-identifiers when the test suite is introduced, for example `ARCH-LOCK-001` or
-`ACC-LOCKOUT-003`. Tests, fault reports and architecture decisions shall refer
-to those identifiers rather than copying slightly different requirements.
+V1 achieves concurrency safety through explicit peripheral ownership. Keeping
+tasks, queues and mutexes out of the platform layer preserves deterministic
+module boundaries and avoids hidden blocking.
 
 ---
 
-## 22. MVP Development Sequence
+## 18. Usage Constraints
 
-The MVP is organized around vertical, verifiable capability. Each phase must
-leave the actuator safe and the project buildable.
-
-```mermaid
-flowchart LR
-    A["0. Freeze architecture"] --> B["1. Stabilize baseline"]
-    B --> C["2. Implement and<br/> test services"]
-    C --> D["3. Add actuator and<br/> RTOS flow"]
-    D --> E["4. Integrate product FSM"]
-    E --> F["5. Validate and release V1"]
-```
-
-### 22.1 Phase 0 - Architecture Baseline
-
-- approve this document;
-- record remaining hardware decisions;
-- create the dedicated architecture commit.
-
-Exit criterion: the team agrees on layer boundaries, task model, events, state
-machines, safety invariants and V1 scope.
-
-### 22.2 Phase 1 - Stable Low-Level Baseline
-
-- make Debug and release-equivalent build inputs consistent;
-- reconcile `.ioc` peripheral configuration with generated source;
-- correct critical component and Platform contract violations;
-- validate keyboard, LCD, LED, buzzer, time and PWM paths on target;
-- establish the actuator-safe electrical level.
-
-Exit criterion: every existing component has a repeatable target smoke test and
-no unresolved issue can cause or prolong an unsafe actuator state.
-
-### 22.3 Phase 2 - Services and Host Tests
-
-- finalize service public contracts and configuration types;
-- implement Credential Entry, Authentication and Timeout Validation first;
-- implement non-blocking Display Render, Status Indication and Sound Generator;
-- add Lock Control and the Power Management PM0/PM1 skeleton;
-- implement host fakes and service-level tests.
-
-Exit criterion: all pure business behavior passes host tests without STM32 HAL
-or FreeRTOS dependencies.
-
-### 22.4 Phase 3 - Actuator and FreeRTOS Execution
-
-- implement and target-test the Lock Actuator component;
-- configure FreeRTOS for static allocation and required hooks;
-- create the static event queue and the two project tasks;
-- measure scan period, event latency, stack use and queue occupancy;
-- validate queue-overflow and critical-hook safety behavior.
-
-Exit criterion: key actions reach the Application Task deterministically and a
-bounded test command can never leave the actuator unlocked past its deadline.
-
-### 22.5 Phase 4 - Product FSM Integration
-
-- implement the full Lock Controller FSM;
-- connect services, UI feedback and lock control;
-- validate boot, normal access, denial, timeout, lockout and fault paths;
-- exercise degraded UI behavior and reset-during-unlock safety.
-
-Exit criterion: every state and transition in this document is observable,
-tested and has a defined recovery path.
-
-### 22.6 Phase 5 - V1 Qualification
-
-- execute the target acceptance scenarios;
-- run long-duration and fault-injection tests;
-- close timing, stack and queue measurements;
-- update module READMEs and release notes;
-- tag the reproducible V1 build only after all critical criteria pass.
-
-Exit criterion: functional V1 scope is complete with no open safety-critical
-defect. PM2 and PM3 may continue after this point if they would jeopardize the
-one-month functional MVP target.
-
-### 22.7 Four-Week Planning Guardrail
-
-| Week | Primary objective |
-| --- | --- |
-| 1 | Architecture approval, build parity, critical low-level corrections |
-| 2 | Services, host tests and actuator component |
-| 3 | FreeRTOS tasks, event flow and full product FSM integration |
-| 4 | Fault injection, measurements, documentation and V1 qualification |
-
-This is a scope guardrail, not a substitute for measured progress. Features
-outside the defined V1 scope do not displace a safety, integration or validation
-item.
+1. Initialize CubeMX-generated peripherals before constructing platform
+   handles.
+2. Pass only valid native contexts that match the concrete STM32 backend.
+3. Use a numeric zero-based index with `PGPIO_Init`; do not pass a pin mask.
+4. Use unshifted 7-bit addresses with `PI2C_Read` and `PI2C_Write`.
+5. Keep every runtime I2C timeout finite and within the architecture bound.
+6. Call `PPWM_Create` and `PPWM_Init` before any other PWM operation.
+7. Treat PWM frequency as a timer-wide property.
+8. Do not access private handle members directly.
+9. Do not call mutable I2C or PWM operations concurrently or from an ISR.
+10. Do not use blocking platform delays to implement product behavior.
+11. Do not reconfigure TIM2 after the microsecond time base starts.
+12. Do not include STM32 HAL headers in component public interfaces.
+13. Do not add an abstraction until a real component or second backend needs
+    the corresponding capability.
 
 ---
 
-## 23. Architecture Governance
+## 19. Testing and Validation
 
-This baseline is frozen for V1 implementation. Frozen means that implementation
-must follow it and changes require evidence and review; it does not mean that a
-known mistake can never be corrected.
+Platform verification shall combine contract tests with target measurements.
 
-### 23.1 Frozen Decisions
+### 19.1 GPIO
 
-| ID | Decision | Rationale |
-| --- | --- | --- |
-| `ARCH-001` | STM32F411CEU6 and the committed `.ioc` file define the target | Matches the real project and board integration |
-| `ARCH-002` | Dependency direction is Application -> Services -> Components -> Platform -> HAL | Preserves portability and testability |
-| `ARCH-003` | V1 has exactly two project-owned tasks | Deterministic input plus simple serialized behavior |
-| `ARCH-004` | The Application Task is the only owner of services and output drivers | Avoids mutexes and split state ownership |
-| `ARCH-005` | Keyboard events cross one bounded static queue | Makes the concurrency boundary explicit |
-| `ARCH-006` | Application behavior is event-driven with a 10 ms maximum heartbeat | Combines responsiveness and non-blocking effects |
-| `ARCH-007` | The full eight-state Lock Controller FSM is implemented | Makes boot, denial, lockout and fault behavior explicit |
-| `ARCH-008` | Every unlock is finite and independently deadline-protected | Core safety invariant |
-| `ARCH-009` | Services and drivers do not depend on FreeRTOS | Keeps business and hardware modules host-testable |
-| `ARCH-010` | Application RTOS objects use static allocation | Predictable memory and startup behavior |
-| `ARCH-011` | V1 uses bounded synchronous I2C owned by the Application Task | Sufficient for the current LCD path without bus-task complexity |
-| `ARCH-012` | There is no task per service and no effects task in V1 | Avoids unjustified scheduling and synchronization |
-| `ARCH-013` | Power Management shares the Application Task and is introduced in stages | Preserves the MVP while enabling battery work |
-| `ARCH-014` | No application-owned dynamic allocation | Eliminates fragmentation and runtime allocation failure |
+* reject null setup and uninitialized write handles;
+* verify index-to-mask mapping for pins `0` through `15`;
+* verify set, reset and toggle electrical output;
+* verify input reads report LOW/HIGH and invalid use is handled safely.
 
-### 23.2 What Requires an Architecture Change
+### 19.2 I2C
 
-The root README and, when useful, an Architecture Decision Record shall be
-updated before or with a change that:
+* verify a public 7-bit address is shifted exactly once;
+* verify all HAL statuses map to the correct platform status;
+* verify timeout units and the `20 ms` product bound at call sites;
+* exercise PCF8574 success, NACK/error, busy and timeout paths on target.
 
-- adds, removes or changes the responsibility of a task;
-- changes resource ownership or introduces a mutex;
-- changes the layer dependency direction;
-- adds an asynchronous bus, DMA completion path or new inter-task channel;
-- changes an FSM state, transition, safety invariant or product deadline;
-- permits deep sleep in a new product state;
-- changes the critical/degradable classification of a dependency;
-- moves a feature into or out of V1 scope;
-- introduces dynamic allocation after startup;
-- changes actuator safe polarity or the unlock fail-safe mechanism.
+### 19.3 PWM
 
-Changing an internal helper, improving an algorithm without changing its public
-contract, fixing a documented defect or adding a conforming unit test does not
-require an architecture revision.
+* verify create/init lifecycle and invalid-handle rejection;
+* verify enable/disable idempotence;
+* verify duty clamping at `0`, `100%`, ARR and above-range inputs;
+* verify requested versus measured frequency on TIM3 and TIM4;
+* verify duty-ratio preservation after frequency changes;
+* verify polarity and shared-timer effects;
+* verify safe output state after disable and failed initialization.
 
-### 23.3 Change Procedure
+### 19.4 Time
 
-1. State the observed problem or new requirement.
-2. Provide target measurements, test evidence or a concrete product need.
-3. Compare the smallest viable alternatives and their safety impact.
-4. Record the decision and update this baseline first.
-5. Update affected public APIs, module READMEs and tests in the same change.
-6. Review the implementation against the revised invariant or contract.
+* verify millisecond elapsed-time behavior across HAL tick wrap;
+* verify TIM2 counter frequency with a logic analyzer or reference timer;
+* verify microsecond delays below, at and across the configured counter wrap;
+* verify initialization order and continuous time-base operation;
+* verify blocking delays are absent from product-level state/effect code.
 
-Architecture is not expanded for hypothetical reuse. A third task, additional
-queue, bus manager, event group or deep-sleep mechanism requires evidence that
-the two-task baseline cannot meet a measured requirement.
+Host fakes are appropriate only where they test a project-owned contract
+without reproducing STM32 HAL internals. Register timing, alternate functions,
+clock-tree behavior and electrical output require target tests.
 
 ---
 
-## 24. Current Project Status
+## 20. Known Limitations and Baseline Corrections
 
-This section separates committed implementation from the target architecture.
-The architecture sections above are normative even when a listed module is not
-implemented yet.
+The following items describe the repository baseline and shall be resolved or
+consciously accepted before the affected capability is treated as production-
+ready:
 
-### 24.1 Implementation Inventory
+1. **TIM2 configuration mismatch:** `Electronic-Lock.ioc` currently records a
+   TIM2 prescaler of `999`, while generated `Core/Src/tim.c` configures `99`.
+   At the current 100 MHz timer-clock assumption, only `99` produces a 1 MHz
+   counter. Regenerate or reconcile the project so `.ioc` and generated code
+   have one authoritative value.
+2. **TIM2 wrap contract:** TIM2 currently uses period `0xFFFF`. The
+   microsecond delay implementation subtracts 32-bit readings as if the source
+   wrapped naturally at `2^32`; it is therefore not correct when the 16-bit
+   configured period wraps. Correct the time-base period or implement
+   wrap-aware elapsed-time accumulation before relying on this API.
+3. **PWM clock assumption:** the PWM backend uses
+   `HAL_RCC_GetSysClockFreq()` as the timer input clock. It does not derive the
+   real APB clock and timer multiplier for the selected instance.
+4. **PWM range:** frequency updates preserve PSC, change ARR only and limit ARR
+   to 16 bits. Some otherwise valid frequencies are not representable.
+5. **PWM shared state:** one handle updates a timer-wide ARR without
+   synchronizing cached frequency/maximum-duty fields in other handles bound
+   to the same timer. V1 avoids this for buzzer and backlight by assigning
+   separate timers.
+6. **PWM channel portability:** public channel enumerator values currently
+   mirror STM32 HAL encodings. A second backend would require an explicit
+   translation layer or a compatible contract revision.
+7. **GPIO read validation:** `PGPIO_GetLevel` currently rejects a null handle
+   but does not check `_initialized` before dereferencing the stored native
+   port. Callers must pass an initialized handle; the implementation should be
+   strengthened to return `GPIO_LEVEL_UNKNOWN` safely.
+8. **GPIO pin representation:** the API name `GPIO_Pin` can be confused with
+   STM32 pin masks, while the implementation expects a zero-based index. This
+   README states the current contract; the header and validation should make
+   it unambiguous and reject indexes above `15`.
+9. **I2C argument validation:** the current I2C functions do not reject null
+   contexts, null buffers, zero sizes or addresses outside the 7-bit range
+   before calling HAL.
+10. **Getter ambiguity:** several PWM getters return `0` or a default enum when
+    a handle is invalid, and those values may also represent valid state. A
+    future API revision may use status plus output parameters.
+11. **PWM lifecycle validation:** `PPWM_Create` does not safely reject every
+    invalid channel before dereferencing resolved timer registers, and
+    `PPWM_Init` does not verify that creation succeeded. Polarity input is also
+    not range-checked. The required lifecycle remains a caller precondition
+    until these checks are strengthened.
+12. **PWM creation-state decoding:** `PPWM_Create` casts the raw STM32 CCER
+    polarity mask directly to `PWM_Polarity_t` instead of normalizing it to
+    `PWM_POLARITY_LOW`, and initializes the cached running state to disabled
+    without reading the hardware channel-enable state.
+13. **PWM frequency/duty accuracy:** frequency is cached as the requested value
+    even when integer ARR quantization produces a different actual frequency.
+    The duty-refresh arithmetic also requires correction and boundary tests,
+    including protection against a zero previous period.
+14. **Time prototype strictness:** the public time header currently declares
+    `Platform_GetMillis()` and `Platform_GetMicros()` with old-style empty
+    parameter lists, while the definitions take `void`. The header declarations
+    should use `(void)` to restore full C prototype checking.
+15. **Single target:** there is no interchangeable backend or host platform
+    implementation. The public boundary reduces coupling but has not yet been
+    proven by a second target.
+16. **Build-configuration parity:** Debug currently includes project `App`,
+    `Libs` and `Platforms` sources, while Release configuration requires
+    reconciliation before it can serve as an equivalent product build.
 
-| Area | Current state | V1 architectural destination |
-| --- | --- | --- |
-| STM32Cube project | Present for STM32F411CEU6 | Reconcile and keep generated configuration reproducible |
-| GPIO, I2C, PWM and Time Platforms | Implemented baseline | Harden contracts and keep HAL out of public upper layers |
-| Buzzer driver | Implemented baseline with README | Used only by Sound Generator service |
-| HD44780 plus PCF8574/PWM adapters | Implemented baseline with README | Used only through Display Render service |
-| LED driver | Implemented baseline with README | Used only through Status Indication service |
-| Matrix Keyboard plus GPIO adapter | Implemented baseline with README | Owned by Keyboard Task |
-| PCF8574 driver | Implemented baseline with README | Owned through the LCD bus adapter |
-| Application Core | Skeleton | Composition root, static RTOS objects and task entry points |
-| Lock Controller | Skeleton | Full Electronic Lock FSM |
-| Six initial services | API/source skeletons | Implement and test contracts defined here |
-| Lock Actuator component | Not present | Required before product integration |
-| Lock Control service | Not present | Required before product integration |
-| Power Management service | Not present | PM0/PM1 skeleton during MVP; deep sleep later |
-| FreeRTOS integration | Not present | Two static tasks and one static event queue |
-| Automated tests | Not present | Host unit suite plus target and product acceptance tests |
-
-### 24.2 Known Baseline Corrections Before Integration
-
-The architecture review identified issues that should be handled in Phase 1,
-not silently folded into service development:
-
-- verify that Debug and release-equivalent configurations compile the same
-  application, Platform and library sources;
-- reconcile TIM2/time configuration in the `.ioc` file with committed generated
-  code and the chosen FreeRTOS timebase;
-- decide and document whether keyboard EXTI is wake-only or part of acquisition;
-  normal V1 acquisition remains periodic scanning;
-- remove STM32 HAL types from hardware-independent public contracts where they
-  leak through the abstraction boundary;
-- review HD44780 command, cursor, initialization and adapter status propagation;
-- review PCF8574 shadow-state behavior after failed writes;
-- verify LED active-level handling and safe initialization;
-- strengthen matrix keyboard configuration and pointer validation;
-- verify PWM timer channel, polarity, start/stop and duty-cycle contracts;
-- validate that every existing driver timeout and error status is finite and
-  observable by its owner.
-
-These are bounded corrective items, not permission to redesign the architecture.
-Each correction shall preserve public intent where possible and update the
-relevant driver README if its contract changes.
-
-### 24.3 Import and Build
-
-1. Clone the repository.
-2. In STM32CubeIDE, use **File -> Import -> Existing Projects into Workspace**.
-3. Select the repository directory.
-4. Open [`Electronic-Lock.ioc`](Electronic-Lock.ioc) to inspect or regenerate
-   STM32Cube configuration.
-5. Build the Debug configuration for the current baseline.
-6. Before V1 release, create or validate a release-equivalent configuration with
-   identical project-owned source coverage.
-
-The project uses the STM32CubeIDE-managed GNU Arm toolchain and committed linker
-scripts. A successful build alone is not proof of hardware safety; target smoke
-tests remain mandatory.
-
-### 24.4 Reference Documentation
-
-- [Original V1 scope and architecture reference](References/Architecture/Architecture-V1.pdf)
-- [Platform layer documentation](Platforms/README.md)
-- [Buzzer driver](Libs/Components/Buzzer/README.md)
-- [HD44780 driver and adapters](Libs/Components/HD44780/README.md)
-- [LED driver](Libs/Components/Led/README.md)
-- [Matrix Keyboard driver and adapter](Libs/Components/MatrixKeyboard/README.md)
-- [PCF8574 driver](Libs/Components/PCF8574/README.md)
+These are concrete engineering constraints, not reasons to add a broad
+framework. Corrections should remain local and testable.
 
 ---
 
-## 25. License
+## 21. Future Improvements
 
-This project is distributed under the terms in the repository
-[`LICENSE`](LICENSE) file.
+Improvements shall be driven by validated product or test needs. The current
+priority order is:
+
+1. reconcile TIM2 `.ioc` and generated configuration;
+2. make microsecond elapsed-time behavior correct across wrap;
+3. strengthen GPIO and I2C validation without changing successful-call
+   semantics;
+4. strengthen PWM lifecycle validation and correct state decoding/duty refresh;
+5. derive PWM timer clocks from the actual instance and RCC configuration;
+6. normalize time getter declarations to strict `(void)` prototypes;
+7. make PWM getters return explicit validity where compatibility permits;
+8. reconcile Debug and Release source inclusion;
+9. add focused host fakes only for component tests that need deterministic
+   GPIO, I2C, PWM or time behavior;
+10. separate target-specific source directories only when a second backend is
+   actually introduced.
+
+SPI, UART, ADC, asynchronous I2C and DMA support shall be added only when an
+approved product capability requires them. A future backend shall preserve the
+documented public semantics or introduce an explicit versioned contract change.
+
+---
+
+## 22. License
+
+This module is distributed under the repository [MIT License](../LICENSE).
