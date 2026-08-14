@@ -24,6 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "Credential_Entry_Service.h"
 
 /* USER CODE END Includes */
 
@@ -93,6 +94,17 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
+  CES_Input_t input =
+  {
+          .Kind  = CES_INPUT_KIND_DIGIT,
+          .Digit = 3
+  };
+
+  CES_BeginSession();
+
+  int u = 0;
+
+  CES_Candidate_t candidate;
 
   /* USER CODE END 2 */
 
@@ -100,6 +112,23 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    CES_Event_t output = CES_ProcessInput(&input);
+
+    if(output == CES_EVENT_NONE && u == 0)
+    {
+        u = 1;
+
+        input.Kind = CES_INPUT_KIND_CONFIRM;
+    }
+
+    if(output == CES_EVENT_READY)
+    {
+        CES_GetCandidate(&candidate);
+
+        CES_EndSession();
+    }
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

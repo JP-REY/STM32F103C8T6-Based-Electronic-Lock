@@ -354,10 +354,10 @@ CES_Length_t CES_GetCurrentLength(void)
 }
 
 /**
- * @brief   Copies the complete candidate into caller-provided storage.
+ * @brief   Copies the complete candidate into a caller-provided object.
  *
  * @details Copies the internal candidate credential, preserving digit order,
- *          into the writable buffer referenced by Candidate->Digits.
+ *          into the fixed-size Digits array owned by Candidate.
  *
  *          When the operation succeeds, Candidate->Length is set to
  *          CES_CREDENTIAL_LENGTH.
@@ -365,8 +365,8 @@ CES_Length_t CES_GetCurrentLength(void)
  *          This operation does not erase the internal candidate, change its
  *          length or end the active credential-entry session.
  *
- * @param   Candidate - Pointer to the destination descriptor whose Digits
- *                      member references caller-owned writable storage.
+ * @param   Candidate - Pointer to the caller-owned object that receives the
+ *                      complete candidate credential.
  *
  * @note    This function shall be called only after CES_ProcessInput()
  *          returns CES_EVENT_READY.
@@ -375,35 +375,26 @@ CES_Length_t CES_GetCurrentLength(void)
  *          CES_EndSession() to erase the internal candidate and end the active
  *          session before continuing authentication with the copied data.
  *
- * @note    Ownership of the destination buffer remains with the caller.
- *
- * @warning Candidate and Candidate->Digits shall be valid pointers.
- *
- * @warning Candidate->Digits shall reference storage with capacity for at
- *          least CES_CREDENTIAL_LENGTH elements.
+ * @note    Ownership of Candidate and its credential storage remains with the
+ *          caller.
  *
  * @warning The caller is responsible for erasing the copied credential after
  *          authentication processing is complete.
  *
  * @return  CES_OPERATION_OK   - When the complete candidate was copied
  *                               successfully;
- *          CES_OPERATION_FAIL - When no session is active or the internal
- *                               candidate is incomplete.
+ *          CES_OPERATION_FAIL - When Candidate is NULL, no session is active
+ *                               or the internal candidate is incomplete.
  */
 CES_OpStatus_t CES_GetCandidate(CES_Candidate_t* Candidate)
 {
-    if(!CES_IsActive() || !CES_BufferIsFull())
+    if(Candidate == NULL || !CES_IsActive() || !CES_BufferIsFull())
 
-        return CES_OPERATION_FAIL;
+        return CES_OPERATION_FAIL; 
+
+    memcpy(Candidate->Digits,CES_Instance.candidate,sizeof(CES_Instance.candidate));
 
     Candidate->Length =  CES_Instance.length;
-
-    for(size_t digit = 0; digit < CES_Instance.length; digit++)
-    {
-        *(Candidate->Digits) = CES_Instance.candidate[digit];
-
-        Candidate->Digits++;
-    }
 
     return CES_OPERATION_OK;
 }

@@ -400,41 +400,48 @@ typedef enum
 
 `CES_EVENT_READY` does not authenticate the credential and does not automatically end the session. The Lock Controller must obtain the candidate, invoke authentication, and close the session at the appropriate application transition.
 
-### 7.7 Candidate Copy Descriptor
+### 7.7 Candidate Copy Object
 
-`CES_Candidate_t` describes caller-provided storage into which the service copies a complete candidate:
+`CES_Candidate_t` is a caller-owned object that stores a fixed-size copy of a complete candidate credential:
 
 ```c
 typedef struct
 {
-    CES_Digit_t* Digits;
+    CES_Digit_t  Digits[CES_CREDENTIAL_LENGTH];
     CES_Length_t Length;
 
-} CES_Candidate_t;
+}CES_Candidate_t;
 ```
 
-| Member | Description |
-|---|---|
-| `Digits` | Pointer to a writable caller-owned destination buffer. |
-| `Length` | Number of candidate digits copied successfully into the destination buffer. |
+| Member   | Description                                                                            |
+| :------- | :------------------------------------------------------------------------------------- |
+| `Digits` | Fixed-size array containing the copied candidate digits in their original entry order. |
+| `Length` | Number of valid candidate digits stored in `Digits` after a successful copy.           |
 
-`CES_Candidate_t` is a copy descriptor, not a view of the CES internal buffer. Before calling `CES_GetCandidate()`, the application shall:
+`CES_Candidate_t` is neither a descriptor nor a view of the CES internal buffer. The credential storage is embedded directly in the caller-owned object, and its capacity is defined at compile time by `CES_CREDENTIAL_LENGTH`.
 
-- Allocate a writable `CES_Digit_t` array with capacity for at least `CES_CREDENTIAL_LENGTH` elements.
-- Assign the array address to `Candidate->Digits`.
-- Keep the destination storage valid for the complete duration of the operation.
-- Call the function only after `CES_EVENT_READY`.
+Before calling `CES_GetCandidate()`, the application shall:
+
+* Provide a valid `CES_Candidate_t` object.
+* Call the function only after `CES_ProcessInput()` returns `CES_EVENT_READY`.
+* Keep the object available until authentication processing and credential erasure are complete.
+
+The caller does not need to allocate a separate digit buffer, assign a destination pointer or provide a capacity value.
 
 On success, the service:
 
-- Copies the complete internal candidate into the caller-provided buffer in entry order.
-- Sets `Candidate->Length` to `CES_CREDENTIAL_LENGTH`.
-- Retains ownership of its internal candidate storage.
-- Does not allocate memory or transfer internal-buffer ownership.
+* Copies the complete internal candidate into `Candidate->Digits` in its original entry order.
+* Sets `Candidate->Length` to `CES_CREDENTIAL_LENGTH`.
+* Leaves the internal candidate unchanged.
+* Leaves the credential-entry session active.
+* Retains ownership of its internal candidate storage.
+* Does not allocate memory or transfer internal-buffer ownership.
 
-The copied credential belongs to the caller and remains independent from later changes to the CES internal state. Consequently, `CES_EndSession()` erases only the internal candidate. The caller is responsible for erasing its own copy immediately after authentication completes.
+After a successful copy, the Lock Controller shall call `CES_EndSession()` to erase the service-owned candidate and close the credential-entry session before continuing authentication with the caller-owned copy.
 
-The current descriptor does not include destination capacity. The application must therefore guarantee that `Digits` references storage for at least `CES_CREDENTIAL_LENGTH` elements before calling `CES_GetCandidate()`.
+The copied credential remains valid independently from later CES operations because it is stored directly in the caller-owned `CES_Candidate_t` object. Consequently, `CES_EndSession()` erases only the internal CES candidate.
+
+The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after authentication processing is finished. Candidate digits shall not be logged, displayed or retained in long-lived application storage.
 
 ---
 
@@ -649,7 +656,7 @@ The function does not expose the candidate values.
 
 ### 10.4 CES_GetCandidate
 
-Copies a complete candidate into caller-provided storage for immediate authentication.
+Copies a complete candidate into a caller-owned `CES_Candidate_t` object for immediate authentication.
 
 #### Function Signature
 
@@ -661,35 +668,37 @@ CES_OpStatus_t CES_GetCandidate(
 
 #### Parameters
 
-| Parameter | Description |
-|---|---|
-| `Candidate` | Pointer to a copy descriptor containing the caller-owned destination buffer. |
+| Parameter   | Description                                                                         |
+| :---------- | :---------------------------------------------------------------------------------- |
+| `Candidate` | Pointer to the caller-owned object that receives the complete candidate credential. |
 
 #### Return
 
-| Return Value | Description |
-|---|---|
-| `CES_OPERATION_OK` | The complete candidate was copied successfully. |
-| `CES_OPERATION_FAIL` | No session is active or the internal candidate is incomplete. |
+| Return Value         | Description                                                                          |
+| :------------------- | :----------------------------------------------------------------------------------- |
+| `CES_OPERATION_OK`   | The complete candidate was copied successfully.                                      |
+| `CES_OPERATION_FAIL` | `Candidate` is `NULL`, no session is active or the internal candidate is incomplete. |
 
 Before calling the function:
 
-- `Candidate` shall point to a valid `CES_Candidate_t` object.
-- `Candidate->Digits` shall point to writable caller-owned storage.
-- The destination buffer shall provide capacity for at least `CES_CREDENTIAL_LENGTH` digits.
+* `Candidate` shall point to a valid `CES_Candidate_t` object.
+* The function shall be called only after `CES_ProcessInput()` returns `CES_EVENT_READY`.
+
+The caller does not need to allocate a separate digit buffer or provide its capacity. `CES_Candidate_t::Digits` is a fixed-size array with capacity for exactly `CES_CREDENTIAL_LENGTH` digits.
 
 On success:
 
-- The six internal digits are copied into the buffer supplied through `Candidate->Digits`.
-- `Candidate->Length` equals `CES_CREDENTIAL_LENGTH`.
-- The internal CES candidate and active-session state remain unchanged.
-- Ownership of the destination buffer remains with the caller.
+* The internal candidate is copied into `Candidate->Digits` in its original entry order.
+* `Candidate->Length` is set to `CES_CREDENTIAL_LENGTH`.
+* The internal candidate remains unchanged.
+* The credential-entry session remains active.
+* Ownership of `Candidate` and its credential storage remains with the caller.
 
-The function does not receive a destination-capacity parameter and therefore cannot validate the available storage size. Passing a null or undersized destination violates the API preconditions.
+The function does not authenticate the candidate and does not end the credential-entry session. Sequencing confirmation before candidate retrieval remains a Lock Controller responsibility, while CES verifies that an active complete candidate is available.
 
-The function is intended to be called immediately after `CES_EVENT_READY`. Sequencing confirmation before candidate retrieval is enforced by the Lock Controller, while CES validates that the internal candidate is complete.
+After a successful copy, the Lock Controller shall immediately call `CES_EndSession()` before passing the caller-owned candidate to the Authentication Service. This erases the service-owned candidate and closes the credential-entry session without modifying the copied candidate.
 
-After a successful copy, the Lock Controller shall immediately call `CES_EndSession()` before passing the copied credential to the Authentication Service. This clears the service-owned candidate and closes the credential-entry session without invalidating the caller-owned copy.
+The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after authentication processing is finished.
 
 ### 10.5 CES_EndSession
 

@@ -176,41 +176,39 @@ typedef enum
 }CES_Event_t;
 
 /**
- * @brief   Caller-provided destination descriptor for a candidate credential.
+ * @brief   Caller-owned representation of a complete candidate credential.
  *
- * @details Associates a writable destination buffer with the number of
- *          credential digits copied into that buffer.
+ * @details Stores a fixed-size copy of the candidate credential retrieved from
+ *          the Credential Entry Service.
  *
- *          Before calling CES_GetCandidate(), Digits shall point to storage
- *          owned by the caller with capacity for at least
- *          CES_CREDENTIAL_LENGTH elements.
+ *          Digits contains the copied decimal digits in their original entry
+ *          order. Length indicates how many elements of Digits contain valid
+ *          candidate data.
  *
- *          When the operation succeeds, the service copies the complete
- *          internal candidate into Digits and sets Length to
+ *          When CES_GetCandidate() succeeds, Digits contains exactly
+ *          CES_CREDENTIAL_LENGTH valid digits and Length is set to
  *          CES_CREDENTIAL_LENGTH.
  *
- *          The service does not expose or transfer ownership of its internal
+ *          The structure and its storage belong entirely to the caller. The
+ *          service does not expose or transfer ownership of its internal
  *          candidate buffer.
  *
  * @note    A candidate shall be requested only after CES_ProcessInput()
  *          returns CES_EVENT_READY.
  *
  * @note    The copied credential remains valid independently from subsequent
- *          CES operations because its storage belongs to the caller.
- *
- * @warning Digits shall point to valid writable storage with capacity for at
- *          least CES_CREDENTIAL_LENGTH elements.
+ *          CES operations, including CES_EndSession().
  *
  * @warning Candidate credential data shall not be logged, displayed or
  *          retained in long-lived application storage.
  *
- * @warning The caller is responsible for erasing its copy after authentication
- *          processing is complete.
+ * @warning The caller is responsible for erasing the complete structure after
+ *          authentication processing is finished.
  */
 typedef struct
 {
-    CES_Digit_t* Digits; /*< Pointer to the service-owned candidate digits.   */
-    CES_Length_t Length; /*< Number of valid digits available through Digits. */
+    CES_Digit_t  Digits[CES_CREDENTIAL_LENGTH]; /*< Copied candidate digits in their original entry order. */
+    CES_Length_t Length;                        /*< Number of valid digits available through Digits.       */
 
 }CES_Candidate_t;
 
