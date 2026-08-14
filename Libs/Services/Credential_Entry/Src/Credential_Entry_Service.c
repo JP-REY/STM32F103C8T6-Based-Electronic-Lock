@@ -303,7 +303,7 @@ CES_OpStatus_t CES_EndSession(void)
  */
 CES_Event_t CES_ProcessInput(const CES_Input_t* Input)
 {
-    if(!CES_IsActive())
+    if(Input == NULL || !CES_IsActive())
     {
         return CES_EVENT_NONE;
     }
