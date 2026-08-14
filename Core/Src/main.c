@@ -21,7 +21,6 @@
 #include "i2c.h"
 #include "tim.h"
 #include "gpio.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
