@@ -10,7 +10,6 @@
  Includes
  **********************************************************************************************************************************/
 #include "HD44780_PWM_BacklightAdapter.h"
-#include "PWM_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -194,14 +193,14 @@ static uint16_t GetBrightness(void* Context)
  * @return  HD44780_BACKLIGHT_OP_OK   - Indicates that the adapter was successfully initialized.
  *          HD44780_BACKLIGHT_OP_FAIL - Indicates that one or more parameters are invalid.
  */
-HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, void* Context)
+HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, PWM_Handle_t* Context)
 {
     if ((Backlight == NULL) || (Context == NULL))
     {
         return HD44780_BACKLIGHT_OP_FAIL;
     }
 
-    Backlight->Context       = (PWM_Handle_t*)Context;
+    Backlight->Context       = Context;
     Backlight->TurnOn        = TurnOn;
     Backlight->TurnOff       = TurnOff;
     Backlight->SetBrightness = SetBrightness;
