@@ -1,6 +1,6 @@
 /**********************************************************************************************************************************
- * @file    HD44780_Driver.c
- * @brief   HD44780_Driver.h module implementation.
+ * @file    LCD_Driver.c
+ * @brief   LCD_Driver.h module implementation.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -9,35 +9,35 @@
 /**********************************************************************************************************************************
  Includes
 **********************************************************************************************************************************/
-#include "HD44780_Driver.h"
+#include "LCD_Driver.h"
 #include "Time_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Private Macros
 **********************************************************************************************************************************/
-#define HD44780_SET_DDRAM_ADDRESS_MASK(address)\
+#define LCD_SET_DDRAM_ADDRESS_MASK(address)\
         ((1 << 7) | (address & ((1 << 7) - 1)))
 
-#define HD44780_SET_CGRAM_ADDRESS_MASK(address)\
+#define LCD_SET_CGRAM_ADDRESS_MASK(address)\
         ((1 << 6) | (address & ((1 << 6) - 1)))
 
-#define HD44780_EXTRACT_HIGHER_NIBBLE(byte,nibble)\
+#define LCD_EXTRACT_HIGHER_NIBBLE(byte,nibble)\
         (nibble |= (byte & 0xF0U) >> 4U)
 
-#define HD44780_EXTRACT_LOWER_NIBBLE(byte,nibble)\
+#define LCD_EXTRACT_LOWER_NIBBLE(byte,nibble)\
         (nibble |= (byte & 0x0FU))
 
 /**********************************************************************************************************************************
  Private Types
 **********************************************************************************************************************************/
 /**
- * @brief   HD44780 instruction opcodes.
+ * @brief   LCD instruction opcodes.
  *
  * @details Defines the base command values used internally by the driver to
- *          build HD44780 instructions. Additional configuration bits are
+ *          build LCD instructions. Additional configuration bits are
  *          combined with these opcodes according to the command being issued.
  *
- * @note    These opcodes match the instruction set defined by the HD44780
+ * @note    These opcodes match the instruction set defined by the LCD
  *          controller datasheet.
  */
 typedef enum
@@ -51,7 +51,7 @@ typedef enum
     *
     * @note  S flag of entry mode does not change.
     */
-    HD44780_CMD_CLEAR_DISPLAY   = 0x01U,
+    LCD_CMD_CLEAR_DISPLAY   = 0x01U,
 
    /**
     * @brief Sets DDRAM address 0 into the address counter.
@@ -64,10 +64,10 @@ typedef enum
     *
     * @note  Execution time = 1.52ms
     */
-    HD44780_CMD_RETURN_HOME     = 0x02U,
+    LCD_CMD_RETURN_HOME     = 0x02U,
 
    /**
-    * @brief Sets Entry Mode configuration for HD44780.
+    * @brief Sets Entry Mode configuration for LCD.
     *
     * @note  I/D: Increments or decrements the DDRAM address by 1 when a character code is written into or read from DDRAM.
     *
@@ -77,10 +77,10 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_ENTRYMODESET    = 0x04U,
+    LCD_CMD_ENTRYMODESET    = 0x04U,
 
    /**
-    * @brief Sets Display Control configuration for HD44780
+    * @brief Sets Display Control configuration for LCD
     *
     * @note  D: The display is on when D is 1 and off when D is 0.
     *
@@ -90,10 +90,10 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_DISPLAYCONTROL  = 0x08U,
+    LCD_CMD_DISPLAYCONTROL  = 0x08U,
 
    /**
-    * @brief Sets Cursor Shift configuration for HD44780
+    * @brief Sets Cursor Shift configuration for LCD
     *
     * @note  S/C: Cursor or display shift shifts position to the right or left (R/L) without writing or reading display data.
     *
@@ -101,10 +101,10 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_CURSORSHIFT     = 0x10U,
+    LCD_CMD_CURSORSHIFT     = 0x10U,
 
    /**
-    * @brief Sets HD44780 Data Interface Mode, Number of Lines and Character Font Size.
+    * @brief Sets LCD Data Interface Mode, Number of Lines and Character Font Size.
     *
     * @note  DL: Sets the interface data length. 8-bit length (DL = 1) or 4-bit length (DL = 0).
     *
@@ -114,7 +114,7 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_FUNCTIONSET     = 0x20U,
+    LCD_CMD_FUNCTIONSET     = 0x20U,
 
    /**
     * @brief Sets the CGRAM address binary AAAAAA into the address counter.
@@ -123,7 +123,7 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_SETCGRAMADDR    = 0x40U,
+    LCD_CMD_SETCGRAMADDR    = 0x40U,
 
    /**
     * @brief Set DDRAM address sets the DDRAM address binary AAAAAAA into the address counter.
@@ -132,12 +132,12 @@ typedef enum
     *
     * @note  Execution time = 37us
     */
-    HD44780_CMD_SETDDRAMADDR    = 0x80U
+    LCD_CMD_SETDDRAMADDR    = 0x80U
 
-}HD44780_Cmd_t;
+}LCD_Cmd_t;
 
 /**
- * @brief   Bit positions for the HD44780 Function Set instruction.
+ * @brief   Bit positions for the LCD Function Set instruction.
  *
  * @details Defines the bit positions used to build the Function Set command,
  *          allowing the driver to configure the interface data length, display
@@ -147,14 +147,14 @@ typedef enum
  */
 typedef enum
 {
-    HD44780_DL_INTERFACE_MODE = 0x04U,
-    HD44780_N_LINE_NUMBER     = 0x03U,
-    HD44780_F_CHAR_FONT       = 0x02U,
+    LCD_DL_INTERFACE_MODE = 0x04U,
+    LCD_N_LINE_NUMBER     = 0x03U,
+    LCD_F_CHAR_FONT       = 0x02U,
 
-}HD44780_FunctionSetBits_t;
+}LCD_FunctionSetBits_t;
 
 /**
- * @brief   Bit positions for the HD44780 Display Control instruction.
+ * @brief   Bit positions for the LCD Display Control instruction.
  *
  * @details Defines the bit positions used to control the display state,
  *          cursor visibility and cursor blinking.
@@ -163,14 +163,14 @@ typedef enum
  */
 typedef enum
 {
-    HD44780_D_DISPLAY_ON_OFF  = 0x02U,
-    HD44780_C_CURSOR_ON_OFF   = 0x01U,
-    HD44780_B_BLINKING_ON_OFF = 0x00U,
+    LCD_D_DISPLAY_ON_OFF  = 0x02U,
+    LCD_C_CURSOR_ON_OFF   = 0x01U,
+    LCD_B_BLINKING_ON_OFF = 0x00U,
 
-}HD44780_DisplayControlBits_t;
+}LCD_DisplayControlBits_t;
 
 /**
- * @brief   Bit positions for the HD44780 Cursor or Display Shift instruction.
+ * @brief   Bit positions for the LCD Cursor or Display Shift instruction.
  *
  * @details Defines the bit positions used to select whether the instruction
  *          shifts the cursor or the display, and the shift direction.
@@ -179,13 +179,13 @@ typedef enum
  */
 typedef enum
 {
-    HD44780_SC_DISPLAY_SHIFT = 0x03U,
-    HD44780_RL_SHIFT_RIGHT   = 0x02U,
+    LCD_SC_DISPLAY_SHIFT = 0x03U,
+    LCD_RL_SHIFT_RIGHT   = 0x02U,
 
-}HD44780_CursorShiftBits_t;
+}LCD_CursorShiftBits_t;
 
 /**
- * @brief   Bit positions for the HD44780 Entry Mode Set instruction.
+ * @brief   Bit positions for the LCD Entry Mode Set instruction.
  *
  * @details Defines the bit positions used to configure the cursor movement
  *          direction after each data transfer and the optional automatic
@@ -195,10 +195,10 @@ typedef enum
  */
 typedef enum
 {
-    HD44780_ID_INC_DEC_CURSOR = 0x01U,
-    HD44780_S_ENABLE_SHIFT    = 0x00U,
+    LCD_ID_INC_DEC_CURSOR = 0x01U,
+    LCD_S_ENABLE_SHIFT    = 0x00U,
 
-}HD44780_EntryModeSetBits_t;
+}LCD_EntryModeSetBits_t;
 
 /**********************************************************************************************************************************
  Private Constants
@@ -228,8 +228,8 @@ static volatile uint8_t g_custom_char7_loaded = 0x00;
 /**********************************************************************************************************************************
  Private Function Prototypes
 **********************************************************************************************************************************/
-static HD44780_OpStatus_t HD44780_SendCommand (HD44780_Handle_t* Device, HD44780_Cmd_t Command);
-static HD44780_OpStatus_t HD44780_SendData    (HD44780_Handle_t* Device, uint8_t Data);
+static LCD_OpStatus_t LCD_SendCommand (LCD_Handle_t* Device, LCD_Cmd_t Command);
+static LCD_OpStatus_t LCD_SendData    (LCD_Handle_t* Device, uint8_t Data);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -239,14 +239,14 @@ static HD44780_OpStatus_t HD44780_SendData    (HD44780_Handle_t* Device, uint8_t
  * @brief   Builds the Display Control instruction configuration bits.
  *
  * @details Packs the current display state flags into the bit field required
- *          by the HD44780 Display Control instruction. The returned value is
- *          intended to be combined with the HD44780_CMD_DISPLAYCONTROL opcode.
+ *          by the LCD Display Control instruction. The returned value is
+ *          intended to be combined with the LCD_CMD_DISPLAYCONTROL opcode.
  *
  * @param   void
  *
  * @return  Packed Display Control configuration bits.
  */
-static inline uint8_t HD44780_GetDisplayControlFlags(void)
+static inline uint8_t LCD_GetDisplayControlFlags(void)
 {
     return  g_cursor_inc_dec_flag       |
            (g_cursor_shift_flag   << 1) |
@@ -257,25 +257,25 @@ static inline uint8_t HD44780_GetDisplayControlFlags(void)
  * @brief   Builds the Entry Mode Set instruction configuration bits.
  *
  * @details Packs the current entry mode configuration into the bit field
- *          required by the HD44780 Entry Mode Set instruction. The returned
+ *          required by the LCD Entry Mode Set instruction. The returned
  *          value is intended to be combined with the
- *          HD44780_CMD_ENTRYMODESET opcode.
+ *          LCD_CMD_ENTRYMODESET opcode.
  *
  * @param   void
  *
  * @return  Packed Entry Mode Set configuration bits.
  */
-static inline uint8_t HD44780_GetEntryModeFlags(void)
+static inline uint8_t LCD_GetEntryModeFlags(void)
 {
     return g_cursor_shift_flag         |
           (g_cursor_inc_dec_flag << 1) ;
 }
 
 /**
- * @brief   Waits for the default HD44780 instruction execution time.
+ * @brief   Waits for the default LCD instruction execution time.
  *
  * @details Delays the execution for the standard instruction execution time
- *          defined by the HD44780 controller. This delay is suitable for all
+ *          defined by the LCD controller. This delay is suitable for all
  *          instructions except those requiring extended execution times, such
  *          as Clear Display and Return Home.
  *
@@ -284,37 +284,37 @@ static inline uint8_t HD44780_GetEntryModeFlags(void)
  *
  * @return  None.
  */
-static inline void HD44780_WaitInstructionDefault(void)
+static inline void LCD_WaitInstructionDefault(void)
 {
     Platform_DelayUs(45);
 }
 
 /**
- * @brief   Waits for the execution of an HD44780 instruction.
+ * @brief   Waits for the execution of an LCD instruction.
  *
  * @details Delays the execution for the minimum time required by the specified
- *          HD44780 instruction. Instructions with longer execution times, such
+ *          LCD instruction. Instructions with longer execution times, such
  *          as Clear Display and Return Home, receive dedicated delays, while
  *          all other instructions use the standard execution time.
  *
- * @param   Command - HD44780 instruction whose execution time shall be waited.
+ * @param   Command - LCD instruction whose execution time shall be waited.
  *
  * @note    This function is intended for write-only interfaces where the Busy
  *          Flag cannot be read from the controller.
  *
  * @return  None.
  */
-static void HD44780_WaitInstruction(HD44780_Cmd_t Command)
+static void LCD_WaitInstruction(LCD_Cmd_t Command)
 {
     switch(Command)
     {
-        case HD44780_CMD_CLEAR_DISPLAY:
+        case LCD_CMD_CLEAR_DISPLAY:
         {
             Platform_DelayUs(2000);
             break;
         }
 
-        case HD44780_CMD_RETURN_HOME:
+        case LCD_CMD_RETURN_HOME:
         {
             Platform_DelayUs(1600);
             break;
@@ -326,12 +326,12 @@ static void HD44780_WaitInstruction(HD44780_Cmd_t Command)
 }
 
 /**
- * @brief   Checks whether the HD44780 driver has been initialized.
+ * @brief   Checks whether the LCD driver has been initialized.
  *
  * @details Verifies that the supplied device handle is valid and that the
  *          driver has completed its initialization sequence.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This helper is intended for internal driver validation before
  *          performing operations that require an initialized device.
@@ -339,7 +339,7 @@ static void HD44780_WaitInstruction(HD44780_Cmd_t Command)
  * @return  true  - The device handle is valid and the driver is initialized.
  *          false - The device handle is NULL or the driver is not initialized.
  */
-static bool inline HD44780_IsInit(HD44780_Handle_t* Device)
+static bool inline LCD_IsInit(LCD_Handle_t* Device)
 {
     return Device == NULL ? false : Device->_initialized;
 }
@@ -353,16 +353,16 @@ static bool inline HD44780_IsInit(HD44780_Handle_t* Device)
  *          - 5x8 font  : returns 7 (8 custom characters).
  *          - 5x10 font : returns 3 (4 custom characters).
  *
- * @param   Device  Pointer to the HD44780 device handle.
+ * @param   Device  Pointer to the LCD device handle.
  *
  * @note    This helper is used internally to validate or clamp CGRAM character
  *          positions before accessing the display CGRAM.
  *
  * @return  Maximum valid CGRAM character position.
  */
-static inline uint8_t HD44780_GetCGRAMLimit(HD44780_Handle_t* Device)
+static inline uint8_t LCD_GetCGRAMLimit(LCD_Handle_t* Device)
 {
-    return Device->_font_dot_size == HD44780_5X8_FONT ? 0x07 : 0x03;
+    return Device->_font_dot_size == LCD_5X8_FONT ? 0x07 : 0x03;
 }
 
 /**
@@ -375,11 +375,11 @@ static inline uint8_t HD44780_GetCGRAMLimit(HD44780_Handle_t* Device)
  * @param   CharPosition  CGRAM character position to mark as programmed.
  *
  * @note    This helper only updates the driver's internal state. It does not
- *          modify the HD44780 CGRAM contents.
+ *          modify the LCD CGRAM contents.
  *
  * @return  None.
  */
-static inline void HD44780_SetCustomCharFlag(uint8_t CharPosition)
+static inline void LCD_SetCustomCharFlag(uint8_t CharPosition)
 {
     switch(CharPosition)
     {
@@ -407,18 +407,18 @@ static inline void HD44780_SetCustomCharFlag(uint8_t CharPosition)
  *          - Bit 7 -> Character 7 (5x8 font only)
  *
  *          For displays configured in 5x10 font mode, only bits 0 through 3 are
- *          valid because the HD44780 supports a maximum of four custom characters.
+ *          valid because the LCD supports a maximum of four custom characters.
  *
- * @param   Device  Pointer to the HD44780 device handle.
+ * @param   Device  Pointer to the LCD device handle.
  *
  * @note    This helper only reports the driver's internal tracking state. It does
- *          not read the CGRAM contents from the HD44780 controller.
+ *          not read the CGRAM contents from the LCD controller.
  *
  * @return  Bitmask containing the programmed custom character positions.
  */
-static inline uint8_t HD44780_GetCustomChars(HD44780_Handle_t* Device)
+static inline uint8_t LCD_GetCustomChars(LCD_Handle_t* Device)
 {
-    if(Device->_font_dot_size == HD44780_5X8_FONT)
+    if(Device->_font_dot_size == LCD_5X8_FONT)
     {
         return  g_custom_char0_loaded       | (g_custom_char1_loaded << 1) |
                (g_custom_char2_loaded << 2) | (g_custom_char3_loaded << 3) |
@@ -434,89 +434,89 @@ static inline uint8_t HD44780_GetCustomChars(HD44780_Handle_t* Device)
 }
 
 /**
- * @brief   Sends a command to the HD44780 controller.
+ * @brief   Sends a command to the LCD controller.
  *
  * @details Splits the command byte into its higher and lower nibbles and
  *          transmits them sequentially through the configured bus interface.
  *          The higher nibble is transmitted first, followed by the lower
- *          nibble, as required by the HD44780 4-bit interface protocol.
+ *          nibble, as required by the LCD 4-bit interface protocol.
  *
- * @param   Device  - Pointer to the HD44780 device instance.
- * @param   Command - HD44780 instruction to be transmitted.
+ * @param   Device  - Pointer to the LCD device instance.
+ * @param   Command - LCD instruction to be transmitted.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-static HD44780_OpStatus_t HD44780_SendCommand(HD44780_Handle_t* Device, HD44780_Cmd_t Command)
+static LCD_OpStatus_t LCD_SendCommand(LCD_Handle_t* Device, LCD_Cmd_t Command)
 {
     uint8_t high_nibble = 0x00;
     uint8_t low_nibble  = 0x00;
 
-    HD44780_EXTRACT_LOWER_NIBBLE(Command, low_nibble);
-    HD44780_EXTRACT_HIGHER_NIBBLE(Command, high_nibble);
+    LCD_EXTRACT_LOWER_NIBBLE(Command, low_nibble);
+    LCD_EXTRACT_HIGHER_NIBBLE(Command, high_nibble);
 
-    if(Device->_bus.TransferNibble(Device->_bus.Context, high_nibble, HD44780_BUS_COMMAND) != HD44780_BUS_OPERATION_OK)
+    if(Device->_bus.TransferNibble(Device->_bus.Context, high_nibble, LCD_BUS_COMMAND) != LCD_BUS_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     else
     {
-        if(Device->_bus.TransferNibble(Device->_bus.Context, low_nibble, HD44780_BUS_COMMAND) != HD44780_BUS_OPERATION_OK)
+        if(Device->_bus.TransferNibble(Device->_bus.Context, low_nibble, LCD_BUS_COMMAND) != LCD_BUS_OPERATION_OK)
         {
-            return HD44780_OPERATION_FAIL;
+            return LCD_OPERATION_FAIL;
         }
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
- * @brief   Sends a data byte to the HD44780 controller.
+ * @brief   Sends a data byte to the LCD controller.
  *
  * @details Splits the data byte into its higher and lower nibbles and
  *          transmits them sequentially through the configured bus interface.
  *          The higher nibble is transmitted first, followed by the lower
- *          nibble, as required by the HD44780 4-bit interface protocol.
+ *          nibble, as required by the LCD 4-bit interface protocol.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   Data   - Character or data byte to be written to the display.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-static HD44780_OpStatus_t HD44780_SendData(HD44780_Handle_t* Device, uint8_t Data)
+static LCD_OpStatus_t LCD_SendData(LCD_Handle_t* Device, uint8_t Data)
 {
     uint8_t high_nibble = 0x00;
     uint8_t low_nibble  = 0x00;
 
-    HD44780_EXTRACT_LOWER_NIBBLE(Data, low_nibble);
-    HD44780_EXTRACT_HIGHER_NIBBLE(Data, high_nibble);
+    LCD_EXTRACT_LOWER_NIBBLE(Data, low_nibble);
+    LCD_EXTRACT_HIGHER_NIBBLE(Data, high_nibble);
 
-    if(Device->_bus.TransferNibble(Device->_bus.Context, high_nibble, HD44780_BUS_DATA) != HD44780_BUS_OPERATION_OK)
+    if(Device->_bus.TransferNibble(Device->_bus.Context, high_nibble, LCD_BUS_DATA) != LCD_BUS_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     else
     {
-        if(Device->_bus.TransferNibble(Device->_bus.Context, low_nibble, HD44780_BUS_DATA) != HD44780_BUS_OPERATION_OK)
+        if(Device->_bus.TransferNibble(Device->_bus.Context, low_nibble, LCD_BUS_DATA) != LCD_BUS_OPERATION_OK)
         {
-            return HD44780_OPERATION_FAIL;
+            return LCD_OPERATION_FAIL;
         }
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**********************************************************************************************************************************
  Functions
 **********************************************************************************************************************************/
 /**
- * @brief   Initializes the HD44780 HD44780 controller.
+ * @brief   Initializes the LCD LCD controller.
  *
  * @details Performs the complete initialization sequence required by the
- *          HD44780 controller, including power-up timing, interface
+ *          LCD controller, including power-up timing, interface
  *          initialization, Function Set configuration and default display
  *          settings.
  *
@@ -525,57 +525,57 @@ static HD44780_OpStatus_t HD44780_SendData(HD44780_Handle_t* Device, uint8_t Dat
  *          specified in the device handle. The display is cleared, enabled,
  *          and configured to increment the cursor after each data write.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This driver currently supports only the 4-bit interface mode.
  *
  * @note    The initialization sequence follows the procedure recommended in
- *          the HD44780 datasheet for 4-bit operation.
+ *          the LCD datasheet for 4-bit operation.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_Init(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_Init(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
     // Prevents repeatead initialization
     if(Device->_initialized)
     {
-        return HD44780_OPERATION_OK;
+        return LCD_OPERATION_OK;
     }
 
     if(Device == NULL)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     Platform_DelayMs(50);
 
-    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, HD44780_BUS_COMMAND);
+    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, LCD_BUS_COMMAND);
 
     Platform_DelayUs(4500);
 
-    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, HD44780_BUS_COMMAND);
+    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, LCD_BUS_COMMAND);
 
     Platform_DelayUs(150);
 
-    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, HD44780_BUS_COMMAND);
+    Device->_bus.TransferNibble(Device->_bus.Context, 0x03, LCD_BUS_COMMAND);
 
-    //Sets data inteface mode of HD44780
+    //Sets data inteface mode of LCD
     switch(Device->_interface_mode)
     {
         // Not supported in this driver version!
-        case HD44780_8BIT_MODE: return HD44780_OPERATION_FAIL;
+        case LCD_8BIT_MODE: return LCD_OPERATION_FAIL;
 
         default:
-        case HD44780_4BIT_MODE:
+        case LCD_4BIT_MODE:
 
-            if(Device->_bus.TransferNibble(Device->_bus.Context, 0x02, HD44780_BUS_COMMAND) != HD44780_BUS_OPERATION_OK)
+            if(Device->_bus.TransferNibble(Device->_bus.Context, 0x02, LCD_BUS_COMMAND) != LCD_BUS_OPERATION_OK)
             {
                 Device->_initialized = false;
 
-                return HD44780_OPERATION_FAIL;
+                return LCD_OPERATION_FAIL;
             }
 
         break;
@@ -583,53 +583,53 @@ HD44780_OpStatus_t HD44780_Init(HD44780_Handle_t* Device)
 
     switch(Device->_rows)
     {
-        case HD44780_1LINE:
+        case LCD_1LINE:
 
-            if(Device->_font_dot_size == HD44780_5X8_FONT)
+            if(Device->_font_dot_size == LCD_5X8_FONT)
             {
-                command  =  HD44780_CMD_FUNCTIONSET;
-                command &= ~(1U << HD44780_N_LINE_NUMBER);
-                command &= ~(1U << HD44780_F_CHAR_FONT);
+                command  =  LCD_CMD_FUNCTIONSET;
+                command &= ~(1U << LCD_N_LINE_NUMBER);
+                command &= ~(1U << LCD_F_CHAR_FONT);
             }
 
             else
             {
-                command  =  HD44780_CMD_FUNCTIONSET;
-                command &= ~(1U << HD44780_N_LINE_NUMBER);
-                command |=  (1U << HD44780_F_CHAR_FONT);
+                command  =  LCD_CMD_FUNCTIONSET;
+                command &= ~(1U << LCD_N_LINE_NUMBER);
+                command |=  (1U << LCD_F_CHAR_FONT);
             }
 
-            if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+            if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
             {
                 Device->_initialized = false;
 
-                return HD44780_OPERATION_FAIL;
+                return LCD_OPERATION_FAIL;
             }
 
         break;
 
         default:
-        case HD44780_2LINE:
+        case LCD_2LINE:
 
-            if(Device->_font_dot_size == HD44780_5X8_FONT)
+            if(Device->_font_dot_size == LCD_5X8_FONT)
             {
-                command  =  HD44780_CMD_FUNCTIONSET;
-                command |=  (1U << HD44780_N_LINE_NUMBER);
-                command &= ~(1U << HD44780_F_CHAR_FONT);
+                command  =  LCD_CMD_FUNCTIONSET;
+                command |=  (1U << LCD_N_LINE_NUMBER);
+                command &= ~(1U << LCD_F_CHAR_FONT);
             }
 
             else
             {
-                command  =  HD44780_CMD_FUNCTIONSET;
-                command |=  (1U << HD44780_N_LINE_NUMBER);
-                command |=  (1U << HD44780_F_CHAR_FONT);
+                command  =  LCD_CMD_FUNCTIONSET;
+                command |=  (1U << LCD_N_LINE_NUMBER);
+                command |=  (1U << LCD_F_CHAR_FONT);
             }
 
-            if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+            if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
             {
                 Device->_initialized = false;
 
-                return HD44780_OPERATION_FAIL;
+                return LCD_OPERATION_FAIL;
             }
 
         break;
@@ -638,15 +638,15 @@ HD44780_OpStatus_t HD44780_Init(HD44780_Handle_t* Device)
     Device->_initialized = true;
 
     // Clear display before initialization
-    HD44780_Clear(Device);
+    LCD_Clear(Device);
     // Display Control bits disabled
-    HD44780_SendCommand(Device, HD44780_CMD_DISPLAYCONTROL);
+    LCD_SendCommand(Device, LCD_CMD_DISPLAYCONTROL);
     // Sets increment cursor in Entry Mode Set command (shift disable)
-    HD44780_IncrementCursor(Device);
+    LCD_IncrementCursor(Device);
     // Sets display on/off flag into Display Control command
-    HD44780_DisplayOn(Device);
+    LCD_DisplayOn(Device);
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -657,34 +657,34 @@ HD44780_OpStatus_t HD44780_Init(HD44780_Handle_t* Device)
  *          zero. If the display has been shifted, it is restored to its
  *          original position.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This instruction requires a longer execution time than most
- *          HD44780 commands. The function waits for the instruction to
+ *          LCD commands. The function waits for the instruction to
  *          complete before returning.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_Clear(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_Clear(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command = HD44780_CMD_CLEAR_DISPLAY;
+    command = LCD_CMD_CLEAR_DISPLAY;
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstruction(HD44780_CMD_CLEAR_DISPLAY);
+    LCD_WaitInstruction(LCD_CMD_CLEAR_DISPLAY);
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -694,34 +694,34 @@ HD44780_OpStatus_t HD44780_Clear(HD44780_Handle_t* Device)
  *          home position. If the display has been shifted, it is restored to
  *          its original position. The contents of DDRAM remain unchanged.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This instruction requires a longer execution time than most
- *          HD44780 commands. The function waits for the instruction to
+ *          LCD commands. The function waits for the instruction to
  *          complete before returning.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_Home(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_Home(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command = HD44780_CMD_RETURN_HOME;
+    command = LCD_CMD_RETURN_HOME;
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstruction(HD44780_CMD_RETURN_HOME);
+    LCD_WaitInstruction(LCD_CMD_RETURN_HOME);
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -731,38 +731,38 @@ HD44780_OpStatus_t HD44780_Home(HD44780_Handle_t* Device)
  *          Display Control instruction. The current cursor visibility and
  *          blinking configuration are preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This function does not modify the display contents stored in DDRAM.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_DisplayOn(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_DisplayOn(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command |= (1 << HD44780_D_DISPLAY_ON_OFF);
+    command |= (1 << LCD_D_DISPLAY_ON_OFF);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_display_on_off_flag = 0x01;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -773,42 +773,42 @@ HD44780_OpStatus_t HD44780_DisplayOn(HD44780_Handle_t* Device)
  *          are preserved, as are the current cursor visibility and blinking
  *          configuration.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Turning the display off does not clear DDRAM. The previously
  *          written contents become visible again when the display is turned
  *          back on.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_DisplayOff(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_DisplayOff(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command &= ~(1 << HD44780_D_DISPLAY_ON_OFF);
+    command &= ~(1 << LCD_D_DISPLAY_ON_OFF);
 
-    command |= ((HD44780_CMD_DISPLAYCONTROL | display_seted_flags) & ~(1 << HD44780_D_DISPLAY_ON_OFF));
+    command |= ((LCD_CMD_DISPLAYCONTROL | display_seted_flags) & ~(1 << LCD_D_DISPLAY_ON_OFF));
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_display_on_off_flag = 0x00;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -818,39 +818,39 @@ HD44780_OpStatus_t HD44780_DisplayOff(HD44780_Handle_t* Device)
  *          making the cursor visible. The current display state and blinking
  *          configuration are preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This function only affects cursor visibility. The cursor position
  *          and the display contents remain unchanged.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_CursorOn(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_CursorOn(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command |= (1 << HD44780_C_CURSOR_ON_OFF);
+    command |= (1 << LCD_C_CURSOR_ON_OFF);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_cursor_on_off_flag = 0x01;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -860,39 +860,39 @@ HD44780_OpStatus_t HD44780_CursorOn(HD44780_Handle_t* Device)
  *          making the cursor invisible. The current display state and blinking
  *          configuration are preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    This function only affects cursor visibility. The cursor position
  *          and the display contents remain unchanged.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_CursorOff(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_CursorOff(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command &= ~(1 << HD44780_C_CURSOR_ON_OFF);
+    command &= ~(1 << LCD_C_CURSOR_ON_OFF);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_cursor_on_off_flag = 0x00;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -902,38 +902,38 @@ HD44780_OpStatus_t HD44780_CursorOff(HD44780_Handle_t* Device)
  *          enabling cursor blinking. The current display state and cursor
  *          visibility are preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Cursor blinking is only visible when the cursor is enabled.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_BlinkOn(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_BlinkOn(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command |= (1 << HD44780_B_BLINKING_ON_OFF);
+    command |= (1 << LCD_B_BLINKING_ON_OFF);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_blink_on_off_flag = 0x01;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -943,39 +943,39 @@ HD44780_OpStatus_t HD44780_BlinkOn(HD44780_Handle_t* Device)
  *          instruction, disabling cursor blinking. The current display state
  *          and cursor visibility are preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Disabling blinking does not affect the cursor position or
  *          visibility.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_BlinkOff(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_BlinkOff(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetDisplayControlFlags();
+    uint8_t display_seted_flags = LCD_GetDisplayControlFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_DISPLAYCONTROL;
+    command  = LCD_CMD_DISPLAYCONTROL;
     command |= display_seted_flags;
-    command &= ~(1 << HD44780_B_BLINKING_ON_OFF);
+    command &= ~(1 << LCD_B_BLINKING_ON_OFF);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     g_blink_on_off_flag = 0x00;
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -986,37 +986,37 @@ HD44780_OpStatus_t HD44780_BlinkOff(HD44780_Handle_t* Device)
  *          character is written to or read from the display. The current
  *          automatic display shift configuration is preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    With automatic display shift disabled, the visible cursor moves to
  *          the right after each character operation.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_IncrementCursor(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_IncrementCursor(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+    uint8_t display_seted_flags = LCD_GetEntryModeFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_ENTRYMODESET;
+    command  = LCD_CMD_ENTRYMODESET;
     command |= display_seted_flags;
-    command |= (1 << HD44780_ID_INC_DEC_CURSOR);
+    command |= (1 << LCD_ID_INC_DEC_CURSOR);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1027,37 +1027,37 @@ HD44780_OpStatus_t HD44780_IncrementCursor(HD44780_Handle_t* Device)
  *          character is written to or read from the display. The current
  *          automatic display shift configuration is preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    With automatic display shift disabled, the visible cursor moves to
  *          the left after each character operation.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_DecrementCursor(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_DecrementCursor(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+    uint8_t display_seted_flags = LCD_GetEntryModeFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_ENTRYMODESET;
+    command  = LCD_CMD_ENTRYMODESET;
     command |= display_seted_flags;
-    command &= ~(1 << HD44780_ID_INC_DEC_CURSOR);
+    command &= ~(1 << LCD_ID_INC_DEC_CURSOR);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1068,37 +1068,37 @@ HD44780_OpStatus_t HD44780_DecrementCursor(HD44780_Handle_t* Device)
  *          The shift direction is determined by the current Increment/
  *          Decrement (I/D) configuration.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Enabling automatic display shift does not change the current
  *          cursor movement direction.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_EnableShift(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_EnableShift(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+    uint8_t display_seted_flags = LCD_GetEntryModeFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_ENTRYMODESET;
+    command  = LCD_CMD_ENTRYMODESET;
     command |= display_seted_flags;
-    command |= (1 << HD44780_S_ENABLE_SHIFT);
+    command |= (1 << LCD_S_ENABLE_SHIFT);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1108,58 +1108,58 @@ HD44780_OpStatus_t HD44780_EnableShift(HD44780_Handle_t* Device)
  *          preventing the display from shifting automatically after character
  *          operations. The current cursor movement direction is preserved.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Disabling automatic display shift does not affect the current
  *          cursor position.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_DisableShift(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_DisableShift(LCD_Handle_t* Device)
 {
     uint8_t command = 0x00;
 
-    uint8_t display_seted_flags = HD44780_GetEntryModeFlags();
+    uint8_t display_seted_flags = LCD_GetEntryModeFlags();
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    command  = HD44780_CMD_ENTRYMODESET;
+    command  = LCD_CMD_ENTRYMODESET;
     command |= display_seted_flags;
-    command &= ~(1 << HD44780_S_ENABLE_SHIFT);
+    command &= ~(1 << LCD_S_ENABLE_SHIFT);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
  * @brief   Sets the cursor position.
  *
- * @details Positions the cursor by updating the HD44780 DDRAM address counter.
+ * @details Positions the cursor by updating the LCD DDRAM address counter.
  *          The specified row and column are translated into the corresponding
  *          DDRAM address and transmitted using the Set DDRAM Address
  *          instruction.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   Row    - Zero-based display row.
  * @param   Col    - Zero-based display column.
  *
  * @note    Row and column values outside the configured display dimensions are
  *          clamped to the nearest valid position.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the command was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
+ * @return  LCD_OPERATION_OK   - Indicates that the command was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the command has failed while attempting transmission.
  */
-HD44780_OpStatus_t HD44780_SetCursor(HD44780_Handle_t* Device, uint8_t Row, uint8_t Col)
+LCD_OpStatus_t LCD_SetCursor(LCD_Handle_t* Device, uint8_t Row, uint8_t Col)
 {
     uint8_t line0_base_addr = 0x00;
     uint8_t line1_base_addr = 0x40;
@@ -1167,9 +1167,9 @@ HD44780_OpStatus_t HD44780_SetCursor(HD44780_Handle_t* Device, uint8_t Row, uint
 
     uint8_t command = 0x00;
 
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
@@ -1186,49 +1186,49 @@ HD44780_OpStatus_t HD44780_SetCursor(HD44780_Handle_t* Device, uint8_t Row, uint
         address_counter = line1_base_addr + Col;
     }
 
-    command = HD44780_CMD_SETDDRAMADDR;
+    command = LCD_CMD_SETDDRAMADDR;
 
-    command |= HD44780_SET_DDRAM_ADDRESS_MASK(address_counter);
+    command |= LCD_SET_DDRAM_ADDRESS_MASK(address_counter);
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    HD44780_WaitInstructionDefault();
+    LCD_WaitInstructionDefault();
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
  * @brief   Writes a single character to the display.
  *
- * @details Transmits a single data byte to the HD44780 controller at the
+ * @details Transmits a single data byte to the LCD controller at the
  *          current cursor position. The cursor behavior after the write is
  *          determined by the current Entry Mode Set configuration.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   Char   - Character code to be written to the display.
  *
  * @note    The device must be successfully initialized before calling this
  *          function.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the character was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the character transmission has failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the character was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the character transmission has failed.
  */
-HD44780_OpStatus_t HD44780_WriteChar(HD44780_Handle_t* Device, uint8_t Char)
+LCD_OpStatus_t LCD_WriteChar(LCD_Handle_t* Device, uint8_t Char)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    if(HD44780_SendData(Device, Char) != HD44780_OPERATION_OK)
+    if(LCD_SendData(Device, Char) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1239,7 +1239,7 @@ HD44780_OpStatus_t HD44780_WriteChar(HD44780_Handle_t* Device, uint8_t Char)
  *          The cursor behavior after each character write is determined by
  *          the current Entry Mode Set configuration.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   String - Pointer to a null-terminated string to be written.
  *
  * @note    The device must be successfully initialized before calling this
@@ -1249,27 +1249,27 @@ HD44780_OpStatus_t HD44780_WriteChar(HD44780_Handle_t* Device, uint8_t Char)
  *          of transmitted characters. Data is written until the terminating
  *          null character is reached.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the string was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the string transmission has failed.
  */
-HD44780_OpStatus_t HD44780_WriteString(HD44780_Handle_t* Device, const char* String)
+LCD_OpStatus_t LCD_WriteString(LCD_Handle_t* Device, const char* String)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)) || String == NULL)
+    if(Device == NULL || !(LCD_IsInit(Device)) || String == NULL)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     while(*String != '\0')
     {
-       if(HD44780_WriteChar(Device, *String) != HD44780_OPERATION_OK)
+       if(LCD_WriteChar(Device, *String) != LCD_OPERATION_OK)
        {
-           return HD44780_OPERATION_FAIL;
+           return LCD_OPERATION_FAIL;
        }
 
        String++;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1279,7 +1279,7 @@ HD44780_OpStatus_t HD44780_WriteString(HD44780_Handle_t* Device, const char* Str
  *          sequentially writes each character from the supplied string until
  *          the null terminator is reached.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   Row    - Zero-based display row.
  * @param   Text   - Pointer to a null-terminated string.
  *
@@ -1289,37 +1289,37 @@ HD44780_OpStatus_t HD44780_WriteString(HD44780_Handle_t* Device, const char* Str
  * @note    If the supplied string exceeds the configured display width,
  *          only the characters that fit on the selected row are written.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the string was successfully transmitted.
- *          HD44780_OPERATION_FAIL - Indicates that the string transmission has failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the string was successfully transmitted.
+ *          LCD_OPERATION_FAIL - Indicates that the string transmission has failed.
  */
-HD44780_OpStatus_t HD44780_PrintLine(HD44780_Handle_t* Device, uint8_t Row, const char* Text)
+LCD_OpStatus_t LCD_PrintLine(LCD_Handle_t* Device, uint8_t Row, const char* Text)
 {
     uint8_t col = 0;
 
-    if(Device == NULL || !(HD44780_IsInit(Device)) || Text == NULL)
+    if(Device == NULL || !(LCD_IsInit(Device)) || Text == NULL)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
 
-    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    if(LCD_SetCursor(Device, Row, 0) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     while((*Text != '\0') && (col < Device->_cols))
     {
-        if(HD44780_WriteChar(Device, *Text) != HD44780_OPERATION_OK)
+        if(LCD_WriteChar(Device, *Text) != LCD_OPERATION_OK)
         {
-            return HD44780_OPERATION_FAIL;
+            return LCD_OPERATION_FAIL;
         }
 
         Text++;
         col++;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1328,51 +1328,51 @@ HD44780_OpStatus_t HD44780_PrintLine(HD44780_Handle_t* Device, uint8_t Row, cons
  * @details Positions the cursor at the beginning of the specified row and
  *          overwrites all display columns with space characters.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  * @param   Row    - Zero-based display row.
  *
  * @note    If the specified row exceeds the configured display size, it is
  *          clamped to the last valid row.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the row was successfully cleared.
- *          HD44780_OPERATION_FAIL - Indicates that the clear operation has failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the row was successfully cleared.
+ *          LCD_OPERATION_FAIL - Indicates that the clear operation has failed.
  */
-HD44780_OpStatus_t HD44780_ClearLine(HD44780_Handle_t* Device, uint8_t Row)
+LCD_OpStatus_t LCD_ClearLine(LCD_Handle_t* Device, uint8_t Row)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     Row = Row > ((uint8_t)Device->_rows) ? (uint8_t)Device->_rows : Row;
 
-    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    if(LCD_SetCursor(Device, Row, 0) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     for(uint8_t i = 0; i < Device->_cols; i++)
     {
-      if(HD44780_WriteChar(Device, ' ') != HD44780_OPERATION_OK)
+      if(LCD_WriteChar(Device, ' ') != LCD_OPERATION_OK)
       {
-          return HD44780_OPERATION_FAIL;
+          return LCD_OPERATION_FAIL;
       }
     }
 
-    if(HD44780_SetCursor(Device, Row, 0) != HD44780_OPERATION_OK)
+    if(LCD_SetCursor(Device, Row, 0) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
- * @brief   Creates or updates a custom character in the HD44780 CGRAM.
+ * @brief   Creates or updates a custom character in the LCD CGRAM.
  *
  * @details Programs a custom character bitmap into the Character Generator RAM (CGRAM).
  *          The character is stored at the specified CGRAM position and becomes available
- *          for display using HD44780_WriteCustomChar().
+ *          for display using LCD_WriteCustomChar().
  *
  *          The bitmap size depends on the configured font:
  *          - 5x8 font  : 8 bytes.
@@ -1382,15 +1382,15 @@ HD44780_OpStatus_t HD44780_ClearLine(HD44780_Handle_t* Device, uint8_t Row)
  *          containing a valid custom character and restores the cursor position to
  *          the first column of the first display line.
  *
- * @param   Device         - Pointer to the HD44780 device handle.
+ * @param   Device         - Pointer to the LCD device handle.
  * @param   Position       - CGRAM character position. Valid range is 0-7 for 5x8 font
  *                           and 0-3 for 5x10 font. Values outside the supported range
-                             cause the function to return HD44780_OPERATION_FAIL.
+                             cause the function to return LCD_OPERATION_FAIL.
  * @param   PatternBitMap  - Pointer to the character bitmap data. The buffer must
                              contain 8 bytes for 5x8 font mode or 4 bytes for
                              5x10 font mode.
  *
- * @note    This function temporarily switches the HD44780 Address Counter to the
+ * @note    This function temporarily switches the LCD Address Counter to the
  *          CGRAM address space while programming the custom character. After the
  *          programming sequence is complete, the DDRAM Address Counter is restored
  *          to the initial DDRAM address (row 0, column 0) using the Set DDRAM Address
@@ -1399,49 +1399,49 @@ HD44780_OpStatus_t HD44780_ClearLine(HD44780_Handle_t* Device, uint8_t Row)
  * @warning The bitmap buffer must contain 8 bytes for 5x8 font mode or 4 bytes for
  *          5x10 font mode.
  *
- * @return  HD44780_OPERATION_OK   - Indicates if the character was successfully programmed.
- * @return  HD44780_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
+ * @return  LCD_OPERATION_OK   - Indicates if the character was successfully programmed.
+ * @return  LCD_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
  *                                   initialized, the bitmap pointer is NULL, or a communication
  *                                   error occurs.
  */
-HD44780_OpStatus_t HD44780_CreateChar(HD44780_Handle_t* Device, uint8_t Position, const uint8_t* PatternBitMap)
+LCD_OpStatus_t LCD_CreateChar(LCD_Handle_t* Device, uint8_t Position, const uint8_t* PatternBitMap)
 {
     uint8_t pattern_size = 0x00;
     uint8_t address_counter = 0x00;
 
-    uint8_t command = HD44780_CMD_SETCGRAMADDR;
+    uint8_t command = LCD_CMD_SETCGRAMADDR;
 
-    if(Device == NULL || !(HD44780_IsInit(Device)) || PatternBitMap == NULL || Position > HD44780_GetCGRAMLimit(Device))
+    if(Device == NULL || !(LCD_IsInit(Device)) || PatternBitMap == NULL || Position > LCD_GetCGRAMLimit(Device))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    pattern_size = Device->_font_dot_size == HD44780_5X8_FONT ? 8 : 4;
+    pattern_size = Device->_font_dot_size == LCD_5X8_FONT ? 8 : 4;
 
-    address_counter = HD44780_SET_CGRAM_ADDRESS_MASK((Position << 3));
+    address_counter = LCD_SET_CGRAM_ADDRESS_MASK((Position << 3));
 
     command |= address_counter;
 
-    if(HD44780_SendCommand(Device, command) != HD44780_OPERATION_OK)
+    if(LCD_SendCommand(Device, command) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     for(uint8_t i = 0; i < pattern_size; i++)
     {
-        if(HD44780_SendData(Device, *PatternBitMap) != HD44780_OPERATION_OK)
+        if(LCD_SendData(Device, *PatternBitMap) != LCD_OPERATION_OK)
         {
-            return HD44780_OPERATION_FAIL;
+            return LCD_OPERATION_FAIL;
         }
 
         PatternBitMap++;
     }
 
-    HD44780_SetCustomCharFlag(Position);
+    LCD_SetCustomCharFlag(Position);
 
-    HD44780_SetCursor(Device, 0, 0);
+    LCD_SetCursor(Device, 0, 0);
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
@@ -1449,9 +1449,9 @@ HD44780_OpStatus_t HD44780_CreateChar(HD44780_Handle_t* Device, uint8_t Position
  *
  * @details Sends the custom character code corresponding to the specified CGRAM
  *          position to the display DDRAM. The character must have been previously
- *          created using HD44780_CreateChar().
+ *          created using LCD_CreateChar().
  *
- * @param   Device        - Pointer to the HD44780 device handle.
+ * @param   Device        - Pointer to the LCD device handle.
  * @param   CharPosition  - CGRAM character position to display.
                             Valid range is 0-7 for 5x8 font and
                             0-3 for 5x10 font.
@@ -1460,37 +1460,37 @@ HD44780_OpStatus_t HD44780_CreateChar(HD44780_Handle_t* Device, uint8_t Position
  *          modify the contents of CGRAM.
  *
  * @warning The function fails if the specified CGRAM position has not been previously
- *          programmed using HD44780_CreateChar().
+ *          programmed using LCD_CreateChar().
  *
- * @return  HD44780_OPERATION_OK   - Indicates if the character was successfully written.
- * @return  HD44780_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
+ * @return  LCD_OPERATION_OK   - Indicates if the character was successfully written.
+ * @return  LCD_OPERATION_FAIL - Indicates if the device handle is invalid, the device is not
  *                                   initialized, the specified character does not exist in CGRAM, or a
  *                                   communication error occurs.
  */
-HD44780_OpStatus_t HD44780_WriteCustomChar(HD44780_Handle_t* Device, uint8_t CharPosition)
+LCD_OpStatus_t LCD_WriteCustomChar(LCD_Handle_t* Device, uint8_t CharPosition)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)) || CharPosition > HD44780_GetCGRAMLimit(Device))
+    if(Device == NULL || !(LCD_IsInit(Device)) || CharPosition > LCD_GetCGRAMLimit(Device))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    if(!(HD44780_GetCustomChars(Device) & (1 << CharPosition)))
+    if(!(LCD_GetCustomChars(Device) & (1 << CharPosition)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    if(HD44780_SendData(Device, CharPosition) != HD44780_OPERATION_OK)
+    if(LCD_SendData(Device, CharPosition) != LCD_OPERATION_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
- * @brief   Turns the HD44780 module backlight on.
+ * @brief   Turns the LCD module backlight on.
  *
- * @details Enables the HD44780 backlight by invoking the TurnOn operation provided
+ * @details Enables the LCD backlight by invoking the TurnOn operation provided
  *          by the configured backlight interface.
  *
  *          The behavior after enabling the backlight depends on the underlying
@@ -1502,80 +1502,80 @@ HD44780_OpStatus_t HD44780_WriteCustomChar(HD44780_Handle_t* Device, uint8_t Cha
  *          brightness configuration, the adapter may apply its default
  *          brightness level when no valid brightness value has been configured.
  *
- *          The HD44780 controller does not provide native backlight control.
+ *          The LCD controller does not provide native backlight control.
  *          This function acts as a hardware-independent wrapper that delegates
  *          the operation to the registered backlight adapter.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    The backlight implementation is defined externally through the
- *          HD44780_BacklightInterface_t interface.
+ *          LCD_BacklightInterface_t interface.
  *
  * @note    The resulting backlight behavior depends on the capabilities and
  *          internal state management of the selected adapter implementation.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the backlight was successfully enabled.
- *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the
+ * @return  LCD_OPERATION_OK   - Indicates that the backlight was successfully enabled.
+ *          LCD_OPERATION_FAIL - Indicates that the device is invalid or the
  *                                   backlight enable operation failed.
  */
-HD44780_OpStatus_t HD44780_BacklightOn(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_BacklightOn(LCD_Handle_t* Device)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
     if(Device->_backlight.GetBrightness(Device->_backlight.Context) == 0)
     {
-        if(Device->_backlight.SetBrightness(Device->_backlight.Context, 100) != HD44780_BACKLIGHT_OP_OK)
+        if(Device->_backlight.SetBrightness(Device->_backlight.Context, 100) != LCD_BACKLIGHT_OP_OK)
         {
-            return HD44780_OPERATION_FAIL;
+            return LCD_OPERATION_FAIL;
         }
     }
 
-    if(Device->_backlight.TurnOn(Device->_backlight.Context) != HD44780_BACKLIGHT_OP_OK)
+    if(Device->_backlight.TurnOn(Device->_backlight.Context) != LCD_BACKLIGHT_OP_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
- * @brief   Turns the HD44780 module backlight off.
+ * @brief   Turns the LCD module backlight off.
  *
- * @details Disables the HD44780 backlight by invoking the TurnOff operation provided
+ * @details Disables the LCD backlight by invoking the TurnOff operation provided
  *          by the configured backlight interface.
  *
- *          The HD44780 controller does not provide native backlight control.
+ *          The LCD controller does not provide native backlight control.
  *          This function acts as a hardware-independent wrapper that delegates
  *          the operation to the registered backlight adapter.
  *
- * @param   Device - Pointer to the HD44780 device instance.
+ * @param   Device - Pointer to the LCD device instance.
  *
  * @note    Turning the backlight off does not affect the display contents,
- *          DDRAM data, cursor position or HD44780 internal state.
+ *          DDRAM data, cursor position or LCD internal state.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the backlight was successfully disabled.
- *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the backlight was successfully disabled.
+ *          LCD_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
  */
-HD44780_OpStatus_t HD44780_BacklightOff(HD44780_Handle_t* Device)
+LCD_OpStatus_t LCD_BacklightOff(LCD_Handle_t* Device)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    if(Device->_backlight.TurnOff(Device->_backlight.Context) != HD44780_BACKLIGHT_OP_OK)
+    if(Device->_backlight.TurnOff(Device->_backlight.Context) != LCD_BACKLIGHT_OP_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 /**
- * @brief   Sets the HD44780 module backlight brightness level.
+ * @brief   Sets the LCD module backlight brightness level.
  *
  * @details Adjusts the backlight brightness by invoking the SetBrightness
  *          operation provided by the configured backlight interface.
@@ -1585,30 +1585,30 @@ HD44780_OpStatus_t HD44780_BacklightOff(HD44780_Handle_t* Device)
  *          may provide continuous brightness control, while GPIO-based adapters
  *          may only support enabled or disabled states.
  *
- * @param   Device        - Pointer to the HD44780 device instance.
+ * @param   Device        - Pointer to the LCD device instance.
  * @param   BrightPercent - Desired brightness level expressed as a percentage
  *                          from 0 to 100.
  *
- * @note    The HD44780 controller does not control the backlight directly.
+ * @note    The LCD controller does not control the backlight directly.
  *          This function only forwards the brightness request to the configured
  *          backlight interface.
  *
- * @return  HD44780_OPERATION_OK   - Indicates that the brightness level was successfully updated.
- *          HD44780_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
+ * @return  LCD_OPERATION_OK   - Indicates that the brightness level was successfully updated.
+ *          LCD_OPERATION_FAIL - Indicates that the device is invalid or the backlight operation failed.
  */
-HD44780_OpStatus_t HD44780_SetBrightness(HD44780_Handle_t* Device, uint16_t BrightPercent)
+LCD_OpStatus_t LCD_SetBrightness(LCD_Handle_t* Device, uint16_t BrightPercent)
 {
-    if(Device == NULL || !(HD44780_IsInit(Device)))
+    if(Device == NULL || !(LCD_IsInit(Device)))
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    if(Device->_backlight.SetBrightness(Device->_backlight.Context, BrightPercent) != HD44780_BACKLIGHT_OP_OK)
+    if(Device->_backlight.SetBrightness(Device->_backlight.Context, BrightPercent) != LCD_BACKLIGHT_OP_OK)
     {
-        return HD44780_OPERATION_FAIL;
+        return LCD_OPERATION_FAIL;
     }
 
-    return HD44780_OPERATION_OK;
+    return LCD_OPERATION_OK;
 }
 
 

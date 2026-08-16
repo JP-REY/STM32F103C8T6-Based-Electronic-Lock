@@ -1,12 +1,12 @@
 /**********************************************************************************************************************************
- * @file    HD44780_BacklightInterface.h
- * @brief   Abstract backlight control interface for the HD44780 HD44780 driver.
+ * @file    LCD_BacklightInterface.h
+ * @brief   Abstract backlight control interface for the LCD LCD driver.
  *
- * @details Defines the abstraction layer used by the HD44780 driver to control the
- *          HD44780 module backlight independently of the underlying hardware implementation.
+ * @details Defines the abstraction layer used by the LCD driver to control the
+ *          LCD module backlight independently of the underlying hardware implementation.
  *
- *          Although the backlight is not controlled by the HD44780 controller itself,
- *          this interface is provided as a convenience abstraction for complete HD44780
+ *          Although the backlight is not controlled by the LCD controller itself,
+ *          this interface is provided as a convenience abstraction for complete LCD
  *          module management.
  *
  *          Different hardware implementations (GPIO, PWM, I/O expanders, etc.) can
@@ -17,8 +17,8 @@
  * @date    Aug 13, 2026
  **********************************************************************************************************************************/
 
-#ifndef LIBS_COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_
-#define LIBS_COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_
+#ifndef LIBS_COMPONENTS_LCD_INC_LCD_BACKLIGHTINTERFACE_H_
+#define LIBS_COMPONENTS_LCD_INC_LCD_BACKLIGHTINTERFACE_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,16 +44,16 @@ extern "C" {
  */
 typedef enum
 {
-    HD44780_BACKLIGHT_OP_OK,
-    HD44780_BACKLIGHT_OP_FAIL
+    LCD_BACKLIGHT_OP_OK,
+    LCD_BACKLIGHT_OP_FAIL
 
-}HD44780_BacklightOpStatus_t;
+}LCD_BacklightOpStatus_t;
 
 /**
  * @brief   Generic backlight control interface.
  *
- * @details Provides a hardware-independent interface used by the HD44780 driver
- *          to control the HD44780 module backlight.
+ * @details Provides a hardware-independent interface used by the LCD driver
+ *          to control the LCD module backlight.
  *
  *          Each function pointer represents a backlight operation that may be
  *          implemented by different hardware adapters such as GPIO outputs,
@@ -64,13 +64,13 @@ typedef enum
  *          interface callback, allowing each adapter to access the resources
  *          required to perform the requested operation.
  *
- * @note    The HD44780 driver interacts exclusively through this interface and
+ * @note    The LCD driver interacts exclusively through this interface and
  *          remains completely independent of the underlying hardware implementation.
  */
 typedef struct
 {
    /**
-     * @brief   Turns the HD44780 module backlight on.
+     * @brief   Turns the LCD module backlight on.
      *
      * @details Requests the underlying hardware implementation to enable the
      *          backlight.
@@ -80,10 +80,10 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
      */
-    HD44780_BacklightOpStatus_t (*TurnOn) (void* Context);
+    LCD_BacklightOpStatus_t (*TurnOn) (void* Context);
 
     /**
-     * @brief   Turns the HD44780 module backlight off.
+     * @brief   Turns the LCD module backlight off.
      *
      * @details Requests the underlying hardware implementation to disable the
      *          backlight.
@@ -93,10 +93,10 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
      */
-    HD44780_BacklightOpStatus_t (*TurnOff) (void* Context);
+    LCD_BacklightOpStatus_t (*TurnOff) (void* Context);
 
     /**
-     * @brief   Sets the HD44780 module backlight brightness.
+     * @brief   Sets the LCD module backlight brightness.
      *
      * @details Requests the underlying hardware implementation to adjust the
      *          backlight brightness to the specified percentage.
@@ -111,17 +111,17 @@ typedef struct
      *
      * @return  Status indicating whether the operation completed successfully.
      */
-    HD44780_BacklightOpStatus_t (*SetBrightness) (void* Context, uint16_t Level);
+    LCD_BacklightOpStatus_t (*SetBrightness) (void* Context, uint16_t Level);
 
     /**
-     * @brief   Gets the HD44780 module backlight brightness level.
+     * @brief   Gets the LCD module backlight brightness level.
      *
      * @details Requests the underlying hardware implementation to return the
      *          current backlight brightness level configured in the adapter.
      *
      *          The returned value represents the brightness setting maintained by
      *          the backlight implementation. It does not necessarily represent the
-     *          actual optical brightness of the HD44780 module, since the perceived
+     *          actual optical brightness of the LCD module, since the perceived
      *          brightness depends on hardware characteristics such as the LED
      *          driver circuit, supply voltage and environmental conditions.
      *
@@ -144,11 +144,11 @@ typedef struct
      *          The concrete implementation defines the type and contents of this
      *          context, which may contain peripheral handles, GPIO information,
      *          timer configuration, or any other resources required to control the
-     *          HD44780 module backlight.
+     *          LCD module backlight.
      */
     void* Context;
 
-}HD44780_BacklightInterface_t;
+}LCD_BacklightInterface_t;
 
 /**********************************************************************************************************************************
  Data
@@ -161,4 +161,4 @@ typedef struct
 }
 #endif
 
-#endif /* LIBS_COMPONENTS_HD44780_INC_HD44780_BACKLIGHTINTERFACE_H_ */
+#endif /* LIBS_COMPONENTS_LCD_INC_LCD_BACKLIGHTINTERFACE_H_ */
