@@ -29,6 +29,7 @@ extern "C" {
  Includes
  **********************************************************************************************************************************/
 #include "HD44780_BacklightInterface.h"
+#include "PWM_Platform_Interface.h"
 
 /**********************************************************************************************************************************
  Macros
@@ -42,7 +43,7 @@ extern "C" {
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, void* Context);
+HD44780_BacklightOpStatus_t HD44780_PWM_BacklightAdapterInit(HD44780_BacklightInterface_t* Backlight, PWM_Handle_t* Context);
 
 #ifdef __cplusplus
 }
