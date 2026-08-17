@@ -2220,6 +2220,7 @@ tests remain mandatory.
 - [Original V1 scope and architecture reference](References/Architecture/Architecture-V1.pdf)
 - [Platform layer documentation](Platforms/README.md)
 - [Buzzer driver](Libs/Components/Buzzer/README.md)
+- [Sound Generator service](Libs/Services/Sound_Generator/README.md)
 - [HD44780 driver and adapters](Libs/Components/HD44780/README.md)
 - [LED driver](Libs/Components/Led/README.md)
 - [Matrix Keyboard driver and adapter](Libs/Components/MatrixKeyboard/README.md)
