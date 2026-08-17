@@ -2,9 +2,10 @@
  * @file    Sound_Generator_Service.h
  * @brief   Public interface of the non-blocking Sound Generator Service.
  *
- * @details The Sound Generator Service translates semantic application sound
- *          requests into timestamp-driven buzzer phases. Each phase defines a
- *          frequency, a duration and whether the PWM output shall be enabled.
+ * @details The Sound Generator Service is a singleton presentation module that
+ *          translates semantic application sound requests into timestamp-driven
+ *          buzzer phases. Each phase defines a frequency, a duration and whether
+ *          the PWM output shall be enabled.
  *
  *          The service does not create or initialize PWM hardware. A Buzzer
  *          Driver instance owned by the application composition root shall be
@@ -23,8 +24,9 @@
  * @note    This module does not create tasks, use RTOS primitives, perform
  *          dynamic memory allocation or include STM32 peripheral headers.
  *
- * @note    One SGS_Handle_t instance shall be accessed by only one execution
- *          context at a time.
+ * @note    All mutable runtime state is owned by the implementation. The
+ *          function-based API shall be accessed by only one serialized
+ *          execution context at a time.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -48,7 +50,6 @@ extern "C" {
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
@@ -61,80 +62,33 @@ extern "C" {
  */
 typedef enum
 {
-    SGS_OPERATION_OK,
-    SGS_OPERATION_IGNORED,
-    SGS_OPERATION_FAIL
+    SGS_OPERATION_OK,      /*< The requested operation completed successfully.           */
+    SGS_OPERATION_IGNORED, /*< Replacement policy preserved a higher-priority pattern.   */
+    SGS_OPERATION_FAIL     /*< The requested operation could not be completed.           */
 
 }SGS_OpStatus_t;
 
 /**
  * @brief   Semantic sound patterns provided by the service.
+ *
+ * @details Identifies the fixed, service-owned phase sequence requested by the
+ *          application. Callers select an application meaning rather than
+ *          supplying buzzer frequencies or timing data directly.
+ *
+ * @note    SGS_RINGTONE_COUNT is a boundary and pattern-map size. It is not a
+ *          playable ringtone and shall not be passed to SGS_Ring().
  */
 typedef enum
 {
-    SGS_RINGTONE_KEYPRESS,
-    SGS_RINGTONE_ACCESS_GRANTED,
-    SGS_RINGTONE_ERROR,
-    SGS_RINGTONE_COUNT
+    SGS_RINGTONE_KEYPRESS,       /*< Short acknowledgement for an accepted keypress. */
+
+    SGS_RINGTONE_ACCESS_GRANTED, /*< Rising feedback pattern for granted access.     */
+
+    SGS_RINGTONE_ERROR,          /*< Descending feedback pattern for an error.       */
+
+    SGS_RINGTONE_COUNT           /*< Number of patterns and invalid ringtone marker. */
 
 }SGS_Ringtone_t;
-
-/**
- * @brief   Replacement priority associated with a sound pattern.
- *
- * @note    Callers select a semantic ringtone rather than a priority. The
- *          service-owned pattern map associates each ringtone with one of
- *          these priorities.
- */
-typedef enum
-{
-    SGS_PRIORITY_KEYPRESS,
-    SGS_PRIORITY_FEEDBACK
-
-}SGS_Priority_t;
-
-/**
- * @brief   One timed output phase of a sound pattern.
- *
- * @details When OutputEnabled is true, FrequencyHz shall be nonzero and is
- *          applied before the buzzer output is enabled. When OutputEnabled is
- *          false, the buzzer is disabled and FrequencyHz is ignored.
- */
-typedef struct
-{
-    uint32_t FrequencyHz;
-    uint32_t DurationMs;
-    bool     OutputEnabled;
-
-}SGS_Phase_t;
-
-/**
- * @brief   Immutable description of a complete sound pattern.
- */
-typedef struct
-{
-    const SGS_Phase_t* Phases;
-    uint8_t            PhaseCount;
-    SGS_Priority_t     Priority;
-
-}SGS_Pattern_t;
-
-/**
- * @brief   Runtime state of one Sound Generator Service instance.
- *
- * @warning Members are private service state and shall not be read or modified
- *          directly by callers.
- */
-typedef struct
-{
-                                               /*< Private data. Do not read or modify!                           */
-    Buzzer_Handle_t*     _buzzer;              /*< Injected buzzer; ownership is not transferred.                 */
-    const SGS_Pattern_t* _active_pattern;      /*< Pattern currently being executed, or NULL when idle.           */
-    uint32_t             _phase_started_ms;    /*< Nominal start timestamp of the current phase.                  */
-    uint8_t              _current_phase_index; /*< Index of the current phase in the active pattern.               */
-    bool                 _initialized;         /*< Indicates whether the service was initialized successfully.    */
-
-}SGS_Handle_t;
 
 /**********************************************************************************************************************************
  Data
@@ -143,11 +97,10 @@ typedef struct
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-SGS_OpStatus_t SGS_Init     (SGS_Handle_t* Instance, Buzzer_Handle_t* Buzzer);
-SGS_OpStatus_t SGS_Ring     (SGS_Handle_t* Instance, SGS_Ringtone_t Ringtone, uint32_t CurrentTimeMs);
-SGS_OpStatus_t SGS_Update   (SGS_Handle_t* Instance, uint32_t CurrentTimeMs);
-SGS_OpStatus_t SGS_Stop     (SGS_Handle_t* Instance);
-bool           SGS_IsActive (const SGS_Handle_t* Instance);
+SGS_OpStatus_t SGS_Init   (Buzzer_Handle_t* Buzzer);
+SGS_OpStatus_t SGS_Ring   (SGS_Ringtone_t Ringtone, uint32_t CurrentTimeMs);
+SGS_OpStatus_t SGS_Update (uint32_t CurrentTimeMs);
+SGS_OpStatus_t SGS_Stop   (void);
 
 #ifdef __cplusplus
 }

@@ -2,10 +2,10 @@
  * @file    Sound_Generator_Service.c
  * @brief   Sound Generator Service implementation.
  *
- * @details Implements non-blocking, priority-based sound patterns through an
- *          injected Buzzer Driver instance. Pattern timing uses caller-supplied
- *          millisecond timestamps and remains safe across one unsigned 32-bit
- *          timestamp rollover.
+ * @details Implements a singleton, non-blocking and priority-based sound engine
+ *          through an injected Buzzer Driver instance. Pattern timing uses
+ *          caller-supplied millisecond timestamps and remains safe across one
+ *          unsigned 32-bit timestamp rollover.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -22,83 +22,195 @@
 /**********************************************************************************************************************************
  Private Macros
  **********************************************************************************************************************************/
+/**
+ * @brief   Returns the number of elements in a compile-time array.
+ *
+ * @details Divides the complete array size by the size of its first element and
+ *          converts the result to the uint8_t pattern phase-count representation.
+ *
+ * @param   Array - Compile-time array whose element count is required.
+ *
+ * @note    Array shall be an actual array expression, not a pointer.
+ */
 #define SGS_ARRAY_LENGTH(Array) ((uint8_t)(sizeof(Array) / sizeof((Array)[0])))
 
 /**********************************************************************************************************************************
  Private Types
  **********************************************************************************************************************************/
+/**
+ * @brief   Replacement priority associated with a sound pattern.
+ *
+ * @details Orders ringtone replacement policy from the short keypress
+ *          acknowledgement to application feedback. Higher enumeration values
+ *          represent higher priority.
+ *
+ * @note    Priority is selected by the private pattern map and is never supplied
+ *          directly by public callers.
+ */
+typedef enum
+{
+    SGS_PRIORITY_KEYPRESS, /*< Replaceable acknowledgement priority.      */
+    SGS_PRIORITY_FEEDBACK  /*< Access-result and error feedback priority. */
+
+}SGS_priority_t;
+
+/**
+ * @brief   One timed output phase of a sound pattern.
+ *
+ * @details Describes the buzzer frequency, nominal duration and explicit output
+ *          state applied for one contiguous interval in a ringtone pattern.
+ *
+ * @note    Enabled phases require a nonzero frequency. Disabled phases ignore
+ *          frequency_hz and request Buzzer_Off(). A zero duration is invalid.
+ */
+typedef struct
+{
+    uint32_t frequency_hz;   /*< Buzzer frequency applied to an enabled phase. */
+    uint32_t duration_ms;    /*< Nominal phase duration in milliseconds.       */
+    bool     output_enabled; /*< Selects an audible tone or silent phase.      */
+
+}SGS_Phase_t;
+
+/**
+ * @brief   Immutable description of a complete semantic sound pattern.
+ *
+ * @details Associates a nonempty phase sequence with the replacement priority
+ *          enforced when SGS_Ring() receives a new request.
+ *
+ * @note    Pattern objects and their phase arrays are compile-time constants
+ *          owned by this translation unit.
+ */
+typedef struct
+{
+    const SGS_Phase_t* phases;      /*< Pointer to the first immutable phase.         */
+    uint8_t            phase_count; /*< Number of valid phases in the sequence.       */
+    SGS_priority_t     priority;    /*< Replacement priority assigned to the pattern. */
+
+}SGS_Pattern_t;
+
+/**
+ * @brief   Private runtime state of the Sound Generator Service singleton.
+ *
+ * @details Retains the borrowed Buzzer Driver dependency, currently active
+ *          immutable pattern, nominal phase timeline, current phase index and
+ *          service lifecycle state.
+ *
+ * @note    Callers cannot allocate this type through the public interface and
+ *          shall interact with the singleton only through SGS functions.
+ */
+typedef struct
+{
+    Buzzer_Handle_t*     buzzer;              /*< Borrowed initialized buzzer; ownership is not transferred. */
+    const SGS_Pattern_t* active_pattern;      /*< Pattern currently executing, or NULL while idle.           */
+    uint32_t             phase_started_ms;    /*< Nominal start timestamp of the current phase.              */
+    uint8_t              current_phase_index; /*< Index of the current phase in the active pattern.          */
+    bool                 initialized;         /*< Indicates whether singleton initialization succeeded.      */
+
+}SGS_Handle_t;
 
 /**********************************************************************************************************************************
  Private Constants
  **********************************************************************************************************************************/
 /**
- * @brief Short acknowledgement emitted for each accepted key press.
- */
-static const SGS_Phase_t SGS_KeypressPhases[] =
-{
-    { .FrequencyHz = 2600U, .DurationMs =  40U, .OutputEnabled = true }
-};
-
-/**
- * @brief Rising two-tone pattern emitted after access is granted.
- */
-static const SGS_Phase_t SGS_AccessGrantedPhases[] =
-{
-    { .FrequencyHz = 2000U, .DurationMs =  80U, .OutputEnabled = true  },
-    { .FrequencyHz =    0U, .DurationMs =  40U, .OutputEnabled = false },
-    { .FrequencyHz = 3000U, .DurationMs = 140U, .OutputEnabled = true  }
-};
-
-/**
- * @brief Descending two-tone pattern used for invalid or incomplete input.
- */
-static const SGS_Phase_t SGS_ErrorPhases[] =
-{
-    { .FrequencyHz = 2600U, .DurationMs = 120U, .OutputEnabled = true  },
-    { .FrequencyHz =    0U, .DurationMs =  50U, .OutputEnabled = false },
-    { .FrequencyHz = 1800U, .DurationMs = 220U, .OutputEnabled = true  }
-};
-
-/**
- * @brief Semantic ringtone-to-pattern map.
+ * @brief   Short acknowledgement emitted for an accepted keypress.
  *
- * @details Feedback patterns have a higher replacement priority than the key
- *          acknowledgement. Patterns at the same priority replace one another.
+ * @details Defines one enabled 2600 Hz tone phase with a nominal duration of
+ *          40 milliseconds.
+ *
+ * @note    This pattern uses SGS_PRIORITY_KEYPRESS and may be ignored while
+ *          higher-priority feedback remains active.
+ */
+static const SGS_Phase_t SGS_Keypressphases[] =
+{
+    { .frequency_hz = 2600U, .duration_ms =  40U, .output_enabled = true }
+};
+
+/**
+ * @brief   Rising two-tone pattern emitted after access is granted.
+ *
+ * @details Defines an 80 ms tone at 2000 Hz, 40 ms of silence and a 140 ms tone
+ *          at 3000 Hz for a total nominal duration of 260 ms.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_AccessGrantedphases[] =
+{
+    { .frequency_hz = 2000U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  40U, .output_enabled = false },
+    { .frequency_hz = 3000U, .duration_ms = 140U, .output_enabled = true  }
+};
+
+/**
+ * @brief   Descending two-tone pattern used for application errors.
+ *
+ * @details Defines a 120 ms tone at 2600 Hz, 50 ms of silence and a 220 ms tone
+ *          at 1800 Hz for a total nominal duration of 390 ms.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_Errorphases[] =
+{
+    { .frequency_hz = 2600U, .duration_ms = 120U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  50U, .output_enabled = false },
+    { .frequency_hz = 1800U, .duration_ms = 220U, .output_enabled = true  }
+};
+
+/**
+ * @brief   Semantic ringtone-to-pattern map.
+ *
+ * @details Uses SGS_Ringtone_t values as designated indexes so each playable
+ *          public ringtone resolves directly to its immutable phase sequence,
+ *          phase count and replacement priority.
+ *
+ * @note    Feedback patterns have higher priority than the keypress pattern.
+ *          Patterns with equal priority replace one another.
  */
 static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
 {
     [SGS_RINGTONE_KEYPRESS] =
     {
-        .Phases     = SGS_KeypressPhases,
-        .PhaseCount = SGS_ARRAY_LENGTH(SGS_KeypressPhases),
-        .Priority   = SGS_PRIORITY_KEYPRESS
+        .phases     = SGS_Keypressphases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_Keypressphases),
+        .priority   = SGS_PRIORITY_KEYPRESS
     },
 
     [SGS_RINGTONE_ACCESS_GRANTED] =
     {
-        .Phases     = SGS_AccessGrantedPhases,
-        .PhaseCount = SGS_ARRAY_LENGTH(SGS_AccessGrantedPhases),
-        .Priority   = SGS_PRIORITY_FEEDBACK
+        .phases     = SGS_AccessGrantedphases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_AccessGrantedphases),
+        .priority   = SGS_PRIORITY_FEEDBACK
     },
 
     [SGS_RINGTONE_ERROR] =
     {
-        .Phases     = SGS_ErrorPhases,
-        .PhaseCount = SGS_ARRAY_LENGTH(SGS_ErrorPhases),
-        .Priority   = SGS_PRIORITY_FEEDBACK
+        .phases     = SGS_Errorphases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_Errorphases),
+        .priority   = SGS_PRIORITY_FEEDBACK
     }
 };
 
 /**********************************************************************************************************************************
  Private Data
  **********************************************************************************************************************************/
+/**
+ * @brief   Module-owned singleton runtime instance.
+ *
+ * @details Holds all mutable Sound Generator Service state and the Buzzer Driver
+ *          dependency injected through SGS_Init(). Zero initialization leaves
+ *          the service unbound, uninitialized and idle before its first use.
+ *
+ * @note    The object is not declared by the public header and shall be accessed
+ *          only by functions in this implementation.
+ */
+SGS_Handle_t SGS_Runtime_Instance;
 
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static void           SGS_ClearPatternState (SGS_Handle_t* Instance);
-static SGS_OpStatus_t SGS_ApplyPhase        (SGS_Handle_t* Instance, const SGS_Phase_t* Phase);
-static SGS_OpStatus_t SGS_AbortPattern      (SGS_Handle_t* Instance);
+static void           SGS_ClearPatternState (void);
+static SGS_OpStatus_t SGS_ApplyPhase        (const SGS_Phase_t* Phase);
+static SGS_OpStatus_t SGS_AbortPattern      (void);
+static bool           SGS_IsActive          (void);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -106,50 +218,61 @@ static SGS_OpStatus_t SGS_AbortPattern      (SGS_Handle_t* Instance);
 /**
  * @brief   Clears only the active-pattern runtime state.
  *
- * @note    The injected buzzer association and initialization state are
- *          preserved.
+ * @details Sets the active pattern to NULL and resets both the nominal phase
+ *          start timestamp and current phase index to zero.
+ *
+ * @note    The retained buzzer association and initialization state are
+ *          preserved. This helper does not access the Buzzer Driver.
  */
-static void SGS_ClearPatternState(SGS_Handle_t* Instance)
+static void SGS_ClearPatternState(void)
 {
-    Instance->_active_pattern      = NULL;
-    Instance->_phase_started_ms    = 0U;
-    Instance->_current_phase_index = 0U;
+    SGS_Runtime_Instance.active_pattern      = NULL;
+    SGS_Runtime_Instance.phase_started_ms    = 0U;
+    SGS_Runtime_Instance.current_phase_index = 0U;
 }
 
 /**
- * @brief   Applies one pattern phase to the injected buzzer.
+ * @brief   Applies one pattern phase to the retained buzzer.
  *
- * @param   Instance - Pointer to an initialized Sound Generator instance.
- * @param   Phase    - Pointer to the phase that shall become active.
+ * @details A disabled phase calls Buzzer_Off(). An enabled phase validates a
+ *          nonzero frequency, configures that frequency and then calls
+ *          Buzzer_On().
  *
- * @return  SGS_OPERATION_OK when the phase was applied successfully;
- *          otherwise SGS_OPERATION_FAIL.
+ * @param   Phase - Pointer to the immutable phase that shall become active.
+ *
+ * @note    Frequency is configured before output is enabled. A disabled phase
+ *          does not inspect or apply its frequency_hz member.
+ *
+ * @return  SGS_OPERATION_OK   - When the requested buzzer state was applied;
+ *          SGS_OPERATION_FAIL - When Phase or the retained buzzer is null, an
+ *                               enabled frequency is zero or a buzzer operation
+ *                               fails.
  */
-static SGS_OpStatus_t SGS_ApplyPhase(SGS_Handle_t* Instance, const SGS_Phase_t* Phase)
+static SGS_OpStatus_t SGS_ApplyPhase(const SGS_Phase_t* Phase)
 {
-    if(Instance == NULL || Phase == NULL || Instance->_buzzer == NULL)
+    if(Phase == NULL || SGS_Runtime_Instance.buzzer == NULL)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    if(!Phase->OutputEnabled)
+    if(!Phase->output_enabled)
     {
-        return (Buzzer_Off(Instance->_buzzer) == BUZZER_OPERATION_OK) ?
-                                                 SGS_OPERATION_OK     :
-                                                 SGS_OPERATION_FAIL   ;
+        return (Buzzer_Off(SGS_Runtime_Instance.buzzer) == BUZZER_OPERATION_OK) ?
+                                                           SGS_OPERATION_OK     :
+                                                           SGS_OPERATION_FAIL   ;
     }
 
-    if(Phase->FrequencyHz == 0U)
-    {
-        return SGS_OPERATION_FAIL;
-    }
-
-    if(Buzzer_SetFrequency(Instance->_buzzer, Phase->FrequencyHz) != BUZZER_OPERATION_OK)
+    if(Phase->frequency_hz == 0U)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    if(Buzzer_On(Instance->_buzzer) != BUZZER_OPERATION_OK)
+    if(Buzzer_SetFrequency(SGS_Runtime_Instance.buzzer, Phase->frequency_hz) != BUZZER_OPERATION_OK)
+    {
+        return SGS_OPERATION_FAIL;
+    }
+
+    if(Buzzer_On(SGS_Runtime_Instance.buzzer) != BUZZER_OPERATION_OK)
     {
         return SGS_OPERATION_FAIL;
     }
@@ -160,76 +283,111 @@ static SGS_OpStatus_t SGS_ApplyPhase(SGS_Handle_t* Instance, const SGS_Phase_t* 
 /**
  * @brief   Forces the buzzer off and clears the current pattern.
  *
- * @details Runtime state is cleared even if the underlying disable operation
- *          fails, preventing a failed pattern from continuing logically.
+ * @details Calls Buzzer_Off() through the retained dependency and then clears
+ *          active pattern state independently from the returned buzzer status.
+ *
+ * @note    Logical pattern state is cleared even when the hardware disable
+ *          operation fails, preventing the pattern from continuing logically.
+ *
+ * @return  SGS_OPERATION_OK   - When the buzzer was disabled successfully;
+ *          SGS_OPERATION_FAIL - When Buzzer_Off() reports failure.
  */
-static SGS_OpStatus_t SGS_AbortPattern(SGS_Handle_t* Instance)
+static SGS_OpStatus_t SGS_AbortPattern(void)
 {
-    Buzzer_OpStatus_t buzzer_status = Buzzer_Off(Instance->_buzzer);
+    Buzzer_OpStatus_t buzzer_status = Buzzer_Off(SGS_Runtime_Instance.buzzer);
 
-    SGS_ClearPatternState(Instance);
+    SGS_ClearPatternState();
 
-    return (buzzer_status == BUZZER_OPERATION_OK) ? SGS_OPERATION_OK : SGS_OPERATION_FAIL;
+    return (buzzer_status == BUZZER_OPERATION_OK) ? 
+                             SGS_OPERATION_OK     : 
+                             SGS_OPERATION_FAIL   ;
+}
+
+/**
+ * @brief   Reports whether the singleton currently owns an active pattern.
+ *
+ * @details Combines successful initialization state with a non-null active
+ *          pattern reference. No timestamp is evaluated and no phase advances.
+ *
+ * @note    This helper is private and does not access the Buzzer Driver.
+ *
+ * @return  true when the initialized singleton has an active pattern;
+ *          otherwise false.
+ */
+static bool SGS_IsActive(void)
+{
+    return (SGS_Runtime_Instance.initialized &&
+            SGS_Runtime_Instance.active_pattern != NULL);
 }
 
 /**********************************************************************************************************************************
  Functions
  **********************************************************************************************************************************/
 /**
- * @brief   Initializes one Sound Generator Service instance.
+ * @brief   Initializes the Sound Generator Service singleton.
  *
- * @details Stores the caller-owned Buzzer Driver reference, forces the output
- *          to its safe disabled state and initializes the pattern state as idle.
- *          Ownership of the buzzer is not transferred.
+ * @details Validates and stores the borrowed buzzer reference, marks the service
+ *          uninitialized, clears all pattern progress and forces the buzzer off.
+ *          The singleton becomes initialized only after the disable operation
+ *          succeeds.
  *
- * @param   Instance - Pointer to caller-owned Sound Generator storage.
- * @param   Buzzer   - Pointer to a previously initialized Buzzer Driver.
+ * @param   Buzzer - Pointer to a caller-owned, initialized Buzzer Driver.
  *
- * @return  SGS_OPERATION_OK when initialization succeeds; otherwise
- *          SGS_OPERATION_FAIL.
+ * @note    Reinitialization replaces the retained dependency and resets logical
+ *          pattern state. Ownership of Buzzer remains with the composition root.
+ *
+ * @return  SGS_OPERATION_OK   - When the buzzer was retained and disabled;
+ *          SGS_OPERATION_FAIL - When Buzzer is null or cannot be disabled. The
+ *                               retained reference is cleared after a disable
+ *                               failure.
  */
-SGS_OpStatus_t SGS_Init(SGS_Handle_t* Instance, Buzzer_Handle_t* Buzzer)
+SGS_OpStatus_t SGS_Init(Buzzer_Handle_t* Buzzer)
 {
-    if(Instance == NULL || Buzzer == NULL)
+    if(Buzzer == NULL)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    Instance->_buzzer      = Buzzer;
-    Instance->_initialized = false;
+    SGS_Runtime_Instance.buzzer      = Buzzer;
+    SGS_Runtime_Instance.initialized = false;
 
-    SGS_ClearPatternState(Instance);
+    SGS_ClearPatternState();
 
-    if(Buzzer_Off(Instance->_buzzer) != BUZZER_OPERATION_OK)
+    if(Buzzer_Off(SGS_Runtime_Instance.buzzer) != BUZZER_OPERATION_OK)
     {
-        Instance->_buzzer = NULL;
+        SGS_Runtime_Instance.buzzer = NULL;
 
         return SGS_OPERATION_FAIL;
     }
 
-    Instance->_initialized = true;
+    SGS_Runtime_Instance.initialized = true;
 
     return SGS_OPERATION_OK;
 }
 
 /**
- * @brief   Starts or requests replacement of a semantic sound pattern.
+ * @brief   Requests a semantic ringtone at a supplied timestamp.
  *
- * @details The first pattern phase is applied immediately. A request whose
- *          priority is lower than the active pattern is ignored. Equal or
- *          higher priority requests replace the active pattern.
+ * @details Validates and resolves the ringtone, advances any active pattern to
+ *          CurrentTimeMs and applies the replacement-priority policy. An accepted
+ *          request becomes the active pattern at phase zero and its first phase
+ *          is applied immediately.
  *
- * @param   Instance      - Pointer to an initialized Sound Generator instance.
- * @param   Ringtone      - Semantic pattern to start.
- * @param   CurrentTimeMs - Current monotonically increasing timestamp in ms.
+ * @param   Ringtone      - Semantic ringtone identifier to request.
+ * @param   CurrentTimeMs - Current timestamp from the monotonic millisecond time
+ *                          base used for subsequent updates.
  *
- * @return  SGS_OPERATION_OK      - When the requested pattern starts;
+ * @note    A lower-priority request leaves the active pattern unchanged and
+ *          returns SGS_OPERATION_IGNORED. Equal or higher priority replaces it.
+ *
+ * @return  SGS_OPERATION_OK      - When the requested pattern started;
  *          SGS_OPERATION_IGNORED - When a higher-priority pattern remains active;
- *          SGS_OPERATION_FAIL    - When parameters are invalid or buzzer control fails.
+ *          SGS_OPERATION_FAIL    - When validation, active-pattern synchronization
+ *                                  or a required buzzer operation fails.
  */
-SGS_OpStatus_t SGS_Ring(SGS_Handle_t* Instance, SGS_Ringtone_t Ringtone, uint32_t CurrentTimeMs)
+SGS_OpStatus_t SGS_Ring(SGS_Ringtone_t Ringtone, uint32_t CurrentTimeMs)
 {
-    if(Instance == NULL || !Instance->_initialized ||
+    if(!SGS_Runtime_Instance.initialized ||
        (uint32_t)Ringtone >= (uint32_t)SGS_RINGTONE_COUNT)
     {
         return SGS_OPERATION_FAIL;
@@ -237,30 +395,30 @@ SGS_OpStatus_t SGS_Ring(SGS_Handle_t* Instance, SGS_Ringtone_t Ringtone, uint32_
 
     const SGS_Pattern_t* requested_pattern = &SGS_PatternMap[Ringtone];
 
-    if(requested_pattern->Phases == NULL || requested_pattern->PhaseCount == 0U)
+    if(requested_pattern->phases == NULL || requested_pattern->phase_count == 0U)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    if(SGS_IsActive(Instance) &&
-       SGS_Update(Instance, CurrentTimeMs) != SGS_OPERATION_OK)
+    if(SGS_IsActive() &&
+       SGS_Update(CurrentTimeMs) != SGS_OPERATION_OK)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    if(SGS_IsActive(Instance) &&
-       requested_pattern->Priority < Instance->_active_pattern->Priority)
+    if(SGS_IsActive() &&
+       requested_pattern->priority < (SGS_Runtime_Instance.active_pattern->priority))
     {
         return SGS_OPERATION_IGNORED;
     }
 
-    Instance->_active_pattern      = requested_pattern;
-    Instance->_current_phase_index = 0U;
-    Instance->_phase_started_ms    = CurrentTimeMs;
+    SGS_Runtime_Instance.active_pattern      = requested_pattern;
+    SGS_Runtime_Instance.current_phase_index = 0U;
+    SGS_Runtime_Instance.phase_started_ms    = CurrentTimeMs;
 
-    if(SGS_ApplyPhase(Instance, &requested_pattern->Phases[0]) != SGS_OPERATION_OK)
+    if(SGS_ApplyPhase(&requested_pattern->phases[0]) != SGS_OPERATION_OK)
     {
-        (void)SGS_AbortPattern(Instance);
+        (void)SGS_AbortPattern();
 
         return SGS_OPERATION_FAIL;
     }
@@ -269,73 +427,76 @@ SGS_OpStatus_t SGS_Ring(SGS_Handle_t* Instance, SGS_Ringtone_t Ringtone, uint32_
 }
 
 /**
- * @brief   Advances the active pattern according to elapsed time.
+ * @brief   Advances the active pattern to a supplied timestamp.
  *
- * @details Every expired phase advances the nominal phase-start timestamp by
- *          its configured duration instead of assigning CurrentTimeMs. This
- *          prevents update jitter from accumulating across a pattern.
+ * @details Uses TVS_HasElapsed() to advance across every expired phase while
+ *          incrementing the stored nominal start by configured durations. It
+ *          applies only the phase that shall currently be active, or aborts the
+ *          pattern after its final phase.
  *
- *          If more than one phase expired between calls, all expired phases are
- *          skipped and only the phase that should currently be active is applied.
- *          Therefore delayed application execution does not stretch a pattern.
+ * @param   CurrentTimeMs - Current monotonic timestamp in milliseconds.
  *
- * @param   Instance      - Pointer to an initialized Sound Generator instance.
- * @param   CurrentTimeMs - Current monotonically increasing timestamp in ms.
+ * @note    Delayed calls skip expired intermediate phases rather than replaying
+ *          them. Advancing the nominal timeline prevents update jitter from
+ *          accumulating in the pattern duration.
  *
- * @return  SGS_OPERATION_OK when the update completes successfully; otherwise
- *          SGS_OPERATION_FAIL.
+ * @return  SGS_OPERATION_OK   - When the singleton is idle or the pattern was
+ *                               advanced successfully;
+ *          SGS_OPERATION_FAIL - When the service is not initialized, a phase
+ *                               has zero duration or a required buzzer operation
+ *                               fails.
  */
-SGS_OpStatus_t SGS_Update(SGS_Handle_t* Instance, uint32_t CurrentTimeMs)
+SGS_OpStatus_t SGS_Update(uint32_t CurrentTimeMs)
 {
-    if(Instance == NULL || !Instance->_initialized)
+    if(!SGS_Runtime_Instance.initialized)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    if(!SGS_IsActive(Instance))
+    if(!SGS_IsActive())
     {
         return SGS_OPERATION_OK;
     }
 
     bool phase_changed = false;
 
-    while(Instance->_current_phase_index < Instance->_active_pattern->PhaseCount)
+    while(SGS_Runtime_Instance.current_phase_index < (SGS_Runtime_Instance.active_pattern->phase_count))
     {
         const SGS_Phase_t* current_phase =
-            &Instance->_active_pattern->Phases[Instance->_current_phase_index];
+            &(SGS_Runtime_Instance.active_pattern->phases[SGS_Runtime_Instance.current_phase_index]);
 
-        if(current_phase->DurationMs == 0U)
+        if(current_phase->duration_ms == 0U)
         {
-            (void)SGS_AbortPattern(Instance);
+            (void)SGS_AbortPattern();
 
             return SGS_OPERATION_FAIL;
         }
 
-        if(!TVS_HasElapsed(Instance->_phase_started_ms,
-                           CurrentTimeMs,
-                           current_phase->DurationMs))
+        if(!TVS_HasElapsed(SGS_Runtime_Instance.phase_started_ms, CurrentTimeMs, current_phase->duration_ms))
         {
             break;
         }
 
-        Instance->_phase_started_ms += current_phase->DurationMs;
-        Instance->_current_phase_index++;
+        SGS_Runtime_Instance.phase_started_ms += current_phase->duration_ms;
+
+        SGS_Runtime_Instance.current_phase_index++;
+
         phase_changed = true;
 
-        if(Instance->_current_phase_index >= Instance->_active_pattern->PhaseCount)
+        if(SGS_Runtime_Instance.current_phase_index >= (SGS_Runtime_Instance.active_pattern->phase_count))
         {
-            return SGS_AbortPattern(Instance);
+            return SGS_AbortPattern();
         }
     }
 
     if(phase_changed)
     {
         const SGS_Phase_t* next_phase =
-            &Instance->_active_pattern->Phases[Instance->_current_phase_index];
+            &(SGS_Runtime_Instance.active_pattern->phases[SGS_Runtime_Instance.current_phase_index]);
 
-        if(SGS_ApplyPhase(Instance, next_phase) != SGS_OPERATION_OK)
+        if(SGS_ApplyPhase(next_phase) != SGS_OPERATION_OK)
         {
-            (void)SGS_AbortPattern(Instance);
+            (void)SGS_AbortPattern();
 
             return SGS_OPERATION_FAIL;
         }
@@ -347,28 +508,23 @@ SGS_OpStatus_t SGS_Update(SGS_Handle_t* Instance, uint32_t CurrentTimeMs)
 /**
  * @brief   Cancels the active pattern and disables the buzzer output.
  *
- * @return  SGS_OPERATION_OK when the buzzer is disabled successfully;
- *          otherwise SGS_OPERATION_FAIL.
+ * @details Aborts the current pattern through SGS_AbortPattern(). The buzzer is
+ *          forced off even when the singleton is already idle, and logical
+ *          pattern state is cleared regardless of the disable result.
+ *
+ * @note    The retained buzzer association and initialization state are
+ *          preserved for subsequent ringtone requests.
+ *
+ * @return  SGS_OPERATION_OK   - When the buzzer was disabled successfully;
+ *          SGS_OPERATION_FAIL - When the service is not initialized or the
+ *                               buzzer cannot be disabled.
  */
-SGS_OpStatus_t SGS_Stop(SGS_Handle_t* Instance)
+SGS_OpStatus_t SGS_Stop(void)
 {
-    if(Instance == NULL || !Instance->_initialized)
+    if(!SGS_Runtime_Instance.initialized)
     {
         return SGS_OPERATION_FAIL;
     }
 
-    return SGS_AbortPattern(Instance);
-}
-
-/**
- * @brief   Reports whether a sound pattern is currently active.
- *
- * @return  true when Instance is initialized and owns an active pattern;
- *          otherwise false.
- */
-bool SGS_IsActive(const SGS_Handle_t* Instance)
-{
-    return (Instance != NULL &&
-            Instance->_initialized &&
-            Instance->_active_pattern != NULL);
+    return SGS_AbortPattern();
 }

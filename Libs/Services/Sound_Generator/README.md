@@ -2,168 +2,116 @@
 
 <p align="left">
   <big>
-    Non-blocking application service for translating semantic sound requests<br>
-    into priority-controlled, timestamp-driven buzzer patterns.
+    Singleton service for translating semantic sound requests into<br>
+    non-blocking, priority-controlled and timestamp-driven buzzer patterns.
   </big>
 </p>
 
 > [!IMPORTANT]
-> The Sound Generator Service owns sound-pattern selection, phase progression, replacement priority and timing state. It does not create PWM hardware, initialize timers, read the system clock, create a task, block the caller, decide access policy, or interpret keyboard input. A caller-owned and initialized `Buzzer_Handle_t` is injected through `SGS_Init()`.
+> The Sound Generator Service exposes a function-based API and keeps its runtime model outside the public header. The composition root injects one initialized `Buzzer_Handle_t` through `SGS_Init()`. All later sound operations use the retained dependency without a public service handle.
+
+> [!NOTE]
+> Pattern execution is non-blocking. The application supplies the current millisecond timestamp to `SGS_Ring()` and `SGS_Update()` and remains responsible for calling `SGS_Update()` periodically.
 
 ---
 
 ## Table of Contents
 
-* [1. Overview](#1-overview)
-* [2. Features](#2-features)
-* [3. Architecture Context](#3-architecture-context)
-
-  * [3.1 Layer Placement](#31-layer-placement)
-  * [3.2 Dependency Direction](#32-dependency-direction)
-  * [3.3 Application Integration](#33-application-integration)
-* [4. Directory Structure](#4-directory-structure)
-* [5. Service Responsibilities](#5-service-responsibilities)
-* [6. Service Non-Responsibilities](#6-service-non-responsibilities)
-* [7. Dependencies](#7-dependencies)
-
-  * [7.1 Public Dependencies](#71-public-dependencies)
-  * [7.2 Private Dependencies](#72-private-dependencies)
-  * [7.3 Injected Dependency](#73-injected-dependency)
-* [8. Configuration and Data Structures](#8-configuration-and-data-structures)
-
-  * [8.1 Operation Status](#81-operation-status)
-  * [8.2 Semantic Ringtones](#82-semantic-ringtones)
-  * [8.3 Pattern Priority](#83-pattern-priority)
-  * [8.4 Sound Phase](#84-sound-phase)
-  * [8.5 Sound Pattern](#85-sound-pattern)
-  * [8.6 Service Handle](#86-service-handle)
-  * [8.7 Built-In Pattern Map](#87-built-in-pattern-map)
-* [9. API Reference](#9-api-reference)
-
-  * [9.1 SGS_Init](#91-sgs_init)
-  * [9.2 SGS_Ring](#92-sgs_ring)
-  * [9.3 SGS_Update](#93-sgs_update)
-  * [9.4 SGS_Stop](#94-sgs_stop)
-  * [9.5 SGS_IsActive](#95-sgs_isactive)
-* [10. Commands and Results](#10-commands-and-results)
-
-  * [10.1 Command Summary](#101-command-summary)
-  * [10.2 Result Semantics](#102-result-semantics)
-  * [10.3 Priority Replacement Matrix](#103-priority-replacement-matrix)
-* [11. Behavioral Rules and Operation Flow](#11-behavioral-rules-and-operation-flow)
-
-  * [11.1 Initialization Flow](#111-initialization-flow)
-  * [11.2 Ring Request Flow](#112-ring-request-flow)
-  * [11.3 Phase Application](#113-phase-application)
-  * [11.4 Pattern Update Flow](#114-pattern-update-flow)
-  * [11.5 Completion and Cancellation](#115-completion-and-cancellation)
-  * [11.6 Delayed Update Behavior](#116-delayed-update-behavior)
-* [12. Timing and Concurrency](#12-timing-and-concurrency)
-
-  * [12.1 Caller-Supplied Time](#121-caller-supplied-time)
-  * [12.2 Update Interval](#122-update-interval)
-  * [12.3 Timing Resolution and Jitter](#123-timing-resolution-and-jitter)
-  * [12.4 Rollover Behavior](#124-rollover-behavior)
-  * [12.5 Concurrency Model](#125-concurrency-model)
-* [13. Usage Example](#13-usage-example)
-
-  * [13.1 Dependency Initialization](#131-dependency-initialization)
-  * [13.2 Runtime Update](#132-runtime-update)
-  * [13.3 Semantic Requests](#133-semantic-requests)
-  * [13.4 TIM3 Channel 1 Integration](#134-tim3-channel-1-integration)
-* [14. Design Decisions](#14-design-decisions)
-
-  * [14.1 Semantic API](#141-semantic-api)
-  * [14.2 Injected Buzzer Dependency](#142-injected-buzzer-dependency)
-  * [14.3 Non-Blocking Phase Engine](#143-non-blocking-phase-engine)
-  * [14.4 No Sound Queue](#144-no-sound-queue)
-  * [14.5 Explicit Priority Policy](#145-explicit-priority-policy)
-  * [14.6 Nominal Phase Timeline](#146-nominal-phase-timeline)
-  * [14.7 Explicit Output State](#147-explicit-output-state)
-* [15. Error Handling](#15-error-handling)
-
-  * [15.1 Argument and State Errors](#151-argument-and-state-errors)
-  * [15.2 Buzzer Operation Errors](#152-buzzer-operation-errors)
-  * [15.3 Invalid Pattern Data](#153-invalid-pattern-data)
-  * [15.4 Safe Failure State](#154-safe-failure-state)
-* [16. Usage Constraints](#16-usage-constraints)
-* [17. Testing and Acceptance Criteria](#17-testing-and-acceptance-criteria)
-
-  * [17.1 Host-Side Tests](#171-host-side-tests)
-  * [17.2 Target Integration Tests](#172-target-integration-tests)
-  * [17.3 Current Validation](#173-current-validation)
-* [18. Applications](#18-applications)
-* [19. Limitations and Future Improvements](#19-limitations-and-future-improvements)
-* [20. License](#20-license)
+- [1. Purpose](#1-purpose)
+- [2. Design Intent](#2-design-intent)
+- [3. Architecture](#3-architecture)
+  - [3.1 Layer Placement](#31-layer-placement)
+  - [3.2 Singleton Ownership](#32-singleton-ownership)
+  - [3.3 Dependency Direction](#33-dependency-direction)
+- [4. Directory Structure](#4-directory-structure)
+- [5. Responsibilities](#5-responsibilities)
+- [6. Dependencies](#6-dependencies)
+- [7. Public Contract](#7-public-contract)
+  - [7.1 Operation Status](#71-operation-status)
+  - [7.2 Semantic Ringtones](#72-semantic-ringtones)
+  - [7.3 Function-Based API](#73-function-based-api)
+- [8. Private Runtime Model](#8-private-runtime-model)
+- [9. Built-In Pattern Catalog](#9-built-in-pattern-catalog)
+- [10. Replacement Priority](#10-replacement-priority)
+- [11. Lifecycle](#11-lifecycle)
+- [12. Pattern Execution Model](#12-pattern-execution-model)
+  - [12.1 Phase Application](#121-phase-application)
+  - [12.2 Nominal Timeline](#122-nominal-timeline)
+  - [12.3 Delayed Update Catch-Up](#123-delayed-update-catch-up)
+  - [12.4 Completion and Cancellation](#124-completion-and-cancellation)
+  - [12.5 Timestamp Rollover](#125-timestamp-rollover)
+- [13. API Reference](#13-api-reference)
+- [14. Composition-Root Integration](#14-composition-root-integration)
+- [15. Operation Flows](#15-operation-flows)
+- [16. Error Handling](#16-error-handling)
+- [17. Timing and Concurrency](#17-timing-and-concurrency)
+- [18. Validation Checklist](#18-validation-checklist)
+- [19. Limitations](#19-limitations)
+- [20. License](#20-license)
 
 ---
 
-## 1. Overview
+## 1. Purpose
 
-The Sound Generator Service is a stateful application service responsible for producing short, non-blocking sound patterns through the Buzzer Driver.
+The Sound Generator Service converts application-level sound meanings into fixed buzzer patterns.
 
-The application requests a sound by semantic meaning rather than by directly controlling a PWM frequency. For example, the caller requests `SGS_RINGTONE_ACCESS_GRANTED`; the service translates that request into a rising two-tone pattern with an intermediate silent phase.
+The application requests `SGS_RINGTONE_KEYPRESS`, `SGS_RINGTONE_ACCESS_GRANTED` or `SGS_RINGTONE_ERROR`. It does not provide frequencies, phase arrays, output states or durations. Those acoustic details remain centralized in the service-owned pattern map.
 
-Each pattern is an immutable sequence of `SGS_Phase_t` objects. A phase describes:
+Each pattern is a sequence of timed phases. A phase specifies:
 
-- the buzzer frequency in hertz;
-- the phase duration in milliseconds;
-- whether the buzzer output is enabled or disabled.
+- Buzzer frequency in hertz.
+- Nominal duration in milliseconds.
+- Whether buzzer output is enabled or disabled.
 
-`SGS_Ring()` selects a pattern and applies its first phase immediately. `SGS_Update()` advances the remaining phases from caller-supplied timestamps. No delay loop is used, and pattern duration does not block keyboard processing, access decisions, lock timing, or other application services.
+`SGS_Ring()` applies the first phase of an accepted pattern immediately. `SGS_Update()` advances later phases according to caller-supplied timestamps. No delay loop blocks keyboard processing, authentication, actuator timing or other application work.
 
-The service supports a priority-based replacement policy. Access feedback has a higher priority than the short keypress acknowledgement. A keypress request therefore cannot interrupt an active access-granted or error pattern.
-
-The acronym `SGS` means **Sound Generator Service** and is used as the prefix for every public symbol exposed by this module.
+The acronym `SGS` means **Sound Generator Service** and prefixes every public symbol provided by this module.
 
 ---
 
-## 2. Features
+## 2. Design Intent
 
-- Semantic keypress, access-granted, and error ringtones.
-- Non-blocking sound-pattern execution.
-- Explicit tone and silence phases.
-- Caller-supplied millisecond timestamps.
-- Rollover-safe elapsed-time evaluation.
-- Immediate application of the first pattern phase.
-- Explicit priority-based pattern replacement.
-- Distinct result when a lower-priority request is ignored.
-- Equal-priority replacement for new application feedback.
-- Delayed-update catch-up without stretching pattern duration.
-- Automatic buzzer shutdown when a pattern completes.
-- Explicit cancellation through `SGS_Stop()`.
-- Active-state query through `SGS_IsActive()`.
-- Caller-owned service handle.
-- Injected Buzzer Driver dependency.
-- No direct STM32, timer, GPIO, or PWM register access.
-- No direct time-source read.
-- No dynamic memory allocation.
-- No RTOS dependency.
-- No internal task, timer, queue, or blocking delay.
+The service is intentionally implemented as one module-owned singleton:
+
+- The application does not allocate an `SGS_Handle_t`.
+- No service handle is declared in the public header.
+- Pattern descriptors, phase descriptors and priority types are private.
+- Active pattern, phase index, phase timestamp and lifecycle state remain implementation-owned.
+- The composition root supplies the concrete Buzzer Driver dependency through `SGS_Init()`.
+- Later calls operate only through public functions.
+- Exactly one Sound Generator runtime is supported.
+- All service storage is static-duration storage; no dynamic allocation is used.
+
+This topology matches the product: one electronic lock owns one passive buzzer and one serialized application flow decides which semantic feedback is appropriate.
+
+The public contract exposes only the types required to request behavior and interpret results:
+
+- `SGS_OpStatus_t` for operation outcomes.
+- `SGS_Ringtone_t` for semantic ringtone requests.
+- `Buzzer_Handle_t` only as the dependency accepted by `SGS_Init()`.
+
+There is no public active-state query in the refactored API. `SGS_IsActive()` is now a private implementation helper used to enforce update and replacement behavior.
 
 ---
 
-## 3. Architecture Context
+## 3. Architecture
 
 ### 3.1 Layer Placement
 
-The Sound Generator Service belongs to the application-services layer. It translates product-level sound meanings into device-level buzzer operations.
+The Sound Generator Service belongs to the application-services layer. The application selects semantic sound feedback while the service translates it into Buzzer Driver operations.
 
 ```mermaid
 flowchart LR
-    subgraph INPUT["Application Inputs"]
-        KEY["Keyboard Event"]
-        AUTH["Authentication Result"]
-    end
-
     subgraph APPLICATION["Application Layer"]
-        CTRL["Lock Controller / Application Flow"]
-        TIME["Current Millisecond Timestamp"]
+        ROOT["Composition Root"]
+        CTRL["Lock Controller<br/>product-state policy"]
+        CLOCK["Millisecond Time Source"]
     end
 
     subgraph SERVICES["Service Layer"]
-        SGS["Sound Generator Service<br/>pattern, priority and phase timing"]
-        TVS["Timeout Validation Service<br/>rollover-safe elapsed check"]
+        API["SGS public functions"]
+        STATE["Singleton pattern state"]
+        TVS["Timeout Validation Service"]
     end
 
     subgraph COMPONENTS["Component Layer"]
@@ -172,158 +120,122 @@ flowchart LR
 
     subgraph PLATFORM["Platform Layer"]
         PWM["PWM Platform Interface"]
+        TIMER["Target Timer and Pin"]
     end
 
-    KEY --> CTRL
-    AUTH --> CTRL
-    TIME --> CTRL
-    CTRL -->|"semantic ringtone + timestamp"| SGS
-    SGS -->|"elapsed evaluation"| TVS
-    SGS -->|"frequency and output state"| BUZZER
-    BUZZER --> PWM
+    ROOT -->|"initialized buzzer handle"| API
+    CTRL -->|"semantic ringtone"| API
+    CLOCK -->|"CurrentTimeMs"| API
+    API --> STATE
+    STATE -->|"elapsed evaluation"| TVS
+    STATE -->|"frequency and output state"| BUZZER
+    BUZZER --> PWM --> TIMER
 ```
 
-The diagram describes stable responsibility and dependency boundaries. It does not require the service to know which timer, channel, GPIO pin, HAL object, or RTOS task is used by the target.
+The service does not create PWM hardware, initialize a timer, select a PWM channel or read the platform time source.
 
-### 3.2 Dependency Direction
+### 3.2 Singleton Ownership
 
-The dependency direction is:
+The implementation owns one runtime object:
+
+```c
+SGS_Handle_t SGS_Runtime_Instance;
+```
+
+The object is not declared by the public header. It contains:
+
+- The borrowed Buzzer Driver pointer.
+- The currently active immutable pattern, or `NULL` while idle.
+- The nominal start timestamp of the current phase.
+- The current phase index.
+- The successful-initialization flag.
+
+The singleton object and its type are implementation details. Application code shall not declare the object manually, reference it through an external declaration or modify its members.
+
+### 3.3 Dependency Direction
+
+The Buzzer Driver remains explicit at the composition boundary:
+
+```c
+SGS_OpStatus_t SGS_Init(Buzzer_Handle_t* Buzzer);
+```
+
+`SGS_Init()` borrows the pointer. It does not copy the Buzzer Driver object and does not take ownership of it. The composition root must retain valid Buzzer and PWM storage for the complete service lifetime.
+
+The intended dependency direction is:
 
 ```text
-Application
-    |
-    v
-Sound Generator Service
-    |                    |
-    v                    v
-Buzzer Driver    Timeout Validation Service
-    |
-    v
-PWM Platform Interface
-    |
-    v
-Target timer and output pin
+Composition Root ──injects──> Sound Generator Service ──uses──> Buzzer Driver
+Application      ─requests──> Sound Generator Service ──uses──> Timeout Validation Service
 ```
 
-The Sound Generator Service does not include `tim.h`, receive `TIM_HandleTypeDef`, or call the PWM Platform Interface directly.
-
-### 3.3 Application Integration
-
-The application is responsible for:
-
-1. Configuring the target timer and PWM channel through the platform startup code.
-2. Creating a caller-owned `PWM_Handle_t`.
-3. Initializing a caller-owned `Buzzer_Handle_t` with that PWM instance.
-4. Initializing a caller-owned `SGS_Handle_t` with the buzzer instance.
-5. Translating application events into `SGS_Ringtone_t` requests.
-6. Supplying one current millisecond timestamp to `SGS_Ring()` and `SGS_Update()`.
-7. Calling `SGS_Update()` at intervals no greater than the application timing contract.
-8. Handling `SGS_OPERATION_FAIL` without delaying safety-critical application behavior.
-9. Calling `SGS_Stop()` before a power state that requires nonessential PWM outputs to be disabled.
-
-The service does not call the Lock Controller or consume keyboard and authentication types directly.
+The service does not depend directly on STM32 HAL, CMSIS, timer headers, the PWM Platform Interface, the Time Platform Interface, FreeRTOS, keyboard types, authentication types or Lock Controller state enumerations.
 
 ---
 
 ## 4. Directory Structure
 
 ```text
-Services/
-|
-└── Sound_Generator/
-    |
-    ├── Inc/
-    │   └── Sound_Generator_Service.h
-    |
-    ├── Src/
-    │   └── Sound_Generator_Service.c
-    |
-    └── README.md
+Sound_Generator/
+├── Inc/
+│   └── Sound_Generator_Service.h
+├── Src/
+│   └── Sound_Generator_Service.c
+└── README.md
 ```
 
-### Public Interface
+`Sound_Generator_Service.h` defines operation statuses, semantic ringtone identifiers and the function-based public API.
 
-`Inc/Sound_Generator_Service.h` contains:
-
-- operation statuses;
-- semantic ringtone identifiers;
-- priority identifiers;
-- phase and pattern descriptors;
-- caller-owned runtime handle;
-- public API declarations.
-
-### Private Implementation
-
-`Src/Sound_Generator_Service.c` contains:
-
-- immutable phase arrays;
-- the semantic ringtone-to-pattern map;
-- phase application logic;
-- priority evaluation;
-- pattern progression;
-- failure cleanup.
+`Sound_Generator_Service.c` owns the singleton runtime state, private pattern model, immutable phase arrays, priority policy, phase progression and dependency-error propagation.
 
 ---
 
-## 5. Service Responsibilities
+## 5. Responsibilities
 
 The Sound Generator Service is responsible for:
 
-- Receiving semantic sound requests.
-- Mapping every supported ringtone to an immutable phase sequence.
-- Associating each pattern with its replacement priority.
+- Retaining the Buzzer Driver reference injected by the composition root.
+- Establishing an idle, buzzer-off state during initialization.
+- Mapping semantic ringtones to immutable phase sequences.
+- Associating every pattern with a replacement priority.
 - Applying the first phase immediately when a request is accepted.
 - Tracking the active pattern.
 - Tracking the current phase index.
-- Tracking the nominal start timestamp of the current phase.
-- Advancing phases from elapsed millisecond time.
-- Turning the buzzer on for tone phases.
-- Turning the buzzer off for silence phases.
-- Updating the buzzer frequency before enabling a tone phase.
-- Ignoring lower-priority requests while higher-priority feedback is active.
-- Replacing an active pattern when the new request has equal or higher priority.
-- Skipping phases that have already expired after a delayed update.
-- Preventing periodic update jitter from accumulating across phases.
+- Tracking the nominal phase-start timestamp.
+- Turning the buzzer on for enabled tone phases.
+- Turning the buzzer off for silent phases.
+- Configuring frequency before enabling a tone phase.
+- Advancing phase state from caller-supplied timestamps.
+- Skipping phases that already expired before a delayed update.
+- Preventing update jitter from extending the nominal pattern timeline.
+- Ignoring lower-priority requests while feedback remains active.
+- Replacing active patterns for equal- or higher-priority requests.
 - Disabling the buzzer after completion or explicit cancellation.
-- Clearing active pattern state after completion, cancellation, or failure.
-- Reporting API, policy, and dependency outcomes explicitly.
+- Clearing pattern state after completion, cancellation or phase failure.
+- Returning policy and hardware outcomes explicitly.
 
----
-
-## 6. Service Non-Responsibilities
-
-The Sound Generator Service is **not responsible** for:
+The service is explicitly not responsible for:
 
 - Creating or configuring a hardware timer.
-- Selecting a timer peripheral or PWM channel.
-- Configuring a GPIO alternate function.
-- Creating a `PWM_Handle_t`.
-- Initializing the PWM Platform Interface directly.
-- Creating or initializing a `Buzzer_Handle_t`.
+- Selecting a timer peripheral, PWM channel or GPIO alternate function.
+- Allocating or initializing `PWM_Handle_t` storage.
+- Allocating or initializing `Buzzer_Handle_t` storage.
 - Reading `HAL_GetTick()` or `Platform_GetMillis()`.
-- Owning the application heartbeat.
-- Creating an RTOS task, queue, semaphore, timer, or notification.
-- Blocking the caller with a millisecond or microsecond delay.
-- Reading or interpreting the physical keyboard.
-- Deciding whether a credential is complete.
-- Authenticating a credential.
-- Counting failed authentication attempts.
-- Applying retry, denial, or lockout policy.
-- Unlocking or locking the actuator.
-- Selecting display or LED feedback.
-- Persisting a history of sound requests.
-- Queueing an unbounded number of patterns.
-- Controlling buzzer volume independently from the Buzzer Driver configuration.
+- Creating a task, queue, timer, semaphore or notification.
+- Blocking the caller with a delay.
+- Reading or interpreting keyboard input.
+- Deciding whether a credential is complete or valid.
+- Counting attempts or applying lockout policy.
+- Selecting display, LED or actuator behavior.
+- Queueing pending sound requests.
 - Recovering or reinitializing failed PWM hardware.
-- Performing global Lock Controller state transitions.
+- Controlling volume independently from Buzzer Driver configuration.
 
 ---
 
-## 7. Dependencies
+## 6. Dependencies
 
-### 7.1 Public Dependencies
-
-The public interface includes:
+The public header includes:
 
 ```c
 #include "Buzzer_Driver.h"
@@ -331,49 +243,26 @@ The public interface includes:
 #include "stdint.h"
 ```
 
-`Buzzer_Driver.h` provides the injected `Buzzer_Handle_t` type. The standard headers provide fixed-width time and frequency values together with Boolean state.
+`Buzzer_Driver.h` provides the injected `Buzzer_Handle_t`. Fixed-width integers represent timestamps and ringtone configuration values.
 
-### 7.2 Private Dependencies
-
-The implementation includes:
+The implementation additionally includes:
 
 ```c
 #include "Timeout_Validation_Service.h"
 #include "stddef.h"
 ```
 
-The Timeout Validation Service provides rollover-safe elapsed-time evaluation. `stddef.h` provides `NULL`.
+The Timeout Validation Service provides rollover-safe `TVS_HasElapsed()` calculations. `stddef.h` provides `NULL`.
 
-The module has no direct dependency on:
+At runtime, the direct injected dependency is one initialized Buzzer Driver. That Buzzer Driver owns its relationship with a previously created PWM Platform handle.
 
-- STM32 HAL or LL headers;
-- CMSIS;
-- `tim.h`;
-- the PWM Platform Interface;
-- the Time Platform Interface;
-- FreeRTOS;
-- the Lock Controller;
-- the Matrix Keyboard Driver;
-- the Credential Entry or Authentication services.
-
-### 7.3 Injected Dependency
-
-`SGS_Init()` receives an already initialized `Buzzer_Handle_t`:
-
-```c
-SGS_OpStatus_t SGS_Init(
-    SGS_Handle_t*    Instance,
-    Buzzer_Handle_t* Buzzer
-);
-```
-
-The service stores the pointer but does not take ownership of the buzzer storage. The caller shall keep the buzzer object valid for the entire initialized lifetime of the Sound Generator instance.
+For lower-layer behavior, see the [Buzzer Driver README](../../Components/Buzzer/README.md) and [Platform README](../../../Platforms/README.md).
 
 ---
 
-## 8. Configuration and Data Structures
+## 7. Public Contract
 
-### 8.1 Operation Status
+### 7.1 Operation Status
 
 ```c
 typedef enum
@@ -386,14 +275,14 @@ typedef enum
 ```
 
 | Status | Meaning |
-|---|---|
+| --- | --- |
 | `SGS_OPERATION_OK` | The requested operation completed successfully. |
-| `SGS_OPERATION_IGNORED` | A valid lower-priority request was processed but did not replace the active pattern. |
-| `SGS_OPERATION_FAIL` | An argument, state, pattern, timing, or underlying buzzer operation was invalid or failed. |
+| `SGS_OPERATION_IGNORED` | A ringtone request was valid, but a higher-priority active pattern remained authoritative. |
+| `SGS_OPERATION_FAIL` | Validation, lifecycle, pattern data or a required Buzzer Driver operation failed. |
 
-`SGS_OPERATION_IGNORED` is not a hardware failure. It is the explicit outcome of the replacement policy.
+`SGS_OPERATION_IGNORED` is a normal priority-policy result. It does not indicate a hardware failure and shall not be escalated as one.
 
-### 8.2 Semantic Ringtones
+### 7.2 Semantic Ringtones
 
 ```c
 typedef enum
@@ -406,16 +295,33 @@ typedef enum
 }SGS_Ringtone_t;
 ```
 
-| Ringtone | Intended application meaning |
-|---|---|
-| `SGS_RINGTONE_KEYPRESS` | A valid user keypress was accepted. |
-| `SGS_RINGTONE_ACCESS_GRANTED` | Credential authentication succeeded and access feedback is required. |
-| `SGS_RINGTONE_ERROR` | The entered credential was incorrect, incomplete, or otherwise rejected by application policy. |
-| `SGS_RINGTONE_COUNT` | Sentinel used to validate ringtone indexes; it is not a playable ringtone. |
+| Ringtone | Application meaning |
+| --- | --- |
+| `SGS_RINGTONE_KEYPRESS` | A valid keypress was accepted. |
+| `SGS_RINGTONE_ACCESS_GRANTED` | Authentication succeeded and access feedback is required. |
+| `SGS_RINGTONE_ERROR` | Input was incomplete, authentication failed or another generic application error requires feedback. |
+| `SGS_RINGTONE_COUNT` | Pattern-map size and invalid ringtone boundary; not playable. |
 
-The service does not decide when any of these meanings applies. The application supplies the semantic request.
+The application decides when each meaning applies. The service does not consume keyboard, credential or authentication objects.
 
-### 8.3 Pattern Priority
+### 7.3 Function-Based API
+
+```c
+SGS_OpStatus_t SGS_Init   (Buzzer_Handle_t* Buzzer);
+SGS_OpStatus_t SGS_Ring   (SGS_Ringtone_t Ringtone, uint32_t CurrentTimeMs);
+SGS_OpStatus_t SGS_Update (uint32_t CurrentTimeMs);
+SGS_OpStatus_t SGS_Stop   (void);
+```
+
+There is no public `SGS_Handle_t`, instance parameter, pattern descriptor, priority selector or `SGS_IsActive()` query.
+
+---
+
+## 8. Private Runtime Model
+
+The source file defines four private model types.
+
+Priority orders replacement policy:
 
 ```c
 typedef enum
@@ -423,486 +329,328 @@ typedef enum
     SGS_PRIORITY_KEYPRESS,
     SGS_PRIORITY_FEEDBACK
 
-}SGS_Priority_t;
+}SGS_priority_t;
 ```
 
-Priority increases with the enumeration value:
+Higher numeric values have higher priority:
 
 ```text
 SGS_PRIORITY_KEYPRESS < SGS_PRIORITY_FEEDBACK
 ```
 
-The application does not pass a priority to `SGS_Ring()`. Priority belongs to the service-owned pattern configuration, preventing callers from accidentally changing the replacement policy for a semantic ringtone.
-
-### 8.4 Sound Phase
+A phase describes one timed output interval:
 
 ```c
 typedef struct
 {
-    uint32_t FrequencyHz;
-    uint32_t DurationMs;
-    bool     OutputEnabled;
+    uint32_t frequency_hz;
+    uint32_t duration_ms;
+    bool     output_enabled;
 
 }SGS_Phase_t;
 ```
 
-| Member | Unit | Description |
-|---|---:|---|
-| `FrequencyHz` | Hz | Frequency applied to the Buzzer Driver for an enabled phase. It shall be nonzero when `OutputEnabled` is `true`. |
-| `DurationMs` | ms | Nominal phase duration. The current implementation treats zero duration as invalid. |
-| `OutputEnabled` | Boolean | Selects a tone phase (`true`) or a silent phase (`false`). |
+An enabled phase requires a nonzero `frequency_hz`. A disabled phase calls `Buzzer_Off()` and ignores the frequency. `SGS_Update()` treats a zero duration as invalid pattern data.
 
-For a silent phase, `FrequencyHz` is ignored and is configured as `0U` in the built-in patterns for clarity.
-
-### 8.5 Sound Pattern
+A pattern combines its phase array and policy priority:
 
 ```c
 typedef struct
 {
-    const SGS_Phase_t* Phases;
-    uint8_t            PhaseCount;
-    SGS_Priority_t     Priority;
+    const SGS_Phase_t* phases;
+    uint8_t            phase_count;
+    SGS_priority_t     priority;
 
 }SGS_Pattern_t;
 ```
 
-| Member | Description |
-|---|---|
-| `Phases` | Pointer to the first immutable phase in the pattern. |
-| `PhaseCount` | Number of valid phases in the array. It shall be greater than zero. |
-| `Priority` | Replacement priority used by `SGS_Ring()`. |
-
-The current public API does not accept caller-defined patterns. `SGS_Pattern_t` describes the built-in service configuration and the active-pattern reference stored by the service handle.
-
-### 8.6 Service Handle
+The singleton runtime state is:
 
 ```c
 typedef struct
 {
-    Buzzer_Handle_t*     _buzzer;
-    const SGS_Pattern_t* _active_pattern;
-    uint32_t             _phase_started_ms;
-    uint8_t              _current_phase_index;
-    bool                 _initialized;
+    Buzzer_Handle_t*     buzzer;
+    const SGS_Pattern_t* active_pattern;
+    uint32_t             phase_started_ms;
+    uint8_t              current_phase_index;
+    bool                 initialized;
 
 }SGS_Handle_t;
 ```
 
-| Member | Description |
-|---|---|
-| `_buzzer` | Injected Buzzer Driver dependency. |
-| `_active_pattern` | Currently active pattern or `NULL` while idle. |
-| `_phase_started_ms` | Nominal start timestamp of the current phase. |
-| `_current_phase_index` | Index of the current phase. |
-| `_initialized` | Successful service-initialization state. |
+These declarations document the internal engine. They do not create an application-facing allocation contract.
 
-All leading-underscore members are private service state. Callers shall allocate the handle but shall not read or modify its members directly.
+Before `SGS_Init()`, static-duration initialization leaves the pointer and active pattern null, timestamps and indexes zero and the lifecycle flag false.
 
-### 8.7 Built-In Pattern Map
+---
 
-The current implementation defines the following immutable phases:
+## 9. Built-In Pattern Catalog
 
-#### Keypress
+### Keypress
 
 | Phase | Frequency | Duration | Output |
-|---:|---:|---:|---|
+| ---: | ---: | ---: | --- |
 | 0 | 2600 Hz | 40 ms | Enabled |
 
-Total nominal duration: **40 ms**.
+Total nominal duration: **40 ms**. Priority: `SGS_PRIORITY_KEYPRESS`.
 
-#### Access Granted
+### Access Granted
 
 | Phase | Frequency | Duration | Output |
-|---:|---:|---:|---|
+| ---: | ---: | ---: | --- |
 | 0 | 2000 Hz | 80 ms | Enabled |
 | 1 | Ignored | 40 ms | Disabled |
 | 2 | 3000 Hz | 140 ms | Enabled |
 
-Total nominal duration: **260 ms**.
+Total nominal duration: **260 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
 
-#### Error
+### Error
 
 | Phase | Frequency | Duration | Output |
-|---:|---:|---:|---|
+| ---: | ---: | ---: | --- |
 | 0 | 2600 Hz | 120 ms | Enabled |
 | 1 | Ignored | 50 ms | Disabled |
 | 2 | 1800 Hz | 220 ms | Enabled |
 
-Total nominal duration: **390 ms**.
+Total nominal duration: **390 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
 
-The exact acoustic result depends on the passive buzzer, board mechanics, supply voltage, PWM duty cycle, timer resolution, and enclosure. The values are application configuration and may be tuned after target evaluation while preserving the service contract.
-
----
-
-## 9. API Reference
-
-### 9.1 SGS_Init
-
-Initializes one caller-owned Sound Generator instance with an already initialized buzzer.
-
-```c
-SGS_OpStatus_t SGS_Init(
-    SGS_Handle_t*    Instance,
-    Buzzer_Handle_t* Buzzer
-);
-```
-
-#### Parameters
-
-| Parameter | Description |
-|---|---|
-| `Instance` | Caller-owned Sound Generator storage. It shall not be `NULL`. |
-| `Buzzer` | Caller-owned and initialized Buzzer Driver instance. It shall not be `NULL`. |
-
-#### Behavior
-
-- Stores the injected buzzer pointer.
-- Clears active-pattern state.
-- Calls `Buzzer_Off()` to establish the disabled output state.
-- Marks the service initialized only after the buzzer is successfully disabled.
-
-#### Return
-
-| Return value | Condition |
-|---|---|
-| `SGS_OPERATION_OK` | The buzzer was accepted and forced off successfully. |
-| `SGS_OPERATION_FAIL` | A pointer is null or `Buzzer_Off()` fails. |
-
-### 9.2 SGS_Ring
-
-Requests a semantic ringtone at a supplied millisecond timestamp.
-
-```c
-SGS_OpStatus_t SGS_Ring(
-    SGS_Handle_t*  Instance,
-    SGS_Ringtone_t Ringtone,
-    uint32_t       CurrentTimeMs
-);
-```
-
-#### Parameters
-
-| Parameter | Description |
-|---|---|
-| `Instance` | Initialized Sound Generator instance. |
-| `Ringtone` | Supported semantic ringtone identifier. |
-| `CurrentTimeMs` | Current timestamp from the same monotonic millisecond time base used by `SGS_Update()`. |
-
-#### Behavior
-
-- Validates the instance and ringtone.
-- Synchronizes an active pattern to `CurrentTimeMs` before applying priority policy.
-- Ignores the request if its priority is lower than the still-active pattern.
-- Replaces the active pattern when priority is equal or higher.
-- Sets phase index zero.
-- Records `CurrentTimeMs` as the first phase start.
-- Applies the first phase immediately.
-
-#### Return
-
-| Return value | Condition |
-|---|---|
-| `SGS_OPERATION_OK` | The requested pattern started. |
-| `SGS_OPERATION_IGNORED` | A higher-priority pattern remained active. |
-| `SGS_OPERATION_FAIL` | Validation, synchronization, frequency configuration, or output control failed. |
-
-### 9.3 SGS_Update
-
-Advances the active pattern according to the supplied timestamp.
-
-```c
-SGS_OpStatus_t SGS_Update(
-    SGS_Handle_t* Instance,
-    uint32_t      CurrentTimeMs
-);
-```
-
-#### Parameters
-
-| Parameter | Description |
-|---|---|
-| `Instance` | Initialized Sound Generator instance. |
-| `CurrentTimeMs` | Current monotonic timestamp in milliseconds. |
-
-#### Behavior
-
-- Returns successfully without hardware access when no pattern is active.
-- Uses `TVS_HasElapsed()` to evaluate the current phase duration.
-- Advances through every phase that has already expired.
-- Advances the nominal start timestamp by each phase duration.
-- Applies only the phase that should currently be active.
-- Disables the buzzer and clears pattern state after the final phase.
-
-#### Return
-
-| Return value | Condition |
-|---|---|
-| `SGS_OPERATION_OK` | The idle or active update completed successfully. |
-| `SGS_OPERATION_FAIL` | The instance is invalid, a phase has zero duration, or a buzzer operation fails. |
-
-### 9.4 SGS_Stop
-
-Cancels any active pattern and disables the buzzer.
-
-```c
-SGS_OpStatus_t SGS_Stop(SGS_Handle_t* Instance);
-```
-
-#### Behavior
-
-- Calls `Buzzer_Off()` even when the service is already idle.
-- Clears the active pattern, phase timestamp, and phase index.
-- Preserves the injected buzzer pointer and initialized state.
-
-#### Return
-
-| Return value | Condition |
-|---|---|
-| `SGS_OPERATION_OK` | The buzzer was disabled and runtime pattern state was cleared. |
-| `SGS_OPERATION_FAIL` | The instance is not initialized or the buzzer cannot be disabled. |
-
-### 9.5 SGS_IsActive
-
-Reports whether an initialized service instance currently owns an active pattern.
-
-```c
-bool SGS_IsActive(const SGS_Handle_t* Instance);
-```
-
-#### Return
-
-| Return value | Meaning |
-|---|---|
-| `true` | The instance is initialized and `_active_pattern` is not `NULL`. |
-| `false` | The pointer is null, the instance is not initialized, or the service is idle. |
-
-This operation does not read the current time and does not advance the pattern.
+The exact acoustic result depends on the passive buzzer, supply voltage, PWM duty cycle, timer resolution, board mechanics and enclosure. Frequency and duration changes belong in the private pattern configuration, not in Lock Controller calls.
 
 ---
 
-## 10. Commands and Results
+## 10. Replacement Priority
 
-### 10.1 Command Summary
+The service maintains at most one active pattern. A request either replaces that pattern or is ignored; no queue is maintained.
 
-| Command | Purpose | Hardware effect |
-|---|---|---|
-| `SGS_Init()` | Establish the injected dependency and idle state. | Forces buzzer off. |
-| `SGS_Ring()` | Start, replace, or policy-ignore a semantic ringtone. | May set frequency and enable output immediately. |
-| `SGS_Update()` | Advance active phases. | May change frequency, enable output, disable output, or do nothing. |
-| `SGS_Stop()` | Cancel current sound behavior. | Forces buzzer off. |
-| `SGS_IsActive()` | Query logical activity. | None. |
+Before comparing priority, `SGS_Ring()` calls `SGS_Update(CurrentTimeMs)` when a pattern is active. This prevents a feedback pattern whose nominal duration already ended from incorrectly blocking a new keypress.
 
-The service produces no application event object. The direct result is `SGS_OpStatus_t`, while `SGS_IsActive()` provides an observational Boolean state.
+After synchronization:
 
-### 10.2 Result Semantics
-
-The caller should interpret results as follows:
-
-- `SGS_OPERATION_OK`: continue normal application processing.
-- `SGS_OPERATION_IGNORED`: continue normal application processing; the active higher-priority sound remains authoritative.
-- `SGS_OPERATION_FAIL`: record or report the degradable sound-path failure according to application policy, but do not delay lock or safety deadlines.
-
-### 10.3 Priority Replacement Matrix
+- Lower requested priority returns `SGS_OPERATION_IGNORED` and preserves the active pattern.
+- Equal requested priority replaces the active pattern.
+- Higher requested priority replaces the active pattern.
 
 | Active pattern | Requested keypress | Requested access granted | Requested error |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | None | Start | Start | Start |
 | Keypress | Replace | Replace | Replace |
 | Access granted | Ignore | Replace | Replace |
 | Error | Ignore | Replace | Replace |
 
-The matrix follows two rules:
-
-1. Lower priority is ignored.
-2. Equal or higher priority replaces immediately.
-
-Before applying the matrix, `SGS_Ring()` updates the active pattern to the request timestamp. A feedback pattern whose nominal duration has already completed therefore does not incorrectly block a new keypress.
+Priority belongs to the private `SGS_Pattern_t`. Public callers cannot elevate a keypress or override product feedback policy.
 
 ---
 
-## 11. Behavioral Rules and Operation Flow
+## 11. Lifecycle
 
-### 11.1 Initialization Flow
+The expected lifecycle is:
 
-```mermaid
-flowchart TD
-    START["SGS_Init"] --> VALIDATE{"Instance and Buzzer valid?"}
-    VALIDATE -->|"No"| FAIL["SGS_OPERATION_FAIL"]
-    VALIDATE -->|"Yes"| STORE["Store buzzer pointer"]
-    STORE --> CLEAR["Clear active pattern state"]
-    CLEAR --> OFF["Buzzer_Off"]
-    OFF -->|"Failure"| INVALID["Clear buzzer pointer<br/>remain uninitialized"]
-    INVALID --> FAIL
-    OFF -->|"Success"| READY["Mark initialized"]
-    READY --> OK["SGS_OPERATION_OK"]
-```
+1. The composition root creates and initializes the PWM Platform handle.
+2. The composition root initializes the Buzzer Driver with that PWM handle.
+3. The composition root calls `SGS_Init(&Buzzer)`.
+4. The service retains the Buzzer Driver reference.
+5. The service clears pattern progress and forces the buzzer off.
+6. The singleton becomes initialized only after `Buzzer_Off()` succeeds.
+7. The application requests semantic ringtones and periodically calls `SGS_Update()`.
+8. The application calls `SGS_Stop()` when explicit cancellation or a power transition requires silence.
 
-Initialization establishes the safe output state before the instance becomes usable.
+There is no public deinitialization function.
 
-### 11.2 Ring Request Flow
+Calling `SGS_Init()` again replaces the retained Buzzer Driver pointer, clears logical pattern state and disables the newly supplied buzzer. It does not first disable a previously retained different buzzer. Normal composition should therefore initialize the singleton once; if rebinding is required, stop the active sound path before supplying another dependency.
 
-```mermaid
-flowchart TD
-    REQUEST["SGS_Ring"] --> VALIDATE{"Initialized and ringtone valid?"}
-    VALIDATE -->|"No"| FAIL["FAIL"]
-    VALIDATE -->|"Yes"| MAP["Resolve built-in pattern"]
-    MAP --> SYNC{"Pattern already active?"}
-    SYNC -->|"Yes"| UPDATE["Advance active pattern to CurrentTimeMs"]
-    SYNC -->|"No"| PRIORITY
-    UPDATE -->|"Failure"| FAIL
-    UPDATE -->|"Success"| PRIORITY{"Requested priority lower?"}
-    PRIORITY -->|"Yes"| IGNORED["IGNORED"]
-    PRIORITY -->|"No"| SELECT["Select pattern and phase zero"]
-    SELECT --> APPLY["Apply first phase immediately"]
-    APPLY -->|"Failure"| ABORT["Force off and clear pattern"]
-    ABORT --> FAIL
-    APPLY -->|"Success"| OK["OK"]
-```
+If initialization fails because `Buzzer_Off()` fails, the retained pointer is cleared and `initialized` remains false.
 
-### 11.3 Phase Application
+---
+
+## 12. Pattern Execution Model
+
+### 12.1 Phase Application
 
 For an enabled phase, the service performs:
 
 ```text
-Buzzer_SetFrequency(FrequencyHz)
-             |
-             v
-        Buzzer_On()
+Buzzer_SetFrequency(frequency_hz)
+                 |
+                 v
+            Buzzer_On()
 ```
 
-Frequency is configured before output is enabled. If the buzzer is already enabled, the Buzzer Driver and PWM Platform update the active frequency.
+The frequency must be nonzero. It is configured before the output is enabled.
 
-For a disabled phase, the service performs:
+For a disabled phase, the service performs only:
 
 ```text
 Buzzer_Off()
 ```
 
-The frequency field is not applied during a silent phase.
+The stored frequency is not inspected or applied during a silent phase.
 
-### 11.4 Pattern Update Flow
+### 12.2 Nominal Timeline
 
-`SGS_Update()` evaluates the current phase from the stored nominal start timestamp:
+`SGS_Ring()` records the supplied timestamp as the nominal start of phase zero:
 
-```text
-elapsed = CurrentTimeMs - PhaseStartedMs
+```c
+phase_started_ms = CurrentTimeMs;
 ```
 
-The actual elapsed comparison is delegated to `TVS_HasElapsed()`.
+When a phase expires, `SGS_Update()` advances the timeline by the configured duration:
 
-When the current phase has expired:
+```c
+phase_started_ms += current_phase->duration_ms;
+```
 
-1. Add its duration to `_phase_started_ms`.
-2. Increment `_current_phase_index`.
-3. Repeat the elapsed check if the next phase is also expired.
-4. Stop if the pattern has completed.
-5. Otherwise apply only the phase that should currently be active.
+It does not assign a late update timestamp as the next phase start. This prevents scheduling jitter from stretching every remaining phase.
 
-### 11.5 Completion and Cancellation
+### 12.3 Delayed Update Catch-Up
 
-Pattern completion and `SGS_Stop()` share the same cleanup behavior:
+The update loop advances through every phase already expired at `CurrentTimeMs`. Intermediate expired phases are not rapidly replayed; only the phase that should currently be active is applied.
 
-- request `Buzzer_Off()`;
-- set `_active_pattern` to `NULL`;
-- reset `_phase_started_ms` to `0U`;
-- reset `_current_phase_index` to `0U`.
+For an access-granted pattern starting at `1000 ms`:
 
-The initialized service and injected dependency remain available for the next request.
-
-### 11.6 Delayed Update Behavior
-
-Consider the access-granted pattern starting at `1000 ms`:
-
-| Nominal interval | Expected phase |
-|---|---|
+| Nominal interval | Expected output |
+| --- | --- |
 | 1000–1079 ms | 2000 Hz tone |
 | 1080–1119 ms | Silence |
 | 1120–1259 ms | 3000 Hz tone |
-| 1260 ms onward | Complete and off |
+| 1260 ms onward | Pattern complete and buzzer off |
 
-If the application does not call `SGS_Update()` until `1150 ms`, the service:
+If the next update occurs at `1150 ms`, the service advances past both the first tone and silence, sets the nominal phase start to `1120 ms` and applies only the 3000 Hz tone. The original completion deadline remains `1260 ms`.
 
-1. recognizes that the first 80 ms tone expired;
-2. recognizes that the following 40 ms silence also expired;
-3. advances the nominal phase start to `1120 ms`;
-4. applies only the 3000 Hz phase.
+### 12.4 Completion and Cancellation
 
-It does not rapidly replay the expired silence and does not restart the 3000 Hz phase at `1150 ms`. The original pattern deadline remains `1260 ms`.
+Completion and `SGS_Stop()` use the same abort helper:
+
+1. Call `Buzzer_Off()`.
+2. Set `active_pattern` to `NULL`.
+3. Reset `phase_started_ms` to `0U`.
+4. Reset `current_phase_index` to `0U`.
+
+Logical pattern state is cleared even when `Buzzer_Off()` reports failure. The returned operation status still exposes the hardware failure.
+
+The retained Buzzer Driver pointer and initialization flag remain available for later requests.
+
+### 12.5 Timestamp Rollover
+
+Phase expiration is delegated to `TVS_HasElapsed()`, which uses unsigned subtraction. A phase may begin before `UINT32_MAX` and complete after the millisecond counter wraps to zero.
+
+All timestamps supplied to `SGS_Ring()` and `SGS_Update()` must originate from the same monotonically increasing unsigned 32-bit time base. Evaluation must occur before a complete counter period elapses.
 
 ---
 
-## 12. Timing and Concurrency
+## 13. API Reference
 
-### 12.1 Caller-Supplied Time
-
-`SGS_Ring()` and `SGS_Update()` receive `CurrentTimeMs` explicitly. The service does not read a hardware or operating-system clock.
-
-All timestamps supplied to one `SGS_Handle_t` shall come from the same monotonically increasing unsigned 32-bit millisecond time base.
-
-The recommended application flow samples time once and shares that value across all timestamp-driven updates:
+### `SGS_Init`
 
 ```c
-uint32_t now_ms = Platform_GetMillis();
-
-SGS_Update(&SoundGenerator, now_ms);
+SGS_OpStatus_t SGS_Init(Buzzer_Handle_t* Buzzer);
 ```
 
-### 12.2 Update Interval
+Initializes or reinitializes the singleton.
 
-The V1 application architecture requires a maximum interval of **10 ms** between Sound Generator updates.
+Behavior:
 
-The shortest configured phase is the 40 ms keypress tone. A 10 ms update interval therefore provides multiple observation opportunities during every phase.
+- Rejects a null buzzer pointer.
+- Stores the supplied Buzzer Driver pointer.
+- Marks the singleton uninitialized during setup.
+- Clears active pattern, phase timestamp and phase index.
+- Calls `Buzzer_Off()` to establish the safe idle output state.
+- Clears the retained pointer when the disable operation fails.
+- Marks the singleton initialized only after successful disable.
 
-The service does not enforce the update interval. The caller owns scheduling and shall ensure that unrelated work does not starve the update path.
+Returns:
 
-### 12.3 Timing Resolution and Jitter
+- `SGS_OPERATION_OK` when the dependency is retained and the buzzer is disabled.
+- `SGS_OPERATION_FAIL` when the pointer is null or `Buzzer_Off()` fails.
 
-The first phase starts during `SGS_Ring()` and does not wait for the next update.
+The Buzzer Driver remains owned by the composition root and must stay valid.
 
-Subsequent transitions occur on the first `SGS_Update()` call that observes the phase duration as elapsed. With a maximum 10 ms update interval, a hardware transition may occur up to approximately one update interval after its nominal timestamp, plus task-scheduling and bounded execution jitter.
+### `SGS_Ring`
 
-The service prevents this observation delay from accumulating because it advances `_phase_started_ms` by the configured phase duration rather than assigning the late `CurrentTimeMs` value.
+```c
+SGS_OpStatus_t SGS_Ring(
+    SGS_Ringtone_t Ringtone,
+    uint32_t CurrentTimeMs
+);
+```
 
-### 12.4 Rollover Behavior
+Requests one built-in semantic pattern.
 
-The Timeout Validation Service uses unsigned subtraction. A phase can therefore begin before `UINT32_MAX` and complete after the timestamp wraps to zero.
+Behavior:
 
-The contract remains valid when the phase is evaluated before one complete 32-bit millisecond-counter period has elapsed. The current patterns are much shorter than that limit.
+- Requires successful singleton initialization.
+- Rejects `SGS_RINGTONE_COUNT`, negative enumeration values and values above the map boundary.
+- Resolves the immutable pattern and validates its phase pointer and count.
+- Synchronizes an active pattern to `CurrentTimeMs`.
+- Applies the replacement-priority policy after synchronization.
+- Selects phase zero and records `CurrentTimeMs` for an accepted request.
+- Applies the first phase immediately.
+- Aborts and clears pattern state if the first phase cannot be applied.
 
-### 12.5 Concurrency Model
+Returns:
 
-One `SGS_Handle_t` shall be owned by one execution context at a time.
+- `SGS_OPERATION_OK` when the requested pattern starts.
+- `SGS_OPERATION_IGNORED` when a higher-priority pattern remains active.
+- `SGS_OPERATION_FAIL` for lifecycle, ringtone, pattern, synchronization or Buzzer Driver failures.
 
-The supported model is:
+### `SGS_Update`
 
-- application task or main loop calls `SGS_Ring()`;
-- the same context calls `SGS_Update()`;
-- the same context calls `SGS_Stop()` when required.
+```c
+SGS_OpStatus_t SGS_Update(uint32_t CurrentTimeMs);
+```
 
-The public API does not contain locks and is not designed for simultaneous calls from multiple tasks or interrupt handlers. When requests originate elsewhere, the application shall transport them to the owning context through its approved event mechanism.
+Advances the active pattern without blocking.
 
-No Sound Generator function shall be called from an ISR when the underlying Buzzer Driver or PWM Platform operation is not ISR-safe.
+Behavior:
+
+- Fails when the singleton is not initialized.
+- Returns success without hardware access while idle.
+- Rejects an active phase with zero duration and aborts the pattern.
+- Uses `TVS_HasElapsed()` for the current phase.
+- Advances through all phases expired at the supplied timestamp.
+- Applies only the phase that should currently be active.
+- Disables the buzzer and clears state after the last phase.
+- Aborts after a phase-application failure.
+
+Returns:
+
+- `SGS_OPERATION_OK` while idle or after a successful update.
+- `SGS_OPERATION_FAIL` when lifecycle, pattern data or a required buzzer operation fails.
+
+### `SGS_Stop`
+
+```c
+SGS_OpStatus_t SGS_Stop(void);
+```
+
+Cancels the active pattern and forces the buzzer off.
+
+Behavior:
+
+- Requires successful initialization.
+- Calls `Buzzer_Off()` even when no pattern is active.
+- Clears active pattern, phase timestamp and phase index.
+- Preserves the retained dependency and initialization state.
+
+Returns:
+
+- `SGS_OPERATION_OK` when the buzzer is disabled.
+- `SGS_OPERATION_FAIL` when the service is uninitialized or the disable operation fails.
 
 ---
 
-## 13. Usage Example
+## 14. Composition-Root Integration
 
-### 13.1 Dependency Initialization
-
-The following example uses the current STM32 target configuration. Hardware-specific creation remains outside the service:
+The composition root owns the PWM and Buzzer Driver objects. It passes only the initialized buzzer address to the singleton:
 
 ```c
 #include "Buzzer_Driver.h"
-#include "PWM_Platform_Interface.h"
 #include "Sound_Generator_Service.h"
-#include "Time_Platform_Interface.h"
 #include "tim.h"
 
 static PWM_Handle_t    BuzzerPwm;
 static Buzzer_Handle_t Buzzer;
-static SGS_Handle_t    SoundGenerator;
 
-bool SoundPath_Init(void)
+static bool SoundComposition_Init(void)
 {
     if(PPWM_Create(&BuzzerPwm, &htim3, PWM_CHANNEL_1) != PWM_OPERATION_OK)
     {
@@ -914,371 +662,241 @@ bool SoundPath_Init(void)
         return false;
     }
 
-    if(SGS_Init(&SoundGenerator, &Buzzer) != SGS_OPERATION_OK)
-    {
-        return false;
-    }
-
-    return true;
+    return SGS_Init(&Buzzer) == SGS_OPERATION_OK;
 }
 ```
 
-The target shall call `MX_TIM3_Init()` before `SoundPath_Init()`.
+No `SGS_Handle_t` is allocated in the composition root.
 
-### 13.2 Runtime Update
+The current STM32 target maps the passive buzzer to TIM3 channel 1 on PB4. That mapping is a target-composition choice, not part of the SGS public contract.
+
+Runtime updates supply a shared millisecond timestamp:
 
 ```c
 void Application_Update(void)
 {
     uint32_t now_ms = Platform_GetMillis();
 
-    if(SGS_Update(&SoundGenerator, now_ms) != SGS_OPERATION_OK)
+    if(SGS_Update(now_ms) != SGS_OPERATION_OK)
     {
-        /* Report or degrade the optional sound path. */
+        /* Apply the application policy for degradable sound-path failure. */
     }
 }
 ```
 
-`Application_Update()` shall be called at intervals no greater than 10 ms in the V1 architecture.
-
-### 13.3 Semantic Requests
+Semantic requests also use the function-only API:
 
 ```c
 uint32_t now_ms = Platform_GetMillis();
 
 /* Valid key accepted. */
-SGS_Ring(&SoundGenerator, SGS_RINGTONE_KEYPRESS, now_ms);
+(void)SGS_Ring(SGS_RINGTONE_KEYPRESS, now_ms);
 
 /* Authentication succeeded. */
-SGS_Ring(&SoundGenerator, SGS_RINGTONE_ACCESS_GRANTED, now_ms);
+(void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, now_ms);
 
 /* Authentication failed or confirmation was incomplete. */
-SGS_Ring(&SoundGenerator, SGS_RINGTONE_ERROR, now_ms);
+(void)SGS_Ring(SGS_RINGTONE_ERROR, now_ms);
 ```
 
-An application that needs to distinguish priority rejection can inspect the result:
+Priority rejection can be handled explicitly:
 
 ```c
-SGS_OpStatus_t status = SGS_Ring(
-    &SoundGenerator,
-    SGS_RINGTONE_KEYPRESS,
-    now_ms
-);
+SGS_OpStatus_t status = SGS_Ring(SGS_RINGTONE_KEYPRESS, now_ms);
 
 if(status == SGS_OPERATION_IGNORED)
 {
-    /* Higher-priority feedback remains active; this is expected policy. */
+    /* Expected policy: higher-priority feedback remains active. */
 }
 ```
 
-### 13.4 TIM3 Channel 1 Integration
+---
 
-The current board test connects the passive buzzer to **TIM3 channel 1**. The direct test sequence in `main.c` uses:
+## 15. Operation Flows
 
-```c
-PPWM_Create(&BuzzerPwm, &htim3, PWM_CHANNEL_1);
+### Initialization
+
+```mermaid
+flowchart TD
+    CALL["SGS_Init(Buzzer)"] --> VALID{"Buzzer non-null?"}
+    VALID -->|"No"| FAIL["SGS_OPERATION_FAIL"]
+    VALID -->|"Yes"| STORE["Retain buzzer and</br> mark uninitialized"]
+    STORE --> CLEAR["Clear pattern state"]
+    CLEAR --> OFF["Buzzer_Off()"]
+    OFF -->|"Failure"| UNBIND["Clear retained pointer"]
+    UNBIND --> FAIL
+    OFF -->|"Success"| READY["Mark initialized"]
+    READY --> OK["SGS_OPERATION_OK"]
 ```
 
-That temporary integration repeats:
+### Ring Request
 
-| Cycle timestamp | Request | Expected result |
-|---:|---|---|
-| 0 ms | Keypress | Short 2600 Hz acknowledgement. |
-| 500 ms | Access granted | Rising two-tone feedback starts. |
-| 550 ms | Keypress | `SGS_OPERATION_IGNORED`; access feedback continues. |
-| 1500 ms | Error | Descending error feedback starts. |
-| 3000 ms | Restart cycle | New keypress acknowledgement. |
-
-TIM3 and channel 1 are target-composition choices. They are not part of the Sound Generator public contract.
-
----
-
-## 14. Design Decisions
-
-### 14.1 Semantic API
-
-Callers request application meanings such as `SGS_RINGTONE_ERROR` instead of supplying a frequency sequence. This keeps acoustic policy centralized and prevents Lock Controller logic from depending on tone-level details.
-
-### 14.2 Injected Buzzer Dependency
-
-The service receives a Buzzer Driver pointer during initialization. It does not include target timer headers or discover hidden global hardware objects.
-
-This preserves:
-
-- explicit ownership;
-- portable service logic;
-- controlled initialization order;
-- testability with a fake Buzzer Driver implementation;
-- separation between product behavior and hardware composition.
-
-### 14.3 Non-Blocking Phase Engine
-
-Patterns are progressed by timestamp comparisons rather than delays. This allows the application to continue processing keyboard input, access deadlines, display updates, and actuator safety behavior while sound feedback is active.
-
-### 14.4 No Sound Queue
-
-V1 maintains at most one active pattern. A request is either accepted as the new active pattern or ignored by priority policy.
-
-An unbounded queue is unnecessary for short user-interface feedback and could cause stale sounds to play after their application meaning is no longer relevant.
-
-### 14.5 Explicit Priority Policy
-
-Priority belongs to `SGS_Pattern_t`. A caller cannot arbitrarily elevate a keypress request.
-
-The two current priority levels express the product requirement directly:
-
-```text
-keypress acknowledgement < access result feedback
+```mermaid
+flowchart TD
+    CALL["SGS_Ring(Ringtone, CurrentTimeMs)"] --> VALID{"Initialized and ringtone valid?"}
+    VALID -->|"No"| FAIL["SGS_OPERATION_FAIL"]
+    VALID -->|"Yes"| MAP["Resolve and validate<br/> pattern"]
+    MAP --> ACTIVE{"Pattern active?"}
+    ACTIVE -->|"Yes"| UPDATE["SGS_Update<br/>(CurrentTimeMs)"]
+    ACTIVE -->|"No"| PRIORITY
+    UPDATE -->|"Failure"| FAIL
+    UPDATE -->|"Success"| PRIORITY{"Requested priority lower?"}
+    PRIORITY -->|"Yes"| IGNORED["SGS_OP_IGNORED"]
+    PRIORITY -->|"No"| SELECT["Select pattern, phase zero<br/> and timestamp"]
+    SELECT --> APPLY["Apply first phase"]
+    APPLY -->|"Failure"| ABORT["Best-effort off<br/> and clear pattern"]
+    ABORT --> FAIL
+    APPLY -->|"Success"| OK["SGS_OPERATION_OK"]
 ```
 
-### 14.6 Nominal Phase Timeline
+### Periodic Update
 
-The service increments the stored phase start by each configured duration:
-
-```c
-phase_started_ms += current_phase->DurationMs;
+```mermaid
+flowchart TD
+    CALL["SGS_Update<br/>(CurrentTimeMs)"] --> INIT{"Initialized?"}
+    INIT -->|"No"| FAIL["SGS_OPERATION_FAIL"]
+    INIT -->|"Yes"| ACTIVE{"Pattern active?"}
+    ACTIVE -->|"No"| OK["SGS_OPERATION_OK"]
+    ACTIVE -->|"Yes"| DURATION{"Current duration nonzero?"}
+    DURATION -->|"No"| ABORT["Abort pattern"]
+    ABORT --> FAIL
+    DURATION -->|"Yes"| ELAPSED{"Phase elapsed?"}
+    ELAPSED -->|"No"| CHANGED{"Any phase advanced?"}
+    CHANGED -->|"No"| OK
+    CHANGED -->|"Yes"| APPLY["Apply current phase"]
+    ELAPSED -->|"Yes"| ADVANCE["Advance nominal timestamp<br/> and phase index"]
+    ADVANCE --> COMPLETE{"Pattern complete?"}
+    COMPLETE -->|"Yes"| STOP["Disable buzzer<br/> and clear state"]
+    COMPLETE -->|"No"| DURATION
+    STOP --> RESULT["Return disable status"]
+    APPLY -->|"Success"| OK
+    APPLY -->|"Failure"| ABORT
 ```
 
-It does not reset the phase start to a late update timestamp. This prevents scheduler jitter from extending every subsequent phase.
+---
 
-### 14.7 Explicit Output State
+## 16. Error Handling
 
-A silent phase is represented by `OutputEnabled = false`, rather than treating frequency zero as an implicit stop command.
+Initialization fails when:
 
-This keeps duration, output state, and frequency as separate concepts. Frequency zero remains invalid for an enabled tone phase.
+- The supplied buzzer pointer is null.
+- The Buzzer Driver is not initialized and therefore rejects `Buzzer_Off()`.
+- The underlying PWM disable operation fails.
+
+Ringtone requests fail when:
+
+- The singleton is not initialized.
+- The ringtone does not index a playable pattern.
+- The mapped pattern pointer is null or its phase count is zero.
+- Synchronizing an active pattern fails.
+- An enabled first phase has zero frequency.
+- Frequency configuration or output enable fails.
+
+Updates fail when:
+
+- The singleton is not initialized.
+- An active phase has zero duration.
+- A phase cannot be applied.
+- Pattern completion cannot disable the buzzer.
+
+`SGS_Stop()` fails when the singleton is not initialized or the buzzer cannot be disabled.
+
+After phase application, completion or cancellation failure, the service makes a best-effort disable request and clears logical pattern state. A failed hardware disable may mean the physical output state is unknown even though the singleton is logically idle.
+
+Sound-path failure is degradable feedback failure. It must not delay lock safety, actuator deadlines, authentication decisions or application fault handling.
 
 ---
 
-## 15. Error Handling
+## 17. Timing and Concurrency
 
-### 15.1 Argument and State Errors
+`SGS_Ring()` and `SGS_Update()` receive `CurrentTimeMs` explicitly. The service does not read the platform clock.
 
-`SGS_OPERATION_FAIL` is returned when:
+The configured V1 patterns recommend a maximum interval of **10 ms** between application updates. The shortest phase is 40 ms, giving multiple observation opportunities per phase.
 
-- `Instance` is `NULL` where a valid instance is required;
-- `Buzzer` is `NULL` during initialization;
-- the service is used before successful initialization;
-- `Ringtone` is outside the playable enumeration range.
+The service does not enforce this cadence. Delayed updates preserve the nominal completion time but can delay the physical transition until the next call.
 
-`SGS_IsActive()` returns `false` instead of an operation status when the supplied pointer is null or uninitialized.
+The singleton is not internally thread-safe. It provides no mutex, critical section, atomic request transaction, queue or interrupt-safe API. `SGS_Init()`, `SGS_Ring()`, `SGS_Update()` and `SGS_Stop()` must be serialized by one application execution context.
 
-### 15.2 Buzzer Operation Errors
+Requests originating in another task or interrupt must be transported to the owning context through the application's approved event mechanism. Sound functions must not be called from an ISR when the Buzzer Driver or PWM Platform is not ISR-safe.
 
-The service propagates failure when any required dependency operation fails:
-
-- `Buzzer_SetFrequency()`;
-- `Buzzer_On()`;
-- `Buzzer_Off()`.
-
-If phase application fails, the service makes a best-effort call to `Buzzer_Off()` and clears the active pattern state.
-
-### 15.3 Invalid Pattern Data
-
-The current implementation rejects or aborts when:
-
-- the selected pattern has a null phase pointer;
-- the selected pattern has zero phases;
-- an active phase has zero duration;
-- an enabled phase has zero frequency.
-
-Built-in patterns are compile-time constants and currently satisfy these invariants.
-
-### 15.4 Safe Failure State
-
-After completion, cancellation, or phase-engine failure, logical pattern state is cleared even if the underlying output-disable request reports failure.
-
-The application shall treat sound-path failure as degradable feedback failure. It shall preserve lock safety and application deadlines independently from the buzzer result.
-
-A target-level fault strategy may additionally disable nonessential PWM outputs during fault handling or system reset.
+Safety-critical state transitions shall never wait for a sound pattern to complete.
 
 ---
 
-## 16. Usage Constraints
+## 18. Validation Checklist
 
-- `SGS_Init()` shall complete before any other operation except `SGS_IsActive()`.
-- The injected buzzer shall already be initialized.
-- The buzzer storage lifetime shall be at least as long as the initialized Sound Generator lifetime.
-- The PWM instance used by the buzzer shall remain valid.
-- Every enabled built-in frequency shall be representable by the configured timer and prescaler.
-- `SGS_Ring()` and `SGS_Update()` for one instance shall use the same millisecond time source.
-- Supplied timestamps shall progress monotonically modulo unsigned 32-bit rollover.
-- `SGS_Update()` shall be called periodically while normal sound behavior is enabled.
-- The V1 application update interval shall not exceed 10 ms.
-- Callers shall not implement pattern timing by counting update calls.
-- Callers shall not modify `SGS_Handle_t` private members.
-- Callers shall not modify the service-owned pattern map at runtime.
-- One instance shall not be accessed concurrently without external serialization.
-- Sound operations shall not execute from an unsupported ISR context.
-- `SGS_OPERATION_IGNORED` shall not be treated as a hardware failure.
-- Safety-critical state transitions shall not wait for a sound pattern to finish.
-- `SGS_Stop()` shall be called before entering a power state that requires the buzzer PWM output to be disabled.
-- The acoustic result shall be validated on the actual passive buzzer and assembled product.
+Recommended host-side validation covers:
 
-For the current STM32 configuration, the lowest built-in tone is 1800 Hz. The TIM3 configuration and PWM Platform range shall be reviewed if the built-in frequencies are changed.
-
----
-
-## 17. Testing and Acceptance Criteria
-
-### 17.1 Host-Side Tests
-
-The service should be tested with fake Buzzer Driver operations covering at least the following cases.
-
-#### Initialization
-
-- Null instance fails.
-- Null buzzer fails.
-- Unusable buzzer dependency fails when the initial `Buzzer_Off()` call fails.
-- Successful initialization leaves the service idle and output disabled.
-
-#### Keypress Pattern
-
-- Ring starts at 2600 Hz and enables the buzzer immediately.
-- Update before 40 ms preserves the phase.
-- Update at exactly 40 ms disables the buzzer and clears the active pattern.
-
-#### Access-Granted Pattern
-
-- Phase zero starts at 2000 Hz.
-- Exact 80 ms boundary disables the output.
-- Exact 120 ms cumulative boundary applies 3000 Hz and enables output.
-- Exact 260 ms cumulative boundary disables output and completes the pattern.
-
-#### Error Pattern
-
-- Phase zero starts at 2600 Hz.
-- Exact 120 ms boundary disables the output.
-- Exact 170 ms cumulative boundary applies 1800 Hz.
-- Exact 390 ms cumulative boundary disables output and completes the pattern.
-
-#### Priority
-
-- Keypress replaces an active keypress.
-- Access granted replaces an active keypress.
-- Error replaces an active keypress.
-- Keypress is ignored during access granted.
-- Keypress is ignored during error.
-- Access granted replaces active error feedback.
-- Error replaces active access-granted feedback.
-- An expired feedback pattern is synchronized before priority evaluation, allowing a new keypress.
-
-#### Delayed Update
-
-- An update delayed across one phase applies the correct next phase.
-- An update delayed across multiple phases skips expired phases.
-- An update after the complete pattern deadline disables output without replaying expired phases.
-- A delayed update does not move the nominal completion deadline.
-
-#### Rollover
-
-- A phase that begins near `UINT32_MAX` completes at the correct timestamp after rollover.
-- A pre-expiration timestamp after rollover does not complete the phase early.
-
-#### Failure Injection
-
-- Frequency failure returns `SGS_OPERATION_FAIL` and clears active state.
-- Output-enable failure returns `SGS_OPERATION_FAIL` and clears active state.
-- Output-disable failure returns `SGS_OPERATION_FAIL` and clears logical pattern state.
-- Zero-duration phase data aborts safely.
+- Null buzzer initialization fails.
+- An unusable or uninitialized buzzer fails during the initial `Buzzer_Off()`.
+- Successful initialization leaves the singleton idle and the output disabled.
+- Reinitialization resets pattern progress.
+- `SGS_Ring()` fails before initialization.
+- Every playable ringtone is accepted while idle.
+- `SGS_RINGTONE_COUNT`, negative values and out-of-range values are rejected.
+- Keypress starts at 2600 Hz and enables output immediately.
+- Keypress remains active before 40 ms.
+- Keypress completes and disables output at exactly 40 ms.
+- Access granted transitions at cumulative boundaries of 80, 120 and 260 ms.
+- Error transitions at cumulative boundaries of 120, 170 and 390 ms.
+- Keypress replaces keypress.
+- Feedback replaces keypress.
+- Keypress is ignored during access-granted feedback.
+- Keypress is ignored during error feedback.
+- Access granted and error replace one another at equal priority.
+- An expired feedback pattern is updated before priority comparison.
+- A delayed update skips one expired phase.
+- A delayed update skips multiple expired phases.
+- A late update does not move the nominal completion deadline.
+- A phase spanning unsigned timestamp rollover completes correctly.
+- Zero-duration active phase data aborts safely.
 - Zero-frequency enabled phase data is rejected.
+- Frequency failure returns failure and clears pattern state.
+- Output-enable failure returns failure and clears pattern state.
+- Output-disable failure returns failure and clears logical pattern state.
+- `SGS_Stop()` calls `Buzzer_Off()` even while idle.
+- No public service handle or active-state query is exposed.
+- The complete firmware builds with the service source included.
 
-### 17.2 Target Integration Tests
+Target integration should additionally verify:
 
-Target acceptance should verify:
-
-- PWM output is present on the configured buzzer pin.
-- The selected timer channel matches the physical pin configuration.
-- Every built-in frequency is accepted by the PWM Platform Interface.
-- The effective PWM duty cycle remains appropriate after frequency changes.
-- Keypress produces a short audible acknowledgement.
-- Access-granted feedback is perceptibly rising.
-- Error feedback is perceptibly descending.
+- PWM output appears on the configured passive-buzzer pin.
+- Every built-in frequency is accepted by the PWM Platform.
 - Silent phases disable PWM output.
-- A keypress cannot interrupt access feedback.
-- Pattern execution does not block keyboard processing.
-- Pattern execution does not delay lock-control deadlines.
-- The buzzer remains off when no pattern is active.
-- The buzzer is disabled after explicit `SGS_Stop()`.
-- Acoustic output is acceptable at expected supply voltages and inside the enclosure.
-
-### 17.3 Current Validation
-
-The current implementation has been validated by:
-
-- compiling and linking the complete STM32 firmware with GNU Arm GCC 14.3;
-- running host-side assertions for pattern transitions;
-- testing lower-priority request rejection;
-- testing equal-priority replacement;
-- testing delayed phase catch-up;
-- testing unsigned timestamp rollover;
-- running the direct target test through TIM3 channel 1;
-- audibly confirming the configured patterns on the current hardware.
-
-Future pattern or priority changes shall repeat both host-side temporal tests and target acoustic validation.
+- Access feedback is perceptibly rising.
+- Error feedback is perceptibly descending.
+- A keypress cannot interrupt feedback.
+- Sound execution does not block keyboard or lock-control deadlines.
+- The buzzer remains off while idle and after `SGS_Stop()`.
+- Acoustic output is acceptable across expected supply voltage and enclosure conditions.
 
 ---
 
-## 18. Applications
+## 19. Limitations
 
-The current service can provide sound feedback for:
+Current V1 limitations include:
 
-- accepted keypad input;
-- successful access authorization;
-- incorrect credentials;
-- incomplete credential confirmation;
-- other short application errors mapped to the generic error ringtone.
-
-Potential future product uses include lockout notification, fault diagnostics, low-battery warnings, and power-state feedback. These meanings shall be introduced as explicit semantic patterns rather than direct frequency control from application logic.
-
----
-
-## 19. Limitations and Future Improvements
-
-### Current Limitations
-
+- Exactly one Sound Generator runtime is supported.
 - Only three semantic ringtones are implemented.
 - Patterns are fixed at compile time.
 - Callers cannot register custom phase arrays.
 - Only two priority levels are available.
 - Equal-priority requests always replace the active pattern.
 - No pending-pattern queue is provided.
-- No repeat count or looping-pattern mode is provided.
-- No pause or resume operation is provided.
-- No service deinitialization API is provided.
+- No repeat, loop, pause or resume mode is provided.
+- No public active-pattern, phase or activity query is provided.
+- No public deinitialization API is provided.
+- Reinitialization does not disable a previously retained different buzzer before rebinding.
 - No volume parameter is provided.
 - PWM duty cycle remains a Buzzer Driver concern.
 - Timing resolution is limited to caller-supplied milliseconds and update cadence.
-- The service does not expose the current ringtone or phase through a diagnostic API.
-- No internal metrics are maintained for ignored, replaced, completed, or failed requests.
-- No built-in lockout, low-battery, or fault ringtone is implemented.
-- Thread safety and ISR safety are not provided internally.
-- Acoustic characteristics are not portable across all passive buzzers and enclosures.
+- No internal metrics are maintained for accepted, ignored, completed or failed requests.
+- No lockout, low-battery or critical-fault ringtone is built in.
+- Thread and ISR safety are not provided internally.
+- The service does not recover or reinitialize failed PWM hardware.
+- Acoustic characteristics vary across buzzers and enclosures.
 
-### Possible Future Improvements
-
-Concrete future extensions may include:
-
-- semantic lockout and fault-diagnostic patterns;
-- an additional critical-fault priority level;
-- immutable pattern configuration supplied during initialization;
-- optional compile-time board-specific pattern tables;
-- diagnostic counters for accepted, ignored, replaced, completed, and failed requests;
-- a current-ringtone query for diagnostics;
-- target-specific acoustic calibration;
-- explicit low-power suspension and resume contracts;
-- automated host tests committed to the repository test suite.
-
-A queue should be introduced only if a measured product requirement needs ordered playback of stale-safe requests. The current replacement model is preferred for V1 user-interface feedback.
-
-Future extensions shall preserve:
-
-- semantic requests at the application boundary;
-- injected hardware dependencies;
-- non-blocking execution;
-- bounded runtime work;
-- explicit priority policy;
-- buzzer-off behavior after completion and failure;
-- independence from STM32 and RTOS types.
+Future extensions should preserve semantic application requests, singleton-owned runtime state, explicit composition-root injection, non-blocking execution, bounded runtime work, explicit priority policy and buzzer-off behavior after completion or failure.
 
 ---
 
