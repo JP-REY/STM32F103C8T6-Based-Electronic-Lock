@@ -365,7 +365,7 @@ This structure is private driver state and shall not be accessed or modified dir
 ```c
 typedef struct
 {
-    GPIO_Handle_t      *_gpio;
+    GPIO_Handle_t*      _gpio;
     LED_State_t         _current_state;
     LED_ActiveLevel_t   _active_level;
     LED_EffectContext_t _effect_context;
@@ -756,7 +756,7 @@ flowchart TD
     INIT_OK -->|No| ERROR[Handle initialization error]
     ERROR --> END_ERROR([Error Handling])
 
-    INIT_OK -->|Yes| CONFIG[Configure desired LED behavior]
+    INIT_OK -->|Yes| CONFIG[Configure desired<br/> LED behavior]
 
     CONFIG --> COMMAND["Select LED operation"]
     COMMAND --> ON[LED_On]
@@ -797,9 +797,9 @@ Finite effects such as `LED_EFFECT_PULSE` and `LED_EFFECT_FLASH` maintain intern
 
 ```mermaid
 flowchart TD
-    TRIGGER[LED_TriggerEffect] --> SAVE[Save current LED state and effect]
+    TRIGGER[LED_TriggerEffect] --> SAVE[Save current LED state<br/> and effect]
 
-    SAVE --> CONFIG[Configure effect interval and repeat count]
+    SAVE --> CONFIG[Configure effect interval<br/> and repeat count]
     CONFIG --> ACTIVE[Activate effect]
 
     ACTIVE --> UPDATE[LED_Update]
@@ -812,7 +812,7 @@ flowchart TD
     COUNT --> COMPLETE{Effect complete?}
 
     COMPLETE -->|No| RETURN
-    COMPLETE -->|Yes| RESTORE[Restore previous LED state and effect]
+    COMPLETE -->|Yes| RESTORE[Restore previous LED state<br/> and effect]
 
     RESTORE --> INACTIVE[Deactivate finite effect]
     INACTIVE --> RETURN
@@ -829,7 +829,16 @@ This mechanism allows a temporary effect to execute without permanently replacin
 A typical application can initialize an LED and execute a non-blocking blink effect as follows:
 
 ```c
-LED_Handle_t StatusLed;
+
+#include "Led_Driver.h"
+#include "GPIO_Platform_Interface.h"
+
+#define STATUS_LED_GPIO_PIN (15U)
+
+GPIO_Handle_t StatusLedGpio;
+LED_Handle_t  StatusLed;
+
+PGIO_Init(&StatusLedGpio, GPIOA, STATUS_LED_GPIO_PIN);
 
 LED_Init(
     &StatusLed,

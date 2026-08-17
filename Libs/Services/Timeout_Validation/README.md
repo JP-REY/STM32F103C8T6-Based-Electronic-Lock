@@ -116,15 +116,15 @@ It receives time values from an owning application or domain module and remains 
 ```mermaid
 flowchart LR
     subgraph PLATFORM["Platform Layer"]
-        TIME["Time Platform Interface<br/>monotonic timestamp source"]
+        TIME["Time Platform Interface<br/>monotonic timestamp<br/> source"]
     end
 
     subgraph APP["Application Layer"]
-        CTRL["Lock Controller<br/>timeout ownership and FSM policy"]
+        CTRL["Lock Controller<br/>timeout ownership<br/> and FSM policy"]
     end
 
     subgraph SERVICES["Domain Services"]
-        TVS["Timeout Validation Service<br/>elapsed and remaining calculations"]
+        TVS["Timeout Validation Service<br/>elapsed and remaining<br/> calculations"]
         CES["Credential Entry Service<br/>candidate session"]
         LCS["Lock Control Service<br/>bounded actuator command"]
     end

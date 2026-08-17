@@ -155,8 +155,8 @@ DRS_OpStatus_t DRS_Init(LCD_Handle_t* Lcd);
 The intended dependency direction is:
 
 ```text
-Composition Root ──injects──> Display Render Service ──uses──> LCD Driver
-Application      ─requests──> Display Render Service
+Composition Root ──── injects ───> Display Render Service ── uses ──> LCD Driver
+Application ──────── requests ──> Display Render Service
 ```
 
 The service does not depend on the Credential Entry Service, Authentication Service, Lock Controller, keyboard types, application states, STM32 HAL headers or RTOS primitives.
@@ -297,6 +297,11 @@ typedef struct
 }DRS_ScreenContent_t;
 ```
 
+| Member | Description |
+| :--- | :--- |
+| `first_line` | Pointer to the immutable, null-terminated text mapped to the LCD first row. |
+| `second_line` | Pointer to the immutable, null-terminated text mapped to the LCD second row. |
+
 `DRS_View_t` represents requested or rendered logical state:
 
 ```c
@@ -307,6 +312,11 @@ typedef struct
 
 }DRS_View_t;
 ```
+
+| Member | Description |
+| :--- | :--- |
+| `screen` | Semantic screen identifier represented by the view. |
+| `entered_digits` | Number of accepted credential positions represented by lock characters on the password-entry screen. The value has no visible effect on static feedback screens. |
 
 `DRS_Handle_t` groups the singleton runtime data:
 
@@ -320,6 +330,13 @@ typedef struct
 
 }DRS_Handle_t;
 ```
+
+| Member | Description |
+| :--- | :--- |
+| `lcd` | Borrowed pointer to the initialized LCD Driver retained after successful dependency injection. |
+| `requested_view` | Most recent logical view requested by application code and awaiting synchronization with the LCD. |
+| `rendered_view` | Last logical view successfully committed to the physical LCD. |
+| `initialized` | Indicates whether singleton initialization and the required initial rendering completed successfully. |
 
 These declarations are implementation details. They are shown here to explain behavior, not to establish an application-facing allocation contract.
 
