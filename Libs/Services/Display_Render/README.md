@@ -396,16 +396,20 @@ State-setting functions update `_requested_view` only. They do not communicate w
 
 ```mermaid
 stateDiagram-v2
+    direction LR
+
     [*] --> Requested
-    Requested --> NoIO: requested view equals rendered view
-    Requested --> FullRender: screen changed
-    Requested --> DeltaRender: password digit count changed
-    FullRender --> Synchronized: all LCD operations succeed
-    DeltaRender --> Synchronized: all LCD operations succeed
-    FullRender --> Pending: any LCD operation fails
-    DeltaRender --> Pending: any LCD operation fails
-    Pending --> Requested: next DRS_Update
-    Synchronized --> Requested: next request
+
+    Requested --> RenderDecision
+
+    RenderDecision --> Synchronized: View unchanged
+    RenderDecision --> Rendering: View changed
+
+    Rendering --> Synchronized: LCD update succeeds
+    Rendering --> Pending: LCD update fails
+
+    Pending --> Requested: Next DRS_Update
+    Synchronized --> Requested: Next DRS_Update
 ```
 
 ### 10.2 Full-Screen Rendering
