@@ -2,10 +2,11 @@
  * @file    Display_Render_Service.h
  * @brief   Public interface of the LCD Display Render Service.
  *
- * @details The Display Render Service translates semantic application screens
- *          into fixed 16x2 LCD views. The application selects a screen and, for
- *          password entry, supplies only the number of accepted digits. Raw
- *          credential digits are never received or retained by this module.
+ * @details The Display Render Service is a singleton presentation module that
+ *          translates semantic application screens into fixed 16x2 LCD views.
+ *          The application selects a screen and, for password entry, supplies
+ *          only the number of accepted digits. Raw credential digits are never
+ *          received or retained by this module.
  *
  *          The password-entry view masks every accepted digit with a custom
  *          lock character stored in LCD CGRAM. The service owns both a requested
@@ -23,8 +24,9 @@
  * @note    The current screen layout targets a 16-column, two-line display using
  *          the 5x8 character font.
  *
- * @note    One DRS_Handle_t instance shall be accessed by only one execution
- *          context at a time.
+ * @note    All mutable runtime state is private to the implementation. The
+ *          function-based API shall be accessed by only one serialized
+ *          execution context at a time.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -49,7 +51,11 @@ extern "C" {
  Macros
  **********************************************************************************************************************************/
 /**
- * @brief Maximum number of credential digits represented by lock characters.
+ * @brief   Maximum number of credential digits represented by lock characters.
+ *
+ * @details Defines the inclusive upper bound accepted by
+ *          DRS_SetEnteredDigits(). The service renders one custom lock character
+ *          for each accepted digit count position.
  */
 #define DRS_ENTRY_DIGIT_CAPACITY (6U)
 
@@ -57,70 +63,53 @@ extern "C" {
  Types
  **********************************************************************************************************************************/
 /**
- * @brief Execution status returned by Display Render Service operations.
+ * @brief   Execution status returned by Display Render Service operations.
+ *
+ * @details Reports whether the requested state change or synchronous LCD
+ *          rendering operation completed successfully.
  */
 typedef enum
 {
-    DRS_OPERATION_OK,
-    DRS_OPERATION_FAIL
+    DRS_OPERATION_OK,   /*< The requested operation completed successfully. */
+    DRS_OPERATION_FAIL  /*< The requested operation could not be completed. */
 
 }DRS_OpStatus_t;
 
 /**
- * @brief Semantic LCD screens provided by the service.
+ * @brief   Semantic LCD screens provided by the service.
+ *
+ * @details Identifies the fixed presentation views that the application may
+ *          request without supplying arbitrary display text.
+ *
+ * @note    DRS_SCREEN_COUNT is a boundary and invalid-view sentinel. It is not
+ *          a renderable screen and shall not be passed to DRS_SetScreen().
  */
 typedef enum
 {
-    DRS_SCREEN_PASSWORD_ENTRY,
-    DRS_SCREEN_ENTRY_TIMEOUT,
-    DRS_SCREEN_ENTRY_INCOMPLETE,
-    DRS_SCREEN_ACCESS_GRANTED,
-    DRS_SCREEN_ACCESS_DENIED,
-    DRS_SCREEN_COUNT
+    DRS_SCREEN_PASSWORD_ENTRY,   /*< Password prompt with dynamic lock-character progress.  */
+
+    DRS_SCREEN_ENTRY_TIMEOUT,    /*< Feedback indicating that credential entry timed out.   */
+
+    DRS_SCREEN_ENTRY_INCOMPLETE, /*< Feedback indicating that the credential is incomplete. */
+
+    DRS_SCREEN_ACCESS_GRANTED,   /*< Feedback indicating successful authentication.         */
+
+    DRS_SCREEN_ACCESS_DENIED,    /*< Feedback indicating rejected authentication.           */
+
+    DRS_SCREEN_COUNT             /*< Number of screens and invalid rendered-screen marker.  */
 
 }DRS_Screen_t;
-
-/**
- * @brief Logical display view requested or rendered by the service.
- *
- * @details EnteredDigits is visually relevant only to
- *          DRS_SCREEN_PASSWORD_ENTRY. It contains a count and never credential
- *          digit values.
- */
-typedef struct
-{
-    DRS_Screen_t Screen;
-    uint8_t      EnteredDigits;
-
-}DRS_View_t;
-
-/**
- * @brief Runtime state of one Display Render Service instance.
- *
- * @warning Members are private service state and shall not be read or modified
- *          directly by callers.
- */
-typedef struct
-{
-                                      /*< Private data. Do not read or modify!                         */
-    LCD_Handle_t* _lcd;               /*< Injected initialized LCD; ownership is not transferred.     */
-    DRS_View_t    _requested_view;    /*< Logical view most recently requested by the application.    */
-    DRS_View_t    _rendered_view;     /*< Logical view last rendered successfully to the physical LCD. */
-    bool          _initialized;       /*< Indicates whether initialization and default render passed. */
-
-}DRS_Handle_t;
 
 /**********************************************************************************************************************************
  Data
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-DRS_OpStatus_t DRS_Init             (DRS_Handle_t* Instance, LCD_Handle_t* LCD);
-DRS_OpStatus_t DRS_SetScreen        (DRS_Handle_t* Instance, DRS_Screen_t Screen);
-DRS_OpStatus_t DRS_SetEnteredDigits (DRS_Handle_t* Instance, uint8_t EnteredDigits);
-DRS_OpStatus_t DRS_Update           (DRS_Handle_t* Instance);
+DRS_OpStatus_t DRS_Init             (LCD_Handle_t* Lcd);
+DRS_OpStatus_t DRS_SetScreen        (DRS_Screen_t Screen);
+DRS_OpStatus_t DRS_SetEnteredDigits (uint8_t EnteredDigits);
+DRS_OpStatus_t DRS_Update           (void);
 
 #ifdef __cplusplus
 }

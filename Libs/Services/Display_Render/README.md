@@ -2,104 +2,89 @@
 
 <p align="left">
   <big>
-    Synchronous presentation service for rendering semantic electronic-lock<br>
+    Singleton presentation service for rendering semantic electronic-lock<br>
     screens and masked credential-entry progress on a 16x2 character LCD.
   </big>
 </p>
 
 > [!IMPORTANT]
-> The Display Render Service receives screen identifiers and an entered-digit count only. It never receives, renders, or retains raw credential digits. The application remains responsible for product-state transitions and for deciding when each screen must be requested.
+> The Display Render Service exposes a function-based API and keeps its complete runtime state private. The composition root injects one initialized `LCD_Handle_t` through `DRS_Init()`. All later operations use the retained LCD reference without requiring a public service handle.
+
+> [!CAUTION]
+> The service receives only semantic screen identifiers and an entered-digit count. It never receives, renders or retains raw credential digits.
 
 ---
 
 ## Table of Contents
 
-* [1. Overview](#1-overview)
-* [2. Features](#2-features)
-* [3. Architecture](#3-architecture)
-
-  * [3.1 Layer Placement](#31-layer-placement)
-  * [3.2 Dependency Direction](#32-dependency-direction)
-* [4. Directory Structure](#4-directory-structure)
-* [5. Responsibilities](#5-responsibilities)
-
-  * [5.1 Service Responsibilities](#51-service-responsibilities)
-  * [5.2 Explicit Non-Responsibilities](#52-explicit-non-responsibilities)
-* [6. Dependencies](#6-dependencies)
-* [7. Public Data Model](#7-public-data-model)
-
-  * [7.1 Operation Status](#71-operation-status)
-  * [7.2 Screen Identifiers](#72-screen-identifiers)
-  * [7.3 Entry Capacity](#73-entry-capacity)
-  * [7.4 Logical View](#74-logical-view)
-  * [7.5 Service Handle](#75-service-handle)
-* [8. Screen Catalog](#8-screen-catalog)
-* [9. Custom Lock Character](#9-custom-lock-character)
-* [10. Rendering Model](#10-rendering-model)
-
-  * [10.1 Requested and Rendered Views](#101-requested-and-rendered-views)
-  * [10.2 Full-Screen Rendering](#102-full-screen-rendering)
-  * [10.3 Incremental Entry Rendering](#103-incremental-entry-rendering)
-  * [10.4 Coalescing](#104-coalescing)
-  * [10.5 Failed Render Retry](#105-failed-render-retry)
-* [11. API Reference](#11-api-reference)
-
-  * [11.1 DRS_Init](#111-drs_init)
-  * [11.2 DRS_SetScreen](#112-drs_setscreen)
-  * [11.3 DRS_SetEnteredDigits](#113-drs_setentereddigits)
-  * [11.4 DRS_Update](#114-drs_update)
-* [12. Operation Flows](#12-operation-flows)
-
-  * [12.1 Initialization](#121-initialization)
-  * [12.2 Password Entry](#122-password-entry)
-  * [12.3 Screen Transition](#123-screen-transition)
-* [13. Usage Example](#13-usage-example)
-* [14. Timing and Scheduling](#14-timing-and-scheduling)
-* [15. Error Handling](#15-error-handling)
-* [16. Concurrency Model](#16-concurrency-model)
-* [17. Security Considerations](#17-security-considerations)
-* [18. Validation Checklist](#18-validation-checklist)
-* [19. Limitations](#19-limitations)
-* [20. License](#20-license)
+- [1. Purpose](#1-purpose)
+- [2. Design Intent](#2-design-intent)
+- [3. Architecture](#3-architecture)
+  - [3.1 Layer Placement](#31-layer-placement)
+  - [3.2 Singleton Ownership](#32-singleton-ownership)
+  - [3.3 Dependency Injection](#33-dependency-injection)
+- [4. Directory Structure](#4-directory-structure)
+- [5. Responsibilities](#5-responsibilities)
+- [6. Public Contract](#6-public-contract)
+  - [6.1 Operation Status](#61-operation-status)
+  - [6.2 Screen Identifiers](#62-screen-identifiers)
+  - [6.3 Entry Capacity](#63-entry-capacity)
+  - [6.4 Function-Based API](#64-function-based-api)
+- [7. Private Runtime Model](#7-private-runtime-model)
+- [8. Screen Catalog](#8-screen-catalog)
+- [9. Custom Lock Character](#9-custom-lock-character)
+- [10. Lifecycle](#10-lifecycle)
+- [11. Rendering Model](#11-rendering-model)
+  - [11.1 Requested and Rendered Views](#111-requested-and-rendered-views)
+  - [11.2 Full-Screen Rendering](#112-full-screen-rendering)
+  - [11.3 Incremental Entry Rendering](#113-incremental-entry-rendering)
+  - [11.4 Coalescing](#114-coalescing)
+  - [11.5 Render Commit and Retry](#115-render-commit-and-retry)
+- [12. API Reference](#12-api-reference)
+- [13. Composition-Root Integration](#13-composition-root-integration)
+- [14. Operation Flows](#14-operation-flows)
+- [15. Error Handling](#15-error-handling)
+- [16. Timing and Concurrency](#16-timing-and-concurrency)
+- [17. Security Considerations](#17-security-considerations)
+- [18. Validation Checklist](#18-validation-checklist)
+- [19. Limitations](#19-limitations)
+- [20. License](#20-license)
 
 ---
 
-## 1. Overview
+## 1. Purpose
 
-The Display Render Service converts semantic application requests into fixed LCD content for the electronic-lock user interface.
+The Display Render Service converts application-level presentation requests into fixed LCD content for the electronic-lock user interface.
 
-Instead of allowing the application to write arbitrary strings directly to the display, the service exposes a small screen catalog. The application selects one of those screens and calls `DRS_Update()` to synchronize the physical LCD with the requested view.
+The application does not send arbitrary strings to the LCD. It requests a semantic screen from a closed catalog, optionally supplies the number of accepted credential digits and invokes `DRS_Update()` to synchronize the physical display.
 
-During password entry, the application supplies only the number of accepted digits. The service represents each accepted digit with a custom closed-padlock character. No credential value crosses the service boundary.
+During credential entry, every accepted position is represented by a custom closed-padlock character. The service learns only the credential length; digit values never cross its public boundary.
 
-The service keeps two logical views:
-
-- The most recently requested view.
-- The last view rendered successfully on the physical display.
-
-This separation allows the service to avoid redundant LCD traffic and retry a failed operation without losing the pending request.
-
-The acronym `DRS` means **Display Render Service** and prefixes every public symbol provided by this module.
+The acronym `DRS` means **Display Render Service** and prefixes every public symbol provided by the module.
 
 ---
 
-## 2. Features
+## 2. Design Intent
 
-- Semantic screen selection through `DRS_Screen_t`.
-- Immediate default screen during initialization.
-- Fixed 16-column, two-line screen layouts.
-- Masked password-entry progress with a custom 5x8 lock character.
-- Support for zero through six entered digits.
-- Incremental addition and removal of lock characters.
-- Coalescing of unchanged views.
-- Full redraw only when the semantic screen changes.
-- Deferred rendering through `DRS_Update()`.
-- Retryable LCD failures.
-- Caller-owned service and LCD instances.
-- Static storage with no dynamic allocation.
-- No direct STM32 HAL or RTOS dependency in the service implementation.
-- No human-scale waits or screen-duration policy.
-- No raw credential storage.
+The service is intentionally designed as one module-owned singleton:
+
+- The application does not allocate a `DRS_Handle_t`.
+- No service handle is declared in the public header.
+- Requested view, rendered view, lifecycle state and LCD reference remain private to the implementation.
+- The composition root supplies the concrete LCD dependency once through `DRS_Init()`.
+- Subsequent calls operate only through the public functions.
+- All storage is static; no dynamic allocation is used.
+- Exactly one Display Render Service runtime exists in the firmware.
+
+This design fits the product topology: the electronic lock has one presentation display and one serialized application owner. It also prevents callers from reading or mutating render state directly.
+
+The public contract still exposes the types and constant required to call the functions:
+
+- `DRS_OpStatus_t` for operation results.
+- `DRS_Screen_t` for semantic screen requests.
+- `DRS_ENTRY_DIGIT_CAPACITY` for the supported credential-length boundary.
+
+It does not expose the private view, content-map or runtime-handle types.
 
 ---
 
@@ -107,16 +92,18 @@ The acronym `DRS` means **Display Render Service** and prefixes every public sym
 
 ### 3.1 Layer Placement
 
-The Display Render Service belongs to the presentation-services layer. It is controlled by the application and uses the LCD component through its public driver interface.
+The Display Render Service belongs to the presentation-services layer. The Lock Controller or another application-layer owner selects semantic content, while the service translates that request into bounded LCD driver operations.
 
 ```mermaid
 flowchart LR
     subgraph APPLICATION["Application Layer"]
+        ROOT["Composition Root"]
         CTRL["Lock Controller<br/>product-state policy"]
     end
 
-    subgraph SERVICE["Presentation Service"]
-        DRS["Display Render Service<br/>screen and render state"]
+    subgraph PRESENTATION["Presentation Service"]
+        API["DRS public functions"]
+        STATE["Private singleton state"]
     end
 
     subgraph LCDSTACK["LCD Stack"]
@@ -128,39 +115,51 @@ flowchart LR
         PWM["PWM Platform"]
     end
 
-    CTRL -->|"screen and digit count"| DRS
-    DRS -->|"bounded LCD operations"| LCD
+    ROOT -->|"initialized LCD handle"| API
+    CTRL -->|"screen and digit count"| API
+    API --> STATE
+    STATE -->|"retained LCD reference"| LCD
     LCD --> BUS --> PCF --> I2C
     LCD --> BL --> PWM
 ```
 
-The Display Render Service does not initialize the lower hardware stack. The composition root creates and initializes the PCF8574, LCD bus adapter, PWM backlight adapter, LCD driver, and service instance in dependency order.
+The service does not initialize I2C, PCF8574, LCD bus, PWM backlight or the LCD driver itself. Those dependencies are assembled and initialized before `DRS_Init()` is called.
 
-### 3.2 Dependency Direction
+### 3.2 Singleton Ownership
+
+The implementation owns one private object:
+
+```c
+static DRS_Handle_t DRS_Runtime_Instance;
+```
+
+This object contains:
+
+- The borrowed LCD pointer.
+- The most recently requested logical view.
+- The render state committed after successful LCD operations.
+- The initialization flag.
+
+Because the object has internal linkage and its type is defined only in the source file, application code cannot allocate a second instance or access its members.
+
+### 3.3 Dependency Injection
+
+The singleton pattern does not make the LCD dependency global to the application. The dependency remains explicit at the composition boundary:
+
+```c
+DRS_OpStatus_t DRS_Init(LCD_Handle_t* Lcd);
+```
+
+`DRS_Init()` borrows the pointer. It does not copy the LCD object and does not take ownership of it. The composition root remains responsible for the LCD storage and must keep that storage valid for every later DRS call.
 
 The intended dependency direction is:
 
 ```text
-Application / Lock Controller
-            |
-            v
-Display Render Service
-            |
-            v
-        LCD Driver
+Composition Root ──injects──> Display Render Service ──uses──> LCD Driver
+Application      ─requests──> Display Render Service
 ```
 
-The service does not depend on:
-
-- The Credential Entry Service.
-- The Authentication Service.
-- The Lock Controller.
-- Keyboard driver types.
-- Application state enumerations.
-- STM32 HAL headers.
-- FreeRTOS types or primitives.
-
-The application may obtain a credential length from another service and pass only that count to `DRS_SetEnteredDigits()`.
+The service does not depend on the Credential Entry Service, Authentication Service, Lock Controller, keyboard types, application states, STM32 HAL headers or RTOS primitives.
 
 ---
 
@@ -175,83 +174,55 @@ Display_Render/
 └── README.md
 ```
 
-The public header defines the screen catalog, logical view, handle, operation status, entry capacity, and service API.
+`Display_Render_Service.h` defines the public status, screen catalog, entry capacity and function prototypes.
 
-The source file owns the fixed screen strings, lock-character bitmap, render-delta logic, coalescing rules, and LCD error propagation.
+`Display_Render_Service.c` owns all runtime state, private types, the fixed screen-content map, the lock bitmap, render-delta logic, coalescing and LCD error propagation.
 
 ---
 
 ## 5. Responsibilities
 
-### 5.1 Service Responsibilities
-
 The Display Render Service is responsible for:
 
-- Owning the requested logical display view.
-- Tracking the last successfully rendered view.
-- Rendering the default password-entry screen during initialization.
+- Retaining the LCD reference injected by the composition root.
+- Owning the single requested logical display view.
+- Tracking successfully committed render state.
 - Programming the custom lock character into LCD CGRAM position zero.
+- Rendering the empty password-entry screen during initialization.
 - Mapping semantic screen identifiers to fixed two-line text.
-- Validating requested screen identifiers.
-- Validating the entered-digit count.
-- Masking credential progress using lock characters.
-- Adding only newly requested lock characters.
-- Removing only lock characters no longer requested.
-- Avoiding LCD transactions when the visible view has not changed.
-- Performing a complete redraw when the screen identifier changes.
-- Propagating LCD failures to the caller.
-- Keeping a failed render pending for a future retry.
+- Validating semantic screen identifiers.
+- Validating the requested entered-digit count.
+- Representing entered positions with lock characters.
+- Adding only newly requested lock characters when possible.
+- Clearing only mask positions that are no longer requested when possible.
+- Avoiding LCD traffic when no visible change is pending.
+- Performing a complete redraw when the semantic screen changes.
+- Returning lower-level LCD failures to the caller.
+- Leaving failed work logically pending for a later retry.
 
-### 5.2 Explicit Non-Responsibilities
+The service is explicitly not responsible for:
 
-The service is not responsible for:
-
-- Reading the keyboard.
+- Reading a keyboard.
 - Receiving or storing raw credential digits.
 - Determining whether a credential is complete.
 - Authenticating a credential.
 - Counting failed authentication attempts.
-- Applying retry or lockout policy.
+- Applying retry, timeout or lockout policy.
 - Choosing how long a feedback screen remains visible.
-- Automatically returning to the password screen after an error.
-- Deciding which application event selects a screen.
+- Automatically returning to the password-entry screen.
+- Selecting a screen from application events.
 - Controlling the lock actuator.
 - Producing LED or sound effects.
-- Initializing I2C, PCF8574, PWM, LCD bus, or LCD backlight hardware.
-- Owning a task, timer, queue, or scheduler.
-- Providing localization or runtime-editable text.
+- Initializing the LCD or its lower hardware stack.
+- Managing backlight state or brightness.
+- Owning a task, timer, queue, mutex or scheduler.
+- Providing localization or runtime-editable strings.
 
 ---
 
-## 6. Dependencies
+## 6. Public Contract
 
-The public service header includes:
-
-```c
-#include "LCD_Driver.h"
-#include "stdbool.h"
-#include "stdint.h"
-```
-
-The direct runtime dependency is one initialized `LCD_Handle_t`.
-
-The LCD handle may internally use any bus and backlight adapters compatible with the LCD driver interfaces. In the current target, the concrete stack uses:
-
-- I2C1.
-- A PCF8574 I/O expander.
-- The LCD PCF8574 bus adapter.
-- TIM4 channel 4 for backlight PWM.
-- The LCD PWM backlight adapter.
-
-Those concrete devices are composition-root concerns and are not accessed directly by the Display Render Service.
-
-For complete LCD-stack initialization details, see the [LCD Driver README](../../Components/LCD/README.md).
-
----
-
-## 7. Public Data Model
-
-### 7.1 Operation Status
+### 6.1 Operation Status
 
 ```c
 typedef enum
@@ -262,11 +233,11 @@ typedef enum
 }DRS_OpStatus_t;
 ```
 
-`DRS_OPERATION_OK` means that the requested API operation completed successfully. For `DRS_Update()`, it also means that the physical view is current or no render was necessary.
+`DRS_OPERATION_OK` indicates that the requested state operation completed, or that the physical display was already current or was updated successfully.
 
-`DRS_OPERATION_FAIL` reports an invalid argument, invalid lifecycle state, unsupported value, or lower-level LCD failure.
+`DRS_OPERATION_FAIL` reports an invalid lifecycle condition, unsupported value, missing LCD binding or lower-level LCD failure, depending on the called function.
 
-### 7.2 Screen Identifiers
+### 6.2 Screen Identifiers
 
 ```c
 typedef enum
@@ -281,77 +252,102 @@ typedef enum
 }DRS_Screen_t;
 ```
 
-`DRS_SCREEN_COUNT` is an internal boundary and sentinel value. It does not identify a renderable screen and shall not be passed to `DRS_SetScreen()`.
+`DRS_SCREEN_COUNT` serves two private implementation needs:
 
-### 7.3 Entry Capacity
+- It defines the screen-content map size.
+- It represents an invalid rendered-screen marker during initialization.
+
+It is not a renderable screen. `DRS_SetScreen(DRS_SCREEN_COUNT)` returns `DRS_OPERATION_FAIL`.
+
+### 6.3 Entry Capacity
 
 ```c
 #define DRS_ENTRY_DIGIT_CAPACITY (6U)
 ```
 
-The accepted digit count is in the inclusive range from `0U` through `DRS_ENTRY_DIGIT_CAPACITY`.
+`DRS_SetEnteredDigits()` accepts values in the inclusive range from `0U` through `DRS_ENTRY_DIGIT_CAPACITY`.
 
-The value represents the number of accepted credential digits, not their values. A request greater than six fails and does not change the requested view.
+The value represents the number of accepted credential digits, not their values. A count greater than six is rejected without changing the requested count.
 
-### 7.4 Logical View
+### 6.4 Function-Based API
+
+```c
+DRS_OpStatus_t DRS_Init             (LCD_Handle_t* Lcd);
+DRS_OpStatus_t DRS_SetScreen        (DRS_Screen_t Screen);
+DRS_OpStatus_t DRS_SetEnteredDigits (uint8_t EnteredDigits);
+DRS_OpStatus_t DRS_Update           (void);
+```
+
+There is no public `DRS_Handle_t`, getter for private render state or instance parameter on state-setting and update functions.
+
+---
+
+## 7. Private Runtime Model
+
+The implementation defines three private types.
+
+`DRS_ScreenContent_t` groups the two fixed strings associated with a semantic screen:
 
 ```c
 typedef struct
 {
-    DRS_Screen_t Screen;
-    uint8_t      EnteredDigits;
+    const char* first_line;
+    const char* second_line;
+
+}DRS_ScreenContent_t;
+```
+
+`DRS_View_t` represents requested or rendered logical state:
+
+```c
+typedef struct
+{
+    DRS_Screen_t screen;
+    uint8_t      entered_digits;
 
 }DRS_View_t;
 ```
 
-`Screen` identifies the semantic view. `EnteredDigits` affects physical output only while `Screen` is `DRS_SCREEN_PASSWORD_ENTRY`.
-
-The field can still be updated while a static feedback screen is selected. That update produces no LCD transaction until the password-entry screen is requested again.
-
-### 7.5 Service Handle
+`DRS_Handle_t` groups the singleton runtime data:
 
 ```c
 typedef struct
 {
-    LCD_Handle_t* _lcd;
-    DRS_View_t    _requested_view;
-    DRS_View_t    _rendered_view;
-    bool          _initialized;
+    LCD_Handle_t* lcd;
+    DRS_View_t    requested_view;
+    DRS_View_t    rendered_view;
+    bool          initialized;
 
 }DRS_Handle_t;
 ```
 
-The handle is caller-owned and must remain valid for the entire service lifetime.
+These declarations are implementation details. They are shown here to explain behavior, not to establish an application-facing allocation contract.
 
-Members prefixed with `_` are private implementation state. Callers shall not read or modify them directly. State changes must be requested through the public API.
-
-The injected LCD remains owned by the caller and must also remain valid for the entire service lifetime.
+Before `DRS_Init()`, static initialization leaves `lcd` null and `initialized` false. Successful initialization binds the LCD, establishes the empty password-entry request and renders that request immediately.
 
 ---
 
 ## 8. Screen Catalog
 
-The current screen map is fixed at compile time:
+The screen-content map is fixed at compile time:
 
 | Screen | First line | Second line | Dynamic content |
 | --- | --- | --- | --- |
-| `DRS_SCREEN_PASSWORD_ENTRY` | `Insert Password:` | Empty initially | Zero through six lock characters from column zero |
+| `DRS_SCREEN_PASSWORD_ENTRY` | `Insert Password:` | Empty before masking | Zero through six lock characters from column zero |
 | `DRS_SCREEN_ENTRY_TIMEOUT` | `Entry Timeout` | Empty | None |
-| `DRS_SCREEN_ENTRY_INCOMPLETE` | `Entry Incomplete` | `      Try Again!` | None |
+| `DRS_SCREEN_ENTRY_INCOMPLETE` | `Entry Incomplete` | Empty | None |
 | `DRS_SCREEN_ACCESS_GRANTED` | `Access Granted` | `Welcome!` | None |
-| `DRS_SCREEN_ACCESS_DENIED` | `Access Denied` | `      Try Again!` | None |
+| `DRS_SCREEN_ACCESS_DENIED` | `Access Denied!` | Empty | None |
 
-The six leading spaces before `Try Again!` place the ten-character text at the right side of the 16-column second line.
+A full-screen transition clears the display before printing both mapped lines. The clear prevents shorter or intentionally empty content from leaving characters from the preceding screen.
 
-Every full-screen transition clears the LCD before writing both lines. This guarantees that shorter strings and intentionally empty lines do not leave characters from the previous view behind.
+Only the password-entry screen renders `entered_digits`. The four feedback screens ignore digit-count differences while they remain selected.
 
 ---
 
 ## 9. Custom Lock Character
 
-The service programs one 5x8 character into LCD CGRAM position zero during `DRS_Init()`.
-
-Bitmap bytes:
+`DRS_Init()` programs one 5x8 character into CGRAM position zero:
 
 ```c
 static const uint8_t DRS_LockCharacterBitmap[8] =
@@ -380,425 +376,409 @@ Visual representation, where `#` is an enabled pixel:
 .....
 ```
 
-The service owns CGRAM position zero while it is active. Other modules shall not overwrite that position without coordinating with the service.
+Password-entry progress is rendered by writing custom-character code zero. The service never converts a credential digit to ASCII and never sends the credential value to the LCD.
 
-Password-entry progress is rendered by writing custom-character code zero, not an ASCII digit or masking symbol.
+CGRAM position zero is reserved by the service after initialization. Another module must not overwrite that position while the service is responsible for the display.
 
 ---
 
-## 10. Rendering Model
+## 10. Lifecycle
 
-### 10.1 Requested and Rendered Views
+The expected lifecycle is:
 
-State-setting functions update `_requested_view` only. They do not communicate with the LCD.
+1. The composition root allocates and initializes the complete LCD stack.
+2. The composition root calls `DRS_Init(&Lcd)` once the LCD is ready.
+3. `DRS_Init()` resets all singleton view state.
+4. The service programs the custom lock character.
+5. The service renders the empty password-entry screen immediately.
+6. The application submits screen and digit-count requests through public functions.
+7. The application calls `DRS_Update()` to apply pending visible changes.
 
-`DRS_Update()` compares `_requested_view` with `_rendered_view` and performs only the operations required to synchronize them.
+There is no public deinitialization function. Calling `DRS_Init()` again rebinds the singleton to the supplied LCD, resets both views and renders the default screen again.
+
+If initialization fails, the implementation clears its retained LCD pointer. A later `DRS_Update()` therefore fails until a subsequent `DRS_Init()` succeeds.
+
+`DRS_SetScreen()` validates only the screen identifier and does not check the initialization flag. A valid call made before initialization can update the zero-initialized private request, but the next `DRS_Init()` resets that request to `DRS_SCREEN_PASSWORD_ENTRY`. Normal integration therefore initializes the service before submitting any screen request.
+
+`DRS_SetEnteredDigits()` explicitly requires successful initialization.
+
+---
+
+## 11. Rendering Model
+
+### 11.1 Requested and Rendered Views
+
+State-setting functions write only the private requested view. They do not communicate with the LCD.
+
+`DRS_Update()` compares the requested view with the private rendered view:
+
+- A different screen identifier requires a full-screen render.
+- Matching password-entry screens with different digit counts require an incremental render.
+- Matching static screens require no render even if their stored digit counts differ.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-
-    [*] --> Requested
-
-    Requested --> RenderDecision
-
-    RenderDecision --> Synchronized: View unchanged
-    RenderDecision --> Rendering: View changed
-
-    Rendering --> Synchronized: LCD update succeeds
-    Rendering --> Pending: LCD update fails
-
-    Pending --> Requested: Next DRS_Update
-    Synchronized --> Requested: Next DRS_Update
+flowchart TD
+    CALL["DRS_Update()"] --> LCD{"LCD reference available?"}
+    LCD -->|"No"| FAIL["DRS_OPERATION_FAIL"]
+    LCD -->|"Yes"| SCREEN{"Requested screen<br/> changed?"}
+    SCREEN -->|"Yes"| FULL["Render full requested <br/>screen"]
+    SCREEN -->|"No"| ENTRY{"Password screen and<br/> digit count changed?"}
+    ENTRY -->|"No"| OK["DRS_OPERATION_OK<br/>no LCD traffic"]
+    ENTRY -->|"Yes"| DELTA["Render entry delta"]
+    FULL --> COMMITSCREEN["Commit rendered screen"]
+    DELTA --> COMMITDIGITS["Commit rendered<br/> digit count"]
+    COMMITSCREEN --> OK
+    COMMITDIGITS --> OK
 ```
 
-### 10.2 Full-Screen Rendering
+### 11.2 Full-Screen Rendering
 
-A semantic screen change performs the following bounded sequence:
+When the requested screen differs from the rendered screen, `DRS_Update()` performs this sequence:
 
-1. Clear the LCD.
-2. Print the configured first line.
-3. Print the configured second line.
-4. If the requested screen is password entry, draw the requested number of locks.
-5. Commit the requested view as the rendered view only after every operation succeeds.
+1. Resolve the requested screen in `DRS_ScreenContentMap`.
+2. Reject the map entry if either text pointer is null.
+3. Clear the LCD.
+4. Print the mapped first line on row zero.
+5. Print the mapped second line on row one.
+6. If password entry is requested, draw all requested locks from column zero.
+7. Commit the rendered screen identifier after every required operation succeeds.
 
-Full-screen rendering is used even when two screens share some text. Semantic screen transitions are infrequent and clearing first guarantees deterministic content.
+The implementation commits the rendered screen identifier in this path. The rendered digit count is committed by the incremental path. Consequently, if the requested digit count changed while a static screen was active, returning to password entry renders the correct full lock sequence immediately, and a later `DRS_Update()` may perform a redundant digit-delta operation before both private counters converge.
 
-### 10.3 Incremental Entry Rendering
+### 11.3 Incremental Entry Rendering
 
-When the password-entry screen remains active and only the digit count changes, the service avoids a complete redraw.
+When password entry remains selected and only the count changes, the service avoids clearing and rewriting the complete display.
 
-If the count increases, the service:
+For an increase from `rendered_digits` to `requested_digits`, it:
 
-1. Positions the cursor at the first newly requested column.
-2. Writes only the additional lock characters.
+1. Sets the cursor to row one and column `rendered_digits`.
+2. Writes one lock for every position in `[rendered_digits, requested_digits)`.
 
-For example, changing from two digits to five writes three lock characters at columns two, three, and four.
+For a decrease, it:
 
-If the count decreases, the service:
+1. Sets the cursor to row one and column `requested_digits`.
+2. Writes a space for every position in `[requested_digits, rendered_digits)`.
 
-1. Positions the cursor at the new end of the entered sequence.
-2. Overwrites only the removed lock positions with spaces.
+An empty range succeeds without an LCD transaction. A reversed range or a range ending above `DRS_ENTRY_DIGIT_CAPACITY` is rejected by the private range helpers.
 
-For example, changing from five digits to two writes three spaces at columns two, three, and four.
+### 11.4 Coalescing
 
-### 10.4 Coalescing
+Repeated `DRS_Update()` calls produce no LCD transaction when:
 
-Repeated calls to `DRS_Update()` perform no LCD transactions when:
+- Requested and rendered screen identifiers match; and
+- The selected screen is static, or the password-entry digit counts also match.
 
-- The requested and rendered screen identifiers match; and
-- The active screen is not password entry, or its requested and rendered digit counts match.
+This allows the application to call `DRS_Update()` periodically or after each presentation request without continuously retransmitting unchanged content over I2C.
 
-Digit-count changes while a static feedback screen is active are logically retained but do not produce output because those screens do not display entry progress.
+### 11.5 Render Commit and Retry
 
-### 10.5 Failed Render Retry
+The service commits corresponding rendered state only after the associated LCD sequence succeeds:
 
-The rendered view is updated only after every required LCD operation succeeds.
+- A successful full-screen render commits `rendered_view.screen`.
+- A successful incremental entry render commits `rendered_view.entered_digits`.
+- A failed operation returns before that commit.
 
-If an I2C or LCD operation fails:
-
-- `DRS_Update()` returns `DRS_OPERATION_FAIL`.
-- The requested view remains unchanged.
-- The rendered view is not committed.
-- A later `DRS_Update()` retries the pending render.
-
-A partial physical write may have occurred before the failure. The retry may therefore repeat some already completed LCD operations. Repetition is intentional and converges the display toward the requested view.
+Physical LCD operations are not transactional. A failure may occur after a clear, line write or part of a lock sequence has already reached the device. Because the logical commit is withheld, a later `DRS_Update()` repeats the pending operation and drives the display back toward the requested state.
 
 ---
 
-## 11. API Reference
+## 12. API Reference
 
-### 11.1 DRS_Init
+### `DRS_Init`
 
 ```c
-DRS_OpStatus_t DRS_Init(
-    DRS_Handle_t* Instance,
-    LCD_Handle_t* LCD
-);
+DRS_OpStatus_t DRS_Init(LCD_Handle_t* Lcd);
 ```
 
-Initializes one service instance.
+Initializes or reinitializes the singleton.
 
 Behavior:
 
-- Stores the caller-owned LCD reference.
-- Selects `DRS_SCREEN_PASSWORD_ENTRY` with zero entered digits.
-- Programs the lock character into CGRAM position zero.
-- Immediately renders the default view.
-- Marks the service initialized only when setup and default rendering succeed.
+- Retains the caller-owned LCD pointer.
+- Requests `DRS_SCREEN_PASSWORD_ENTRY` with zero entered digits.
+- Marks the rendered screen with `DRS_SCREEN_COUNT` so a full render is required.
+- Resets the rendered digit count to zero.
+- Programs the closed-padlock character in CGRAM position zero.
+- Marks the service initialized after character creation succeeds.
+- Calls `DRS_Update()` and renders the default screen before returning.
+- Clears the retained LCD pointer if character creation or default rendering fails.
 
 Preconditions:
 
-- `Instance` is non-null.
-- `LCD` is non-null.
-- The LCD driver and its bus and backlight interfaces have already been initialized.
-- The LCD uses a 16x2 layout with the 5x8 character font.
+- `Lcd` points to a caller-owned LCD object that remains valid after the call.
+- The LCD driver, bus and backlight interfaces have already been initialized.
+- The configured display supports the required 16x2 layout and 5x8 font.
 
 Returns:
 
-- `DRS_OPERATION_OK` when the lock character and default view are rendered successfully.
-- `DRS_OPERATION_FAIL` for an invalid pointer or any LCD failure.
+- `DRS_OPERATION_OK` when the lock character and default screen are rendered successfully.
+- `DRS_OPERATION_FAIL` when the LCD pointer is null, the LCD is not initialized or a required LCD operation fails.
 
-### 11.2 DRS_SetScreen
-
-```c
-DRS_OpStatus_t DRS_SetScreen(
-    DRS_Handle_t* Instance,
-    DRS_Screen_t Screen
-);
-```
-
-Stores a semantic screen request.
-
-The function does not access the LCD. The application must call `DRS_Update()` to render the new screen.
-
-Returns `DRS_OPERATION_FAIL` when:
-
-- `Instance` is null.
-- The service is not initialized.
-- `Screen` is not a renderable value.
-- `Screen` is `DRS_SCREEN_COUNT`.
-
-### 11.3 DRS_SetEnteredDigits
+### `DRS_SetScreen`
 
 ```c
-DRS_OpStatus_t DRS_SetEnteredDigits(
-    DRS_Handle_t* Instance,
-    uint8_t EnteredDigits
-);
+DRS_OpStatus_t DRS_SetScreen(DRS_Screen_t Screen);
 ```
 
-Stores the requested masked-entry length.
+Stores a semantic screen in the requested view without accessing the LCD.
 
-The function accepts values from `0U` through `DRS_ENTRY_DIGIT_CAPACITY`. It does not receive a pointer to credential data and performs no LCD transaction.
+Returns:
 
-The application must call `DRS_Update()` to apply the new count.
+- `DRS_OPERATION_OK` for values from `DRS_SCREEN_PASSWORD_ENTRY` through `DRS_SCREEN_ACCESS_DENIED`.
+- `DRS_OPERATION_FAIL` for `DRS_SCREEN_COUNT`, negative enumeration values or values above the screen boundary.
 
-Returns `DRS_OPERATION_FAIL` when:
+The function does not validate the initialization flag. The expected lifecycle still requires `DRS_Init()` first because initialization resets the request and supplies the LCD used by `DRS_Update()`.
 
-- `Instance` is null.
-- The service is not initialized.
-- `EnteredDigits` is greater than six.
-
-### 11.4 DRS_Update
+### `DRS_SetEnteredDigits`
 
 ```c
-DRS_OpStatus_t DRS_Update(
-    DRS_Handle_t* Instance
-);
+DRS_OpStatus_t DRS_SetEnteredDigits(uint8_t EnteredDigits);
 ```
 
-Synchronizes the physical LCD with the most recently requested view.
+Stores the requested masked-entry length without accessing the LCD or receiving credential values.
+
+Returns:
+
+- `DRS_OPERATION_OK` when the service is initialized and `EnteredDigits` is from zero through six.
+- `DRS_OPERATION_FAIL` when initialization has not completed or the count exceeds `DRS_ENTRY_DIGIT_CAPACITY`.
+
+The application calls `DRS_Update()` to make the accepted request visible. While a static feedback screen is selected, the count is retained but does not itself trigger an LCD operation.
+
+### `DRS_Update`
+
+```c
+DRS_OpStatus_t DRS_Update(void);
+```
+
+Synchronizes the retained LCD with the requested logical view.
 
 Possible outcomes:
 
-- No change: returns successfully without LCD transactions.
-- Screen change: performs a full-screen render.
-- Password length increase: writes only new locks.
-- Password length decrease: clears only removed locks.
-- LCD failure: returns failure and leaves the request pending.
+- Missing retained LCD: return failure.
+- Unchanged visible view: return success without LCD traffic.
+- Screen change: render the complete requested screen.
+- Password count increase: write only additional locks.
+- Password count decrease: overwrite only removed locks with spaces.
+- LCD failure: return failure without committing the corresponding rendered state.
 
-Returns `DRS_OPERATION_FAIL` when the instance is null, uninitialized, missing its LCD reference, or a required LCD operation fails.
-
----
-
-## 12. Operation Flows
-
-### 12.1 Initialization
-
-```mermaid
-sequenceDiagram
-    participant APP as Composition Root
-    participant LCD as Initialized LCD Driver
-    participant DRS as Display Render Service
-
-    APP->>DRS: DRS_Init(instance, lcd)
-    DRS->>LCD: LCD_CreateChar(position 0, lock bitmap)
-    DRS->>LCD: LCD_Clear()
-    DRS->>LCD: LCD_PrintLine(0, "Insert Password:")
-    DRS->>LCD: LCD_PrintLine(1, "")
-    DRS-->>APP: DRS_OPERATION_OK
-```
-
-After successful initialization, the physical display already shows the empty default password-entry screen. An additional initial `DRS_Update()` is optional and produces no LCD transaction.
-
-### 12.2 Password Entry
-
-```mermaid
-sequenceDiagram
-    participant APP as Application
-    participant DRS as Display Render Service
-    participant LCD as LCD Driver
-
-    APP->>DRS: DRS_SetEnteredDigits(1)
-    DRS-->>APP: request stored
-    APP->>DRS: DRS_Update()
-    DRS->>LCD: cursor row 1, column 0
-    DRS->>LCD: write lock character
-
-    APP->>DRS: DRS_SetEnteredDigits(2)
-    APP->>DRS: DRS_Update()
-    DRS->>LCD: cursor row 1, column 1
-    DRS->>LCD: write lock character
-```
-
-Only accepted-entry count changes should be forwarded. Raw key values and raw candidate digits shall never be passed to the display layer.
-
-### 12.3 Screen Transition
-
-The application selects the semantic screen and then updates the renderer:
-
-```c
-if(DRS_SetScreen(&Display, DRS_SCREEN_ACCESS_GRANTED) == DRS_OPERATION_OK)
-{
-    (void)DRS_Update(&Display);
-}
-```
-
-The service does not automatically return to password entry. After the application-owned feedback duration expires, the application explicitly requests `DRS_SCREEN_PASSWORD_ENTRY`.
+The function is synchronous and does not accept an instance or LCD parameter.
 
 ---
 
-## 13. Usage Example
+## 13. Composition-Root Integration
 
-The lower LCD stack must already be initialized before the service is created. The following example focuses on service usage:
+The root composition owns the concrete LCD object and passes its address only during DRS initialization:
 
 ```c
 #include "Display_Render_Service.h"
 
-static LCD_Handle_t LCD;
-static DRS_Handle_t Display;
+static LCD_Handle_t Lcd;
 
-static bool Display_Init(void)
+static bool DisplayComposition_Init(void)
 {
     /*
-     * Initialize I2C, PCF8574, LCD bus, PWM backlight, and LCD first.
-     * The concrete target uses TIM4 channel 4 for backlight PWM.
+     * Configure and initialize I2C, PCF8574, LCD bus, PWM backlight
+     * and the LCD driver before initializing the render service.
      */
 
-    return DRS_Init(&Display, &LCD) == DRS_OPERATION_OK;
-}
-
-static bool Display_ShowEntryLength(uint8_t EnteredDigits)
-{
-    if(DRS_SetEnteredDigits(&Display, EnteredDigits) != DRS_OPERATION_OK)
+    if(LCD_Init(&Lcd) != LCD_OPERATION_OK)
     {
         return false;
     }
 
-    return DRS_Update(&Display) == DRS_OPERATION_OK;
+    return DRS_Init(&Lcd) == DRS_OPERATION_OK;
+}
+```
+
+No `DRS_Handle_t` is allocated in the composition root. Once initialization succeeds, presentation requests use only service functions:
+
+```c
+static bool Display_ShowEntryLength(uint8_t EnteredDigits)
+{
+    if(DRS_SetEnteredDigits(EnteredDigits) != DRS_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return DRS_Update() == DRS_OPERATION_OK;
 }
 
 static bool Display_ShowScreen(DRS_Screen_t Screen)
 {
-    if(DRS_SetScreen(&Display, Screen) != DRS_OPERATION_OK)
+    if(DRS_SetScreen(Screen) != DRS_OPERATION_OK)
     {
         return false;
     }
 
-    return DRS_Update(&Display) == DRS_OPERATION_OK;
+    return DRS_Update() == DRS_OPERATION_OK;
 }
 ```
 
-Typical application use:
+Typical application calls:
 
 ```c
 /* One credential digit was accepted by the entry policy. */
 (void)Display_ShowEntryLength(1U);
 
-/* Confirmation was requested before all six digits were entered. */
+/* Confirmation occurred before the complete credential was entered. */
 (void)Display_ShowScreen(DRS_SCREEN_ENTRY_INCOMPLETE);
 
-/* The application later starts a fresh entry view. */
-(void)DRS_SetEnteredDigits(&Display, 0U);
+/* The application later starts a fresh password-entry presentation. */
+(void)DRS_SetEnteredDigits(0U);
 (void)Display_ShowScreen(DRS_SCREEN_PASSWORD_ENTRY);
 ```
 
-Production application code should propagate and handle every returned status according to the system fault policy rather than discarding it as the concise example does.
+Production application code should handle every returned status according to the system fault policy.
 
 ---
 
-## 14. Timing and Scheduling
+## 14. Operation Flows
 
-`DRS_SetScreen()` and `DRS_SetEnteredDigits()` update memory only and complete in bounded time.
+### Initialization
 
-`DRS_Update()` is synchronous. It returns only after all required LCD operations for that update have completed or one of them has failed.
+```mermaid
+sequenceDiagram
+    participant ROOT as Composition Root
+    participant LCD as Initialized LCD Driver
+    participant DRS as DRS Singleton
 
-The service itself does not call `HAL_Delay()`, sleep, schedule a timer, or hold a feedback screen for a product-visible duration. Any short controller-command timing required by the LCD driver remains a lower-layer concern.
+    ROOT->>DRS: DRS_Init(&Lcd)
+    DRS->>DRS: Reset private requested/rendered state
+    DRS->>LCD: LCD_CreateChar(0, lock bitmap)
+    DRS->>DRS: initialized = true
+    DRS->>LCD: LCD_Clear()
+    DRS->>LCD: LCD_PrintLine(0, "Insert Password:")
+    DRS->>LCD: LCD_PrintLine(1, "")
+    DRS->>DRS: Commit rendered screen
+    DRS-->>ROOT: DRS_OPERATION_OK
+```
 
-The intended application pattern is:
+After successful initialization, the physical LCD already shows the empty password-entry screen. An immediate extra `DRS_Update()` performs no LCD transaction.
 
-1. Store any new semantic screen or digit-count request.
-2. Call `DRS_Update()` from the serialized application execution context.
-3. Continue normal application processing after the bounded LCD operation returns.
+### Password Entry
 
-Calling `DRS_Update()` periodically is supported because unchanged views are coalesced. A new update is also appropriate immediately after a user-interface request when synchronous rendering is desired.
+```mermaid
+sequenceDiagram
+    participant APP as Application
+    participant DRS as DRS Singleton
+    participant LCD as LCD Driver
 
-Human-scale durations such as keeping `Access Granted` visible for two seconds belong to the application state machine and timeout policy, not to this service.
+    APP->>DRS: DRS_SetEnteredDigits(1)
+    DRS-->>APP: Request stored
+    APP->>DRS: DRS_Update()
+    DRS->>LCD: Set cursor to row 1, column 0
+    DRS->>LCD: Write lock character 0
+    DRS->>DRS: Commit rendered digit count = 1
+
+    APP->>DRS: DRS_SetEnteredDigits(2)
+    APP->>DRS: DRS_Update()
+    DRS->>LCD: Set cursor to row 1, column 1
+    DRS->>LCD: Write lock character 0
+    DRS->>DRS: Commit rendered digit count = 2
+```
+
+### Screen Transition
+
+```c
+if(DRS_SetScreen(DRS_SCREEN_ACCESS_GRANTED) == DRS_OPERATION_OK)
+{
+    (void)DRS_Update();
+}
+```
+
+The service does not automatically return to password entry. The application owns the feedback duration and explicitly requests `DRS_SCREEN_PASSWORD_ENTRY` when its product state changes.
 
 ---
 
 ## 15. Error Handling
 
-The service rejects invalid usage without intentionally changing the requested view.
+Initialization returns `DRS_OPERATION_FAIL` when:
 
-Initialization fails when:
-
-- The service handle is null.
-- The LCD handle is null.
+- The supplied LCD pointer is null.
+- The LCD component is not initialized.
 - The lock character cannot be programmed.
-- The default screen cannot be rendered.
+- Clearing or printing the default screen fails.
 
-Screen selection fails when:
+After an initialization failure, the retained LCD pointer is null and `initialized` is false.
 
-- The service is uninitialized.
-- The screen identifier is outside the valid catalog.
+Screen selection returns failure only when the screen identifier is not renderable. It leaves the prior requested screen unchanged.
 
-Entry-length selection fails when:
+Digit-count selection returns failure when the service is not initialized or the count exceeds capacity. It leaves the prior requested count unchanged.
 
-- The service is uninitialized.
-- The requested count exceeds `DRS_ENTRY_DIGIT_CAPACITY`.
-
-Rendering fails when any required LCD operation fails, including:
+Rendering returns failure when no LCD is retained or any required LCD operation fails, including:
 
 - Clearing the display.
 - Positioning the cursor.
 - Printing either line.
-- Writing a custom lock character.
+- Writing a lock character.
 - Clearing a removed lock position.
 
-After an update failure, the application may call `DRS_Update()` again. The service retains the pending requested view because it commits rendered state only after a completely successful update.
-
-Repeated failures should be escalated to the application fault policy. The service does not reset I2C, reinitialize the LCD, or select a degraded screen automatically.
+After an update failure, the application may call `DRS_Update()` again. The service does not reset I2C, reinitialize the LCD, select a fallback screen or implement escalation policy internally.
 
 ---
 
-## 16. Concurrency Model
+## 16. Timing and Concurrency
 
-One `DRS_Handle_t` instance shall be accessed by only one serialized execution context at a time.
+`DRS_SetScreen()` and `DRS_SetEnteredDigits()` update private memory only and complete in bounded time.
 
-The service does not provide:
+`DRS_Init()` and `DRS_Update()` are synchronous. They return after all required LCD operations finish or the first failure is detected. Any controller-level microsecond or millisecond command timing remains an LCD driver concern.
 
-- Mutexes.
-- Critical sections.
-- Atomic request updates.
-- Interrupt-safe APIs.
-- Internal message queues.
+The service does not call a human-scale delay, sleep, schedule a timer or retain a feedback screen for a product-defined duration.
 
-Concurrent calls from multiple tasks, or calls from both task and interrupt context, require external serialization and are not part of the V1 contract.
+The singleton is not internally thread-safe. It provides no mutex, critical section, atomic request transaction, interrupt-safe API or message queue. All calls must be serialized by one application execution context.
 
-The intended owner is the Application Task through the Lock Controller. Other services shall not write directly to the same LCD while the Display Render Service owns it.
+Concurrent access from multiple tasks, or mixed task and interrupt access, requires external serialization and is outside the V1 contract. Other modules must not write directly to the same LCD while the Display Render Service owns its presentation.
 
 ---
 
 ## 17. Security Considerations
 
-The display is an externally observable interface. Credential data must not be exposed through it.
+The LCD is an externally observable interface, so credential values must not reach the presentation layer.
 
-The integration shall follow these rules:
+Integration rules:
 
-- Pass only the accepted credential length to `DRS_SetEnteredDigits()`.
+- Pass only accepted credential length to `DRS_SetEnteredDigits()`.
 - Never format raw credential digits into LCD strings.
-- Never add an API that accepts a raw credential buffer merely for masking.
-- Do not log the candidate credential while preparing a display request.
-- Clear or replace the entry view when the credential-entry session ends.
-- Keep authentication results semantic; do not reveal which credential position was incorrect.
-- Treat LCD or I2C failures as recoverable presentation faults without relaxing authentication policy.
+- Do not add a display API that accepts a credential buffer merely to mask it.
+- Do not log credential values while preparing a display request.
+- Keep authentication results semantic and do not reveal which position failed.
+- Clear or replace the entry presentation when the application ends a session.
+- Treat an LCD fault as a presentation fault; never relax authentication or lock policy because rendering failed.
 
-The lock icons reveal the number of entered digits. This is intentional progress feedback in the current product model. If hiding credential length becomes a product requirement, the presentation contract must be revised explicitly.
+The lock icons intentionally reveal how many digits have been entered. If credential-length concealment becomes a requirement, the public presentation contract must change explicitly.
 
 ---
 
 ## 18. Validation Checklist
 
-Minimum service validation includes:
+Recommended validation covers:
 
-- Null service and LCD pointers are rejected during initialization.
-- An initialized 16x2 LCD produces the default `Insert Password:` screen.
-- The default second line is empty.
-- CGRAM position zero receives the expected eight-byte lock bitmap.
-- A repeated `DRS_Update()` after initialization produces no LCD transaction.
-- Every valid screen identifier is accepted.
-- `DRS_SCREEN_COUNT` and out-of-range identifiers are rejected.
-- Entered-digit counts from zero through six are accepted.
-- A count greater than six is rejected without changing the pending view.
-- Increasing from zero to one digit writes exactly one lock.
-- Increasing from one to three digits writes exactly two additional locks.
-- Decreasing from three to one digit clears exactly two positions.
-- Switching screens clears stale content before printing the new view.
-- `Entry Timeout` renders an empty second line.
-- `Entry Incomplete` renders `Try Again!` on the second line.
+- A null LCD pointer is rejected by `DRS_Init()` through the LCD driver failure path.
+- An uninitialized LCD is rejected.
+- Successful initialization programs CGRAM position zero.
+- Successful initialization renders `Insert Password:` with an empty second line.
+- An immediate repeated `DRS_Update()` produces no LCD transaction.
+- Every renderable screen identifier is accepted.
+- `DRS_SCREEN_COUNT` and out-of-range screen values are rejected.
+- A valid pre-initialization screen request is accepted but reset by `DRS_Init()`.
+- `DRS_SetEnteredDigits()` fails before successful initialization.
+- Counts from zero through six are accepted after initialization.
+- A count above six is rejected without changing the pending count.
+- Increasing from zero to one writes exactly one lock.
+- Increasing from one to three writes only two additional locks.
+- Decreasing from three to one clears only two positions.
+- A screen change clears stale content before printing the new view.
+- `Entry Timeout`, `Entry Incomplete` and `Access Denied!` render empty second lines.
 - `Access Granted` renders `Welcome!` on the second line.
-- `Access Denied` renders `Try Again!` on the second line.
-- Changing the digit count while a static screen is active performs no LCD transaction.
-- Returning to password entry renders the latest requested digit count.
-- An LCD failure returns `DRS_OPERATION_FAIL`.
-- A failed render is retried on the next `DRS_Update()`.
-- A successful retry updates the rendered-view state.
-- No API accepts or exposes a raw credential digit or buffer.
+- Digit-count changes on a static screen do not trigger LCD traffic by themselves.
+- Returning to password entry renders the latest requested count.
+- A lower-level failure returns `DRS_OPERATION_FAIL`.
+- A failed full render remains pending for the next update.
+- A failed entry delta remains pending for the next update.
+- No public service handle or raw credential buffer is exposed.
 - The complete firmware builds with the service source included.
 
-These cases can be exercised with a host-side fake LCD and a target smoke test that cycles through all semantic screens.
+Host-side tests can use an LCD fake to count operations, inject failures and verify the exact full-render and delta sequences. Target smoke tests can verify the physical 5x8 lock glyph and every semantic screen.
 
 ---
 
@@ -806,24 +786,25 @@ These cases can be exercised with a host-side fake LCD and a target smoke test t
 
 Current V1 limitations include:
 
+- Exactly one Display Render Service runtime is supported.
 - The layout is fixed to a 16x2 character LCD.
-- The lock bitmap assumes the 5x8 character font.
-- CGRAM position zero is reserved by the service.
-- The entry capacity is fixed at six digits.
+- The lock bitmap assumes the 5x8 font.
+- CGRAM position zero is reserved.
+- Entry capacity is fixed at six digits.
 - Screen text is fixed in English at compile time.
 - Only the five declared semantic screens are implemented.
 - Remaining-attempt counts are not rendered.
 - Lockout countdown and degraded/fault screens are not implemented.
-- Backlight state and brightness are not managed by the service.
-- Screen durations and automatic transitions are not managed by the service.
-- Animations and scrolling are not implemented.
-- A screen change clears and redraws the complete display.
+- Backlight state and brightness are not managed.
+- Screen duration and automatic transitions are not managed.
+- Animation and scrolling are not implemented.
+- Screen changes clear and redraw the complete display.
 - LCD communication is synchronous.
-- The service is not internally thread-safe.
-- The handle exposes private members because opaque allocation is not used.
+- The singleton is not internally thread-safe.
+- No public deinitialization API is provided.
 - The service does not recover or reinitialize a failed LCD bus.
 
-Future screen additions should preserve the semantic application boundary, fixed storage, credential-masking rules, and render-coalescing behavior.
+Future additions should preserve the semantic application boundary, private singleton state, explicit composition-root injection, fixed storage, credential-masking rules and render-coalescing behavior.
 
 ---
 
