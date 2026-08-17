@@ -252,7 +252,7 @@ Buzzer_OpStatus_t Buzzer_Init(
 ```c
 Buzzer_OpStatus_t Buzzer_SetFrequency(
     Buzzer_Handle_t* Device,
-    uint32_t              Frequency
+    uint32_t         Frequency
 );
 ```
 #### Parameters
@@ -354,17 +354,17 @@ flowchart TD
 
     START([Application Startup])
 
-    INIT["Buzzer_Init()"]
+    INIT["Buzzer_Init"]
 
     INIT_CHECK{"Initialization Successful?"}
 
-    SET_FREQ["Buzzer_SetFrequency()"]
+    SET_FREQ["Buzzer_SetFrequency"]
 
-    ON["Buzzer_On()"]
+    ON["Buzzer_On"]
 
     ACTIVE([Buzzer Active])
 
-    OFF["Buzzer_Off()"]
+    OFF["Buzzer_Off"]
 
     END([Buzzer Inactive])
 
@@ -496,7 +496,7 @@ The buzzer handle stores internal driver state:
 typedef struct
 {
     PWM_Handle_t* _context;
-    bool               _initialized;
+    bool          _initialized;
 
 } Buzzer_Handle_t;
 ```

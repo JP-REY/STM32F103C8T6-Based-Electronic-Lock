@@ -16,6 +16,7 @@
 /**********************************************************************************************************************************
  Private Macros
  **********************************************************************************************************************************/
+/** @brief Fixed repetition count enforced for every LED pulse effect. */
 #define LED_PULSE_EFFECT_REPEATS 1U
 
 /**********************************************************************************************************************************
@@ -136,7 +137,7 @@ LED_OpStatus_t LED_Init(LED_Handle_t* Device, void* Gpio, LED_ActiveLevel_t Acti
 {
     if(Device == NULL || Gpio == NULL ||
       (ActiveLevel != LED_ACTIVE_HIGH &&
-       ActiveLevel!= LED_ACTIVE_LOW))
+       ActiveLevel != LED_ACTIVE_LOW))
     {
         return LED_OPERATION_FAIL;
     }
@@ -293,10 +294,10 @@ LED_OpStatus_t LED_BlinkOn(LED_Handle_t* Device, uint32_t BlinkTimeMs)
 
     LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
-    Device->_blink_time_interval_ms  = BlinkTimeMs;
-    Device->_last_update_time_ms   = now;
+    Device->_blink_time_interval_ms = BlinkTimeMs;
+    Device->_last_update_time_ms    = now;
 
-    fx_ctx->_current_effect = LED_EFFECT_BLINK;
+    fx_ctx->_current_effect         = LED_EFFECT_BLINK;
 
     return LED_OPERATION_OK;
 }
@@ -323,10 +324,10 @@ LED_OpStatus_t LED_BlinkOff(LED_Handle_t* Device)
 
     LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
-    Device->_blink_time_interval_ms  = 0;
-    Device->_last_update_time_ms   = 0;
+    Device->_blink_time_interval_ms = 0;
+    Device->_last_update_time_ms    = 0;
     
-    fx_ctx->_current_effect = LED_EFFECT_STATIC;
+    fx_ctx->_current_effect         = LED_EFFECT_STATIC;
 
     return LED_OPERATION_OK;
 }
@@ -371,20 +372,21 @@ LED_OpStatus_t LED_TriggerEffect(LED_Handle_t* Device, LED_Effect_t Effect, uint
 
     LED_EffectContext_t* fx_ctx = &Device->_effect_context;
 
-    Device->_effect_time_interval_ms   = Interval;
-    Device->_effect_repeat    = Repeats;
-    Device->_effect_repeat    = Effect == LED_EFFECT_PULSE         ?
-                                          LED_PULSE_EFFECT_REPEATS :
-                                          Repeats                  ;
+    Device->_effect_time_interval_ms = Interval;
+    Device->_effect_repeat           = Repeats;
+    Device->_effect_repeat           = Effect == LED_EFFECT_PULSE         ?
+                                                 LED_PULSE_EFFECT_REPEATS :
+                                                 Repeats                  ;
 
-    Device->_effect_counter   = (Device->_effect_repeat) * 2;
+    Device->_effect_counter          = (Device->_effect_repeat) * 2; 
 
-    fx_ctx->_return_effect    = fx_ctx->_current_effect;
-    fx_ctx->_return_led_state = Device->_current_state;
+    fx_ctx->_return_effect           = fx_ctx->_current_effect;
+    fx_ctx->_return_led_state        = Device->_current_state;
 
     if(LED_SetEffect(Device, Effect) != LED_OPERATION_OK)
-
+    {
         return LED_OPERATION_FAIL;
+    }
 
     return LED_OPERATION_OK;
 }
@@ -443,8 +445,9 @@ LED_OpStatus_t LED_Update(LED_Handle_t* Device)
                 Device->_last_update_time_ms = now;
 
                 if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
-
+                {
                     return LED_OPERATION_FAIL;
+                }
 
                 Device->_current_state  = PGPIO_GetLevel((GPIO_Handle_t*)Device->_gpio) == GPIO_LEVEL_HIGH ?
                                                                                            LED_STATE_ON    :
@@ -465,16 +468,18 @@ LED_OpStatus_t LED_Update(LED_Handle_t* Device)
                     Device->_effect_counter--;
 
                     if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
-
+                    {
                         return LED_OPERATION_FAIL;
-
-
+                    }
                 }
             }
 
             else
             {
-                LED_SetEffect(Device, fx_ctx->_return_effect);
+                if(LED_SetEffect(Device, fx_ctx->_return_effect) != LED_OPERATION_OK)
+                {
+                    return LED_OPERATION_FAIL;
+                }
             }
         }
 
@@ -496,24 +501,32 @@ LED_OpStatus_t LED_Update(LED_Handle_t* Device)
                     Device->_effect_counter--;
 
                     if(PGPIO_Toggle((GPIO_Handle_t*)Device->_gpio) != GPIO_OPERATION_OK)
-
+                    {
                         return LED_OPERATION_FAIL;
+                    }
                 }
             }
 
             else
             {
-                LED_SetEffect(Device, fx_ctx->_return_effect);
+                if(LED_SetEffect(Device, fx_ctx->_return_effect) != LED_OPERATION_OK)
+                {
+                    return LED_OPERATION_FAIL;
+                }
 
                 Device->_effect_is_active = false;
 
                 if (fx_ctx->_return_led_state == LED_STATE_ON)
                 {
-                    LED_On(Device);
+                    if(LED_On(Device) != LED_OPERATION_OK)
+
+                        return LED_OPERATION_FAIL;
                 }
                 else
                 {
-                    LED_Off(Device);
+                    if(LED_Off(Device) != LED_OPERATION_OK)
+
+                        return LED_OPERATION_FAIL;
                 }
             }
         }

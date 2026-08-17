@@ -378,12 +378,12 @@ The operation has no externally visible side effects. It does not modify the can
 
 ```mermaid
 flowchart TD
-    CALL["AS_Authenticate(Candidate)"] --> NULL{"Candidate == NULL?"}
-    NULL -->|"Yes"| INVALID["AS_RESULT_INVALID_ARGUMENT"]
+    CALL["AS_Authenticate"] --> NULL{"Candidate == NULL?"}
+    NULL -->|"Yes"| INVALID["INVALID_ARGUMENT"]
     NULL -->|"No"| COMPARE["Compare all configured bytes"]
     COMPARE --> MATCH{"Complete match?"}
-    MATCH -->|"Yes"| AUTH["AS_RESULT_AUTHENTICATED"]
-    MATCH -->|"No"| REJECT["AS_RESULT_REJECTED"]
+    MATCH -->|"Yes"| AUTH["AUTHENTICATED"]
+    MATCH -->|"No"| REJECT["REJECTED"]
 ```
 
 Every branch returns synchronously to the caller.

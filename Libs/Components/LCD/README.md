@@ -1362,7 +1362,6 @@ Byte: 0x41 ('A')
 Binary:
 0100 0001
 
-
 Transfer sequence:
 
 1st nibble:

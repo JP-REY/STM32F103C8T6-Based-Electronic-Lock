@@ -620,7 +620,7 @@ flowchart TD
 
     LOOP["Main Loop"]
 
-    READ["MK_Read()"]
+    READ["MK_Read"]
 
     SCAN["Scan Matrix"]
 

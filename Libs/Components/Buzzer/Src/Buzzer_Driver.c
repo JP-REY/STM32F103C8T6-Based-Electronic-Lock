@@ -100,16 +100,19 @@ Buzzer_OpStatus_t Buzzer_Init(Buzzer_Handle_t* Device, PWM_Handle_t* Context)
     Device->_context = Context;
 
     if(Device->_context->Ctx == NULL)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     if(PPWM_Init(Device->_context) != PWM_OPERATION_OK)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     if(PPWM_SetDutyPercent(Device->_context, BUZZER_DEFAULT_DUTY_CYCLE_PERCENT) != PWM_OPERATION_OK)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     Device->_initialized = true;
 
@@ -140,8 +143,9 @@ Buzzer_OpStatus_t Buzzer_SetFrequency(Buzzer_Handle_t* Device, uint32_t Frequenc
     }
 
     if(PPWM_SetFrequency(Device->_context, Frequency) != PWM_OPERATION_OK)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     return BUZZER_OPERATION_OK;
 }
@@ -166,8 +170,9 @@ Buzzer_OpStatus_t Buzzer_On(Buzzer_Handle_t* Device)
     }
 
     if(PPWM_Enable(Device->_context) != PWM_OPERATION_OK)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     return BUZZER_OPERATION_OK;
 }
@@ -193,8 +198,9 @@ Buzzer_OpStatus_t Buzzer_Off(Buzzer_Handle_t* Device)
     }
 
     if(PPWM_Disable(Device->_context) != PWM_OPERATION_OK)
-
+    {
         return BUZZER_OPERATION_FAIL;
+    }
 
     return BUZZER_OPERATION_OK;
 }

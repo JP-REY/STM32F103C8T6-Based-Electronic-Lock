@@ -733,7 +733,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    CALL["SGS_Ring(Ringtone, CurrentTimeMs)"] --> VALID{"Initialized and ringtone valid?"}
+    CALL["SGS_Ring<br/>(Ringtone, CurrentTimeMs)"] --> VALID{"Initialized and<br/> ringtone valid?"}
     VALID -->|"No"| FAIL["SGS_OPERATION_FAIL"]
     VALID -->|"Yes"| MAP["Resolve and validate<br/> pattern"]
     MAP --> ACTIVE{"Pattern active?"}
