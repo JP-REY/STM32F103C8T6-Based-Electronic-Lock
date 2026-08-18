@@ -123,6 +123,12 @@ static const uint8_t DRS_LockCharacterBitmap[8] =
  */
 static const DRS_ScreenContent_t DRS_ScreenContentMap[DRS_SCREEN_COUNT] =
 {
+    [DRS_SCREEN_IDLE] =
+    {
+        .first_line  = "",
+        .second_line = ""
+    },
+    
     [DRS_SCREEN_PASSWORD_ENTRY] =
     {
         .first_line  = "Insert Password:",
@@ -425,7 +431,7 @@ static DRS_OpStatus_t DRS_RenderFullScreen(void)
 DRS_OpStatus_t DRS_Init(LCD_Handle_t* Lcd)
 {
     DRS_Runtime_Instance.lcd                            = Lcd;
-    DRS_Runtime_Instance.requested_view.screen          = DRS_SCREEN_PASSWORD_ENTRY;
+    DRS_Runtime_Instance.requested_view.screen          = DRS_SCREEN_IDLE;
     DRS_Runtime_Instance.requested_view.entered_digits  = 0U;
     DRS_Runtime_Instance.rendered_view.screen           = DRS_SCREEN_COUNT;
     DRS_Runtime_Instance.rendered_view.entered_digits   = 0U;
