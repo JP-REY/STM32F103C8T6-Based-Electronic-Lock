@@ -123,6 +123,12 @@ static const uint8_t DRS_LockCharacterBitmap[8] =
  */
 static const DRS_ScreenContent_t DRS_ScreenContentMap[DRS_SCREEN_COUNT] =
 {
+    [DRS_SCREEN_IDLE] =
+    {
+        .first_line  = "",
+        .second_line = ""
+    },
+    
     [DRS_SCREEN_PASSWORD_ENTRY] =
     {
         .first_line  = "Insert Password:",
