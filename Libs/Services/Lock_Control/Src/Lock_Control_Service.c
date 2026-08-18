@@ -1,0 +1,480 @@
+/**********************************************************************************************************************************
+ * @file    Lock_Control_Service.c
+ * @brief   Lock Control Service implementation.
+ *
+ * @details Implements the singleton runtime context, ordered transition table, guard evaluation and private transition effects
+ *          of the electronic-lock state machine.
+ *
+ *          Each accepted event is matched against the current state and the immutable transition table. The first transition
+ *          whose source state and event match and whose guard evaluates true is selected. Its internal effect is applied, the
+ *          runtime state is committed to the transition target and its semantic action is returned to the application layer.
+ *
+ *          This implementation contains no hardware access, service-to-service calls, time-source reads, RTOS primitives or
+ *          dynamic allocation. External behavior is requested exclusively through LCS_Action_t values.
+ *
+ * @author  Joao Pedro Rey
+ * @version 1.0.0
+ * @date    Aug 18, 2026
+ **********************************************************************************************************************************/
+/**********************************************************************************************************************************
+ Includes
+ **********************************************************************************************************************************/
+#include "Lock_Control_Service.h"
+#include "stdint.h"
+#include "stdbool.h"
+#include "stddef.h"
+
+/**********************************************************************************************************************************
+ Private Macros
+ **********************************************************************************************************************************/
+/**
+ * @brief   Consecutive authentication-failure limit that activates lockout policy.
+ *
+ * @details The private failure counter saturates at this value. After denial feedback completes, a count below this limit returns
+ *          the machine to the locked state, while a count equal to the limit enters lockout.
+ *
+ * @note    The limit expresses product policy and is intentionally independent from the storage width of the failure counter.
+ */
+#define LCS_FAILURE_ATTEMPTS_LIMIT  (3U)
+
+/**
+ * @brief   Number of transition records in the immutable transition table.
+ *
+ * @details Computes the record count directly from LCS_Transitions so table iteration cannot become inconsistent with the
+ *          declared array length.
+ *
+ * @note    This macro shall be used only after the LCS_Transitions declaration is visible to the compiler.
+ */
+#define LCS_TRANSITION_COUNT (sizeof(LCS_Transitions) / sizeof(LCS_Transitions[0]))
+
+/**********************************************************************************************************************************
+ Private Types
+ **********************************************************************************************************************************/
+/**
+ * @brief   Private states of the electronic-lock state machine.
+ *
+ * @details States describe product-level operating modes. They do not expose presentation details, electrical actuator levels or
+ *          the internal states of collaborating services.
+ *
+ * @note    The type remains private so application code reacts to semantic actions rather than coupling itself to FSM internals.
+ */
+typedef enum
+{
+    LCS_STATE_BOOT = 0U,                 /*< Startup state awaiting the application initialization result.       */
+
+    LCS_STATE_LOCKED,                    /*< Secure idle state awaiting a credential-entry request.              */
+
+    LCS_STATE_CREDENTIAL_SESSION_ACTIVE, /*< Credential-entry session is active and may produce domain events.   */
+
+    LCS_STATE_AUTHENTICATING,            /*< A complete candidate is awaiting its authentication result.         */
+
+    LCS_STATE_ACCESS_GRANTED_UNLOCKED,   /*< Access was granted and bounded unlock operation is active.          */
+
+    LCS_STATE_ACCESS_DENIED_LOCKED,      /*< Access was denied and bounded denial feedback is active.            */
+
+    LCS_STATE_LOCKOUT,                   /*< Entry requests are rejected until the lockout interval expires.     */
+
+    LCS_STATE_FAULT,                     /*< Startup failed and normal operation remains unavailable.            */
+
+    LCS_STATE_COUNT                      /*< Number of private state identifiers; not a runtime state.           */
+
+}LCS_State_t;
+
+/**
+ * @brief   Private guard conditions associated with transition records.
+ *
+ * @details A guard is evaluated only after the transition source state and event match the current dispatch context. Guard values
+ *          allow more than one transition to share the same source/event pair while selecting different targets from runtime
+ *          policy state.
+ *
+ * @note    Guards sharing a source/event pair shall be mutually exclusive. Unknown guard values evaluate false.
+ */
+typedef enum
+{
+    LCS_GUARD_ALWAYS,              /*< Unconditional transition.                                       */
+
+    LCS_GUARD_UNDER_ATTEMPT_LIMIT, /*< True while consecutive failures remain below the lockout limit. */
+
+    LCS_GUARD_ATTEMPT_COUNT_LIMIT  /*< True once consecutive failures reach the lockout limit.         */
+
+}LCS_Guard_t;
+
+/**
+ * @brief   Private mutation applied to the singleton runtime during a transition.
+ *
+ * @details Internal effects update only state owned by the Lock Control Service. They are distinct from public actions, which ask
+ *          the application layer to coordinate other services and hardware-facing adapters.
+ *
+ * @note    The target state assignment is a mandatory part of every accepted transition and therefore is not represented as an
+ *          internal-effect value.
+ */
+typedef enum
+{
+    LCS_INTERNAL_EFFECT_NONE = 0U,                /*< Preserve all runtime fields other than the target state.      */
+
+    LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE,       /*< Mark successful boot activation in the singleton context.     */
+
+    LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT,  /*< Saturating increment of consecutive authentication failures.  */
+
+    LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT       /*< Clear the consecutive authentication-failure counter.         */
+
+}LCS_InternalEffect_t;
+
+/**
+ * @brief   Immutable description of one state-machine transition.
+ *
+ * @details A record defines the source state and event used for candidate matching, the guard that authorizes selection, the
+ *          target state committed after selection, the private runtime effect applied by the service and the semantic action
+ *          returned to the application.
+ *
+ * @note    Transition records reside in read-only static storage and shall never be modified at runtime.
+ */
+typedef struct
+{
+    LCS_State_t          source_state;    /*< State from which the transition may be selected.                */
+    LCS_Event_t          event;           /*< Semantic event required to select the transition.               */
+    LCS_Guard_t          guard;           /*< Runtime condition that must evaluate true.                      */
+    LCS_State_t          target_state;    /*< State committed after the transition is accepted.               */
+    LCS_InternalEffect_t internal_effect; /*< Private context mutation applied before target-state commit.    */
+    LCS_Action_t         action;          /*< Semantic application action returned after target-state commit. */
+
+}LCS_Transition_t;
+
+/**
+ * @brief   Mutable runtime context of the Lock Control Service singleton.
+ *
+ * @details Retains the authoritative FSM state, the number of consecutive rejected authentications and the activation status of
+ *          the service. The transition table is immutable module data and therefore is intentionally excluded from this handle.
+ *
+ * @note    Exactly one instance is allocated by this translation unit. Concurrent access is not supported.
+ */
+typedef struct
+{
+    LCS_State_t current_state;        /*< Authoritative current state used during transition lookup. */
+    uint8_t     failed_attempt_count; /*< Saturating count of consecutive authentication failures.   */
+    bool        initialized;          /*< Indicates whether successful boot activation has occurred. */
+
+}LCS_Handle_t;
+
+/**********************************************************************************************************************************
+ Private Constants
+ **********************************************************************************************************************************/
+/**
+ * @brief   Ordered transition rules of the electronic-lock state machine.
+ *
+ * @details Stores only valid transitions rather than allocating a dense state-by-event matrix. LCS_FindTransition() scans the
+ *          table from the first record to the last and returns the first record whose source state and event match the dispatch
+ *          context and whose guard evaluates true.
+ *
+ *          The two access-denied timeout records intentionally share a source/event pair. Their mutually exclusive attempt-count
+ *          guards select either return-to-locked or lockout behavior.
+ *
+ * @note    Because selection is first-match, future records with the same source/event pair shall use mutually exclusive guards
+ *          or be ordered deliberately and documented as priority rules.
+ */
+static const LCS_Transition_t LCS_Transitions[] =
+{
+    {
+        .source_state    = LCS_STATE_BOOT,
+        .event           = LCS_EVENT_INIT_OK,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE,
+        .action          = LCS_ACTION_NONE,
+    },
+
+    {
+        .source_state    = LCS_STATE_BOOT,
+        .event           = LCS_EVENT_INIT_FAIL,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_FAULT,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REQUEST_CONTROLLED_RESET,
+    },
+
+    {
+        .source_state    = LCS_STATE_LOCKED,
+        .event           = LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .event           = LCS_EVENT_CREDENTIAL_CANCELLED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .event           = LCS_EVENT_ENTRY_TIMEOUT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .event           = LCS_EVENT_CANDIDATE_READY,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_AUTHENTICATING,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REQUEST_AUTHENTICATION,
+    },
+
+    {
+        .source_state    = LCS_STATE_AUTHENTICATING,
+        .event           = LCS_EVENT_AUTH_SUCCESS,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_ACCESS_GRANTED_UNLOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT,
+        .action          = LCS_ACTION_GRANT_ACCESS_UNLOCK,
+    },
+
+    {
+        .source_state    = LCS_STATE_ACCESS_GRANTED_UNLOCKED,
+        .event           = LCS_EVENT_UNLOCK_TIMEOUT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_RETURN_TO_LOCKED,
+    },
+
+    {
+        .source_state    = LCS_STATE_AUTHENTICATING,
+        .event           = LCS_EVENT_AUTH_FAILURE,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_ACCESS_DENIED_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT,
+        .action          = LCS_ACTION_DENY_ACCESS,
+    },
+
+    {
+        .source_state    = LCS_STATE_ACCESS_DENIED_LOCKED,
+        .event           = LCS_EVENT_DENIED_ACCESS_TIMEOUT,
+        .guard           = LCS_GUARD_UNDER_ATTEMPT_LIMIT,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_RETURN_TO_LOCKED,
+    },
+
+    {
+        .source_state    = LCS_STATE_ACCESS_DENIED_LOCKED,
+        .event           = LCS_EVENT_DENIED_ACCESS_TIMEOUT,
+        .guard           = LCS_GUARD_ATTEMPT_COUNT_LIMIT,
+        .target_state    = LCS_STATE_LOCKOUT,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_ENTER_LOCKOUT,
+    },
+
+    {
+        .source_state    = LCS_STATE_LOCKOUT,
+        .event           = LCS_EVENT_LOCKOUT_TIMEOUT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT,
+        .action          = LCS_ACTION_RETURN_TO_LOCKED,
+    },
+
+};
+
+/**********************************************************************************************************************************
+ Private Data
+ **********************************************************************************************************************************/
+/**
+ * @brief   Singleton runtime instance of the Lock Control Service.
+ *
+ * @details Starts in LCS_STATE_BOOT with no authentication failures and normal operation inactive. LCS_EVENT_INIT_OK selects the
+ *          boot-success transition, marks the instance initialized and commits the locked state. LCS_EVENT_INIT_FAIL commits the
+ *          fault state without activating normal operation.
+ *
+ * @note    Static initialization guarantees a deterministic safe context before the first call to LCS_Process().
+ */
+static LCS_Handle_t LCS_RuntimeInstance =
+{
+    .current_state        = LCS_STATE_BOOT,
+    .failed_attempt_count = 0U,
+    .initialized          = false
+};
+
+/**********************************************************************************************************************************
+ Private Function Prototypes
+ **********************************************************************************************************************************/
+static void                    LCS_ApplyInternalEffect (LCS_InternalEffect_t Effect);
+static bool                    LCS_EvaluateGuard       (LCS_Guard_t Guard);
+static const LCS_Transition_t* LCS_FindTransition      (LCS_Event_t Event);
+
+/**********************************************************************************************************************************
+ Private Functions
+ **********************************************************************************************************************************/
+/**
+ * @brief   Reports whether normal Lock Control Service processing is active.
+ *
+ * @details Reads the lifecycle flag owned by the singleton runtime. The flag becomes true only when the boot state processes
+ *          LCS_EVENT_INIT_OK.
+ *
+ * @note    This helper does not modify the runtime context.
+ *
+ * @return  true when normal event processing is active; otherwise false.
+ */
+static inline bool LCS_IsActive(void)
+{
+    return LCS_RuntimeInstance.initialized;
+}
+
+/**
+ * @brief   Applies one private transition effect to the singleton runtime.
+ *
+ * @details Activates the service after successful boot, increments the consecutive-failure counter with saturation at
+ *          LCS_FAILURE_ATTEMPTS_LIMIT or resets that counter to zero according to Effect.
+ *
+ * @param   Effect - Private mutation selected by the accepted transition.
+ *
+ * @note    LCS_INTERNAL_EFFECT_NONE and unknown values preserve the runtime fields. Target-state assignment is performed
+ *          separately by LCS_Process() after this function returns.
+ */
+static void LCS_ApplyInternalEffect(LCS_InternalEffect_t Effect)
+{
+    switch(Effect)
+    {
+        case LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE:
+
+            LCS_RuntimeInstance.initialized = true;
+
+        break;
+
+        case LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT:
+
+            if(LCS_RuntimeInstance.failed_attempt_count < LCS_FAILURE_ATTEMPTS_LIMIT)
+            {
+                LCS_RuntimeInstance.failed_attempt_count++;
+            }
+
+        break;
+
+        case LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT:
+
+            LCS_RuntimeInstance.failed_attempt_count = 0U;
+
+        break;
+
+        default:
+            break;
+    }
+}
+
+/**
+ * @brief   Evaluates one private guard against the current singleton context.
+ *
+ * @details Resolves unconditional selection and the two complementary failure-limit conditions used after access-denied feedback.
+ *
+ * @param   Guard - Guard identifier stored in a candidate transition record.
+ *
+ * @note    Unknown guard values return false so malformed transition data cannot authorize a state change.
+ *
+ * @return  true when Guard authorizes the candidate transition; otherwise false.
+ */
+static bool LCS_EvaluateGuard(LCS_Guard_t Guard)
+{
+    switch(Guard)
+    {
+        case LCS_GUARD_ALWAYS:
+
+            return true;
+
+        case LCS_GUARD_ATTEMPT_COUNT_LIMIT:
+
+            return (LCS_RuntimeInstance.failed_attempt_count >= LCS_FAILURE_ATTEMPTS_LIMIT);
+
+        case LCS_GUARD_UNDER_ATTEMPT_LIMIT:
+
+            return (LCS_RuntimeInstance.failed_attempt_count < LCS_FAILURE_ATTEMPTS_LIMIT);
+
+        default:
+            return false;
+    }
+}
+
+/**
+ * @brief   Finds the first transition authorized for the current state and supplied event.
+ *
+ * @details Performs a bounded linear scan of LCS_Transitions. A record is selected only when its source state equals the current
+ *          runtime state, its event equals Event and LCS_EvaluateGuard() authorizes its guard.
+ *
+ * @param   Event - Semantic product event to match against transition records.
+ *
+ * @note    The returned pointer refers to immutable static storage and remains valid for the entire program lifetime. This helper
+ *          does not modify the runtime context.
+ *
+ * @return  Pointer to the first authorized transition; NULL when no transition is valid.
+ */
+static const LCS_Transition_t* LCS_FindTransition(LCS_Event_t Event)
+{
+    size_t index = 0;
+
+    for(index = 0; index < LCS_TRANSITION_COUNT; index++)
+    {
+        const LCS_Transition_t* transition = &LCS_Transitions[index];
+
+        if(transition->source_state == LCS_RuntimeInstance.current_state &&
+           transition->event == Event && LCS_EvaluateGuard(transition->guard))
+        {
+            return transition;
+        }
+    }
+
+    return NULL;
+}
+
+/**********************************************************************************************************************************
+ Functions
+ **********************************************************************************************************************************/
+/**
+ * @brief   Processes one semantic event through the Lock Control Service state machine.
+ *
+ * @details When normal operation is inactive, only LCS_EVENT_INIT_OK and LCS_EVENT_INIT_FAIL are eligible for dispatch. All other
+ *          events are ignored.
+ *
+ *          For an eligible event, the function locates the first authorized transition, applies its private effect, commits the
+ *          target state and returns its semantic application action. If no transition matches, the runtime context is preserved
+ *          and LCS_ACTION_NONE is returned.
+ *
+ * @param   Event - Semantic product event to process.
+ *
+ * @note    The internal effect and target-state commit occur before the action is returned. The application may therefore dispatch
+ *          a synchronous result event only after this call completes and observe the new authoritative state.
+ *
+ * @note    The function is non-blocking, allocates no memory and performs no calls to hardware or collaborating services.
+ *
+ * @return  Semantic action associated with the accepted transition, or LCS_ACTION_NONE when no external work is requested.
+ */
+LCS_Action_t LCS_Process(LCS_Event_t Event)
+{
+    const LCS_Transition_t* transition;
+
+    if(!LCS_IsActive() &&
+       Event != LCS_EVENT_INIT_OK &&
+       Event != LCS_EVENT_INIT_FAIL)
+    {
+        return LCS_ACTION_NONE;
+    }
+
+    transition = LCS_FindTransition(Event);
+
+    if(transition == NULL)
+    {
+        return LCS_ACTION_NONE;
+    }
+
+    LCS_ApplyInternalEffect(transition->internal_effect);
+
+    LCS_RuntimeInstance.current_state = transition->target_state;
+
+    return transition->action;
+}

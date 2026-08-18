@@ -27,7 +27,7 @@ STM32F411CEU6 using STM32CubeIDE, the STM32 HAL and FreeRTOS.
 | Memory policy | Static allocation; no application-owned dynamic allocation |
 | Primary UI | 4x4 matrix keyboard, 16x2 LCD, status LEDs and passive PWM buzzer |
 | Credential model | Fixed six-digit development PIN compiled into firmware |
-| Last architecture update | 2026-08-12 |
+| Last architecture update | 2026-08-18 |
 
 ### Authority and Conflict Resolution
 
@@ -285,7 +285,7 @@ flowchart LR
 | GPIO PA4-PA7 | Matrix keyboard columns 3-0 | Keyboard Task through Matrix Keyboard stack |
 | GPIO PA12 | Red status LED | Status Indication Service through LED Driver |
 | GPIO PA15 | Blue status LED | Status Indication Service through LED Driver |
-| GPIO PB8 | Lock actuator command | Lock Control Service through Lock Actuator Driver |
+| GPIO PB8 | Lock actuator command | Application action dispatcher through Lock Actuator Driver |
 | I2C1 PB6/PB7 | PCF8574 LCD bus at Fast Mode | Display Render Service through LCD stack |
 | TIM2 | Microsecond time base | Time Platform Interface |
 | TIM3 CH1 PB4 | Passive buzzer PWM | Sound Generator Service through Buzzer Driver |
@@ -322,7 +322,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph HIGH["High-Level Software"]
-        APP["App Core and<br/> Lock Controller"]
+        APP["App Core and<br/> Action Dispatcher"]
         SVC["Authentication, Credential,<br/> UI, Lock and Time Services"]
     end
 
@@ -377,7 +377,7 @@ otherwise.
 
 ### Architectural Invariants
 
-- The actuator is safe outside `ACCESS_GRANTED`.
+- The actuator is safe outside bounded `ACCESS_GRANTED_UNLOCKED` operation.
 - Authentication has no hardware side effects.
 - Drivers never decide whether access is granted.
 - The candidate credential never exceeds its fixed storage.
@@ -575,21 +575,29 @@ cancellation.
 
 ```mermaid
 flowchart TB
+    LOCK["Lock Control Service<br/>table-driven FSM"]
+    APP["Application<br/>Action Dispatcher"]
     STATUS["Status Indication Service"]
     SOUND["Sound Generator Service"]
-    LOCK["Lock Control Service"]
-    COMPONENTS["LED, Buzzer and<br/> Lock Actuator Drivers"]
+    COMPONENTS["LED and Buzzer Drivers"]
+    ACTUATOR["Lock Actuator Driver"]
     PLATFORM["GPIO, PWM and<br/> Time Platform"]
 
+    LOCK -->|"LCS_Action_t"| APP
+    APP --> STATUS
+    APP --> SOUND
+    APP --> ACTUATOR
     STATUS --> COMPONENTS
     SOUND --> COMPONENTS
-    LOCK --> COMPONENTS
     COMPONENTS --> PLATFORM
+    ACTUATOR --> PLATFORM
 ```
 
 The Status and Sound services translate domain concepts such as `SUCCESS`,
 `DENIED` and `LOCKOUT` into device-level effects. Component drivers remain
-unaware of those domain meanings.
+unaware of those domain meanings. The Lock Control Service only returns a
+semantic action; the application coordinates the participating services and
+the actuator driver required to execute it.
 
 ---
 
@@ -622,25 +630,27 @@ Non-responsibilities:
 - application state transitions;
 - direct manipulation of HAL peripherals during normal operation.
 
-#### Lock Controller
+#### Lock Action Orchestration
 
-`Lock_Controller` owns the authoritative electronic-lock state machine and V1
-access policy.
+The application action dispatcher is the execution boundary between the Lock
+Control Service and the modules that realize each semantic action. It does not
+own a competing product state machine.
 
 Responsibilities:
 
-- own the current application state;
-- dispatch semantic events according to that state;
-- own the consecutive failed-attempt counter;
-- coordinate Credential Entry and Authentication;
-- request display, status and sound behavior;
-- request bounded lock/unlock operations;
+- translate application facts into `LCS_Event_t` values;
+- call `LCS_Process()` from one serialized execution context;
+- interpret each returned `LCS_Action_t`;
+- coordinate Credential Entry, Authentication, display, status and sound;
+- execute bounded lock/unlock operations through the actuator driver;
 - own application-level entry, denial, unlock and lockout deadlines;
-- prioritize critical faults over user input;
-- define state entry and exit actions.
+- dispatch authentication and timeout result events back to LCS;
+- preserve safe ordering when one action involves multiple modules.
 
 Non-responsibilities:
 
+- own the authoritative product state or failed-attempt counter;
+- duplicate the transition rules outside LCS;
 - scan the keyboard matrix;
 - compare raw GPIO levels;
 - render HD44780 commands;
@@ -653,16 +663,19 @@ Non-responsibilities:
 
 ```mermaid
 flowchart TB
-    CONTROLLER["Lock Controller"]
+    APP["Application<br/>Action Dispatcher"]
+    LOCK["Lock Control Service<br/>FSM and access policy"]
     ACCESS["Credential Entry<br/> and Authentication"]
     UI["Display, Status and<br/> Sound Services"]
-    LOCK["Lock Control Service"]
     TIME["Timeout Validation Service"]
+    ACTUATOR["Lock Actuator Driver"]
 
-    CONTROLLER --> ACCESS
-    CONTROLLER --> UI
-    CONTROLLER --> LOCK
-    CONTROLLER --> TIME
+    APP -->|"LCS_Event_t"| LOCK
+    LOCK -->|"LCS_Action_t"| APP
+    APP --> ACCESS
+    APP --> UI
+    APP --> TIME
+    APP --> ACTUATOR
 ```
 
 Services are synchronous modules called from the Application Task. A service
@@ -670,13 +683,13 @@ may maintain internal non-blocking state, but it shall not own an RTOS task.
 
 | Service | Owns | Uses | Must not own |
 | --- | --- | --- | --- |
-| Credential Entry | Candidate buffer, length, session state and entry timestamp | Semantic key codes and timeout validation | Valid PIN, attempt count, lockout policy |
+| Credential Entry | Candidate buffer, length and session state | Semantic input commands | Valid PIN, timestamps, attempt count or lockout policy |
 | Authentication | Fixed V1 credential comparison contract | Read-only configured credential | UI, attempt count, hardware side effects |
 | Display Render | Current logical screen/model and render coalescing | HD44780 Driver | Application transitions or raw credential storage |
 | Status Indication | Logical LED mode and non-blocking indication selection | LED Driver | Authentication policy |
 | Sound Generator | Current sound pattern, phase and timing | Buzzer Driver | Product state transitions |
 | Timeout Validation | Rollover-safe elapsed/deadline calculations | Unsigned time values | Threads, hardware timers or mutable global deadlines |
-| Lock Control | Requested commanded state and actuator-operation result | Lock Actuator Driver | Authentication and failed-attempt policy |
+| Lock Control | Product FSM state, consecutive-failure policy and transition table | Semantic events from the application | Calls to services, drivers, hardware or action execution |
 | Power Management | Power-mode policy and sleep eligibility | Application state and Platform power hooks | Access decisions or unlock commands |
 
 #### Credential Entry Service
@@ -687,25 +700,25 @@ semantic outcomes.
 Required behavior:
 
 - accept only digits `0` through `9` as credential content;
-- limit the candidate to exactly four stored digits;
+- limit the candidate to exactly six stored digits;
 - expose the number of entered digits for masked display rendering;
-- treat `#` as confirmation only when four digits are present;
+- treat `#` as confirmation only when six digits are present;
 - report incomplete confirmation without authenticating;
 - clear a non-empty candidate when `*` is pressed;
 - cancel the entry session when `*` is pressed with an empty candidate;
-- detect the 15-second inactivity timeout using rollover-safe arithmetic;
 - erase storage whenever the session ends for any reason;
 - never expose the candidate through logs or display strings.
 
 The service does not read the keyboard driver directly. It receives keys from
-the Lock Controller inside the Application Task.
+the application inside the Application Task. The application owns inactivity
+timing and ends the session when the timeout becomes a semantic LCS event.
 
 #### Authentication Service
 
 Authentication is a pure domain operation for V1:
 
-- receive a candidate pointer and explicit length;
-- require exactly four digits;
+- receive a pointer to a fixed six-digit candidate buffer;
+- compare exactly six digits;
 - compare against the configured development credential;
 - return `AUTH_SUCCESS`, `AUTH_FAILURE` or an operation error;
 - produce no hardware, UI, timing or attempt-counter side effect.
@@ -731,7 +744,7 @@ transmitted over I2C. The service may perform a bounded synchronous LCD update,
 but shall not wait for human-scale display durations.
 
 LCD failure is recoverable by default: the lock remains operational only if
-the keyboard, time base and actuator safety path are valid. The Lock Controller
+the keyboard, time base and actuator safety path are valid. The application
 shall receive a display error status so the degraded-mode policy remains
 explicit.
 
@@ -790,10 +803,12 @@ It shall:
 
 #### Lock Control Service and Lock Actuator Driver
 
-Two safety boundaries are used deliberately:
+Three boundaries are used deliberately:
 
-- The **Lock Control Service** represents domain commands and reports logical
-  completion/failure to the Lock Controller.
+- The **Lock Control Service** owns the product FSM and returns semantic actions
+  without calling any service, driver or hardware interface.
+- The **application action dispatcher** coordinates all modules required to
+  execute a returned action.
 - The **Lock Actuator Driver** represents electrical control, polarity and a
   redundant maximum energization deadline.
 
@@ -806,14 +821,14 @@ An unlock request shall always include a finite duration. A public unlimited
 
 ```mermaid
 flowchart TB
-    FSM["Lock Controller FSM"]
-    SERVICE["Lock Control Service"]
+    SERVICE["Lock Control Service<br/>FSM decision"]
+    APP["Application<br/>Action Dispatcher"]
     DRIVER["Lock Actuator Driver"]
     GPIO["GPIO and Time Platform"]
     STAGE["Power Stage and Actuator"]
 
-    FSM -->|"Unlock for bounded duration"| SERVICE
-    SERVICE --> DRIVER
+    SERVICE -->|"GRANT_ACCESS_UNLOCK"| APP
+    APP -->|"Unlock for bounded duration"| DRIVER
     DRIVER --> GPIO
     GPIO --> STAGE
 ```
@@ -840,13 +855,14 @@ flowchart TB
     KEYBOARD["Keyboard Task<br/> Periodic 1 ms"]
     QUEUE["Keyboard Event Queue<br/>8 Entries"]
     APP["Application Task<br/> Event plus heartbeat"]
-    FSM["Lock Controller FSM"]
+    LCS["Lock Control Service<br/>Table-driven FSM"]
     SERVICES["Synchronous non-blocking<br/> Services"]
 
     KEYBOARD -->|"MK key action"| QUEUE
     QUEUE --> APP
-    APP --> FSM
-    FSM --> SERVICES
+    APP -->|"LCS_Event_t"| LCS
+    LCS -->|"LCS_Action_t"| APP
+    APP --> SERVICES
 ```
 
 ### Scheduler Configuration Contracts
@@ -977,7 +993,7 @@ during integration.
 | Matrix Keyboard Driver and row/column GPIO handles | Keyboard Task | Initialization by App Core before scheduler |
 | Keyboard event queue write side | Keyboard Task | None |
 | Keyboard event queue read side | Application Task | None |
-| Lock Controller state and failed-attempt counter | Application Task | Tests through public API |
+| Lock Control Service singleton state and failed-attempt counter | LCS, called only by Application Task | Tests through public API |
 | Credential candidate | Credential Entry Service, called by Application Task | Masked length only to Display Service |
 | LCD, PCF8574 and I2C1 | Application Task | Initialization by App Core |
 | LED drivers and GPIOs | Application Task | Initialization by App Core |
@@ -1030,17 +1046,18 @@ payload shall remain a value object with no hardware information.
 | --- | --- | --- | --- |
 | `EV_INIT_OK` | App Core | Initialization summary | Critical startup dependencies are valid |
 | `EV_INIT_FAIL` | App Core | Module/fault code | Startup cannot enter normal operation |
+| `EV_CREDENTIAL_ENTRY_REQUESTED` | Credential input mapping | None | A wake key requests credential-entry mode; that key is not stored as a digit |
 | `EV_KEY_DIGIT` | Credential input mapping | Digit 0-9 | Append candidate digit if capacity permits |
 | `EV_KEY_CONFIRM` | Credential input mapping | None | Request completion/authentication |
 | `EV_KEY_CANCEL` | Credential input mapping | None | Clear or cancel candidate entry |
-| `EV_ENTRY_TIMEOUT` | Credential Entry/Lock Controller | None | Input inactivity limit elapsed |
+| `EV_ENTRY_TIMEOUT` | Application deadline owner | None | Input inactivity limit elapsed |
 | `EV_AUTH_SUCCESS` | Authentication Service | None | Candidate matches configured credential |
 | `EV_AUTH_FAILURE` | Authentication Service | None | Candidate does not match |
-| `EV_DENIED_TIMEOUT` | Lock Controller | None | Denial feedback interval elapsed |
-| `EV_UNLOCK_TIMEOUT` | Lock Controller/Lock Control | None | Authorized unlock interval elapsed |
-| `EV_LOCKOUT_TIMEOUT` | Lock Controller | None | Temporary lockout elapsed |
+| `EV_DENIED_TIMEOUT` | Application deadline owner | None | Denial feedback interval elapsed |
+| `EV_UNLOCK_TIMEOUT` | Application/actuator deadline owner | None | Authorized unlock interval elapsed |
+| `EV_LOCKOUT_TIMEOUT` | Application deadline owner | None | Temporary lockout elapsed |
 | `EV_INPUT_OVERFLOW` | Keyboard event transport | Count/status | Input ordering cannot be trusted |
-| `EV_CRITICAL_FAULT` | Any subsystem through App boundary | Fault code | Immediate transition to safe fault handling |
+| `EV_CRITICAL_FAULT` | Any subsystem through App boundary | Fault code | Planned global transition to safe fault handling; not yet in LCS API |
 | `EV_PM_SLEEP_REQUEST` | Power Management | None | Later power increment requests sleep evaluation |
 | `EV_PM_WAKE` | Platform wake integration | Wake reason | Later power increment resumes active execution |
 
@@ -1053,45 +1070,73 @@ transition.
 
 ## Electronic Lock State Machine
 
-The Lock Controller shall implement one explicit state machine. Distributed
-service conditionals shall not become an implicit second product FSM.
+The Lock Control Service owns one explicit, table-driven product state machine.
+The application translates product facts into `LCS_Event_t`, calls
+`LCS_Process()` and coordinates the modules required to execute the returned
+semantic `LCS_Action_t`. Distributed application or service conditionals shall
+not become an implicit second product FSM.
 
 ### Operational Flow
+
 ```mermaid
 flowchart TB
-    START((Start)) --> BOOT[BOOT]
-    BOOT -->|EV_INIT_OK| LOCKED_IDLE[LOCKED_IDLE]
-    LOCKED_IDLE -->|EV_KEY_DIGIT| CREDENTIAL_ENTRY[CREDENTIAL_ENTRY]
-    CREDENTIAL_ENTRY -->|EV_KEY_CONFIRM<br/> and complete| AUTHENTICATING[AUTHENTICATING]
+    START((Start)) --> BOOT["BOOT"]
 
-    AUTHENTICATING -->|EV_AUTH_SUCCESS| ACCESS_GRANTED[ACCESS_GRANTED]
-    AUTHENTICATING -->|EV_AUTH_FAILURE| ACCESS_DENIED[ACCESS_DENIED]
-    ACCESS_DENIED -->|Denial feedback complete| ATTEMPT_LIMIT{Attempt limit reached?}
+    BOOT -->|"INIT_OK<br/>effect: activate<br/>service"| LOCKED["LOCKED"]
+    BOOT -->|"INIT_FAIL<br/>action: request<br/>controlled reset"| FAULT["FAULT"]
 
-    ACCESS_GRANTED -->|EV_UNLOCK_TIMEOUT| RETURN_IDLE[Return to locked idle]
-    ATTEMPT_LIMIT -->|No| RETURN_IDLE
-    ATTEMPT_LIMIT -->|Yes| LOCKOUT[LOCKOUT]
-    LOCKOUT -->|EV_LOCKOUT_TIMEOUT| RETURN_IDLE
-    CREDENTIAL_ENTRY -->|Cancel when empty or entry timeout| RETURN_IDLE
+    LOCKED -->|"CREDENTIAL_ENTRY_<br/>REQUESTED<br/>action: begin<br/>entry session"| ENTRY["CREDENTIAL SESSION<br/>ACTIVE"]
+    ENTRY -->|"CANDIDATE_READY<br/>action: request<br/>authentication"| AUTH["AUTHENTICATING"]
+    ENTRY -->|"CREDENTIAL_<br/>CANCELLED<br/>or ENTRY_TIMEOUT<br/>action: end<br/>entry session"| TO_LOCKED["Target state:<br/>LOCKED"]
 
+    AUTH -->|"AUTH_SUCCESS<br/>effect: reset<br/>failure count<br/>action: grant<br/>access / unlock"| GRANTED["ACCESS GRANTED<br/>UNLOCKED"]
+    AUTH -->|"AUTH_FAILURE<br/>effect: increment<br/>failure count<br/>action: deny access"| DENIED["ACCESS DENIED<br/>LOCKED"]
+
+    GRANTED -->|"UNLOCK_TIMEOUT<br/>action: return<br/>to locked"| TO_LOCKED
+    DENIED -->|"DENIED_ACCESS_<br/>TIMEOUT"| LIMIT{"Attempt limit<br/>reached?"}
+    LIMIT -->|"No<br/>guard: under<br/>attempt limit<br/>action: return<br/>to locked"| TO_LOCKED
+    LIMIT -->|"Yes<br/>guard: attempt<br/>limit reached<br/>action: enter<br/>lockout"| LOCKOUT["LOCKOUT"]
+    LOCKOUT -->|"LOCKOUT_TIMEOUT<br/>effect: reset<br/>failure count<br/>action: return<br/>to locked"| TO_LOCKED
+    TO_LOCKED --> LOCKED
+
+    classDef initial fill:#f4f6f7,stroke:#667681,color:#263642
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
-    classDef processing fill:#f0f8f8,stroke:#1f7a75,color:#17324d
-    classDef denied fill:#fff2e5,stroke:#e58a3a,color:#17324d
-    classDef connector fill:#f4f6f7,stroke:#667681,color:#263642
+    classDef active fill:#eaf4fb,stroke:#3478a8,color:#17324d
+    classDef denied fill:#fff2e5,stroke:#d77a27,color:#5e3514
+    classDef decision fill:#fff8d9,stroke:#ad8b00,color:#4d4100
+    classDef connector fill:#f4f6f7,stroke:#667681,color:#263642,stroke-dasharray: 5 3
+    classDef fault fill:#fbecec,stroke:#b54040,color:#7a2525
 
-    class BOOT,LOCKED_IDLE secure
-    class CREDENTIAL_ENTRY,AUTHENTICATING,ACCESS_GRANTED processing
-    class ACCESS_DENIED,ATTEMPT_LIMIT,LOCKOUT denied
-    class RETURN_IDLE connector
+    class START initial
+    class BOOT,LOCKED secure
+    class ENTRY,AUTH,GRANTED active
+    class DENIED,LOCKOUT denied
+    class LIMIT decision
+    class TO_LOCKED connector
+    class FAULT fault
 ```
+
+The named operational boxes correspond to private `LCS_State_t` values.
+`START` is only the static-initialization marker, `LIMIT` is only a visual
+decision node, and `TO_LOCKED` only separates the converging return routes;
+none is an additional runtime state. The two complete paths through `LIMIT`
+summarize the mutually exclusive attempt-count guards of the two
+`DENIED_ACCESS_TIMEOUT` transition records.
+
+Event names omit the common `LCS_EVENT_` prefix and action labels omit
+`LCS_ACTION_` for readability. The complete transition records, including
+their internal effects and returned actions, are documented in the
+[Lock Control Service README](Libs/Services/Lock_Control/README.md#94-transition-table).
+
 ---
 
-### Critical Fault Precedence
+### Planned Critical Fault Precedence
+
 ```mermaid
 flowchart LR
-    BOOT[BOOT] -->|EV_INIT_FAIL| FAULT[FAULT]
-    OPERATIONAL[Operational states] -->|EV_CRITICAL_FAULT| FAULT
-    FAULT -->|Controlled reset| RESET((Reset))
+    BOOT["BOOT"] -->|"INIT_FAIL — implemented"| FAULT["FAULT"]
+    OPERATIONAL["Operational states"] -.->|"CRITICAL_FAULT — planned"| FAULT
+    FAULT -.->|"Application executes controlled reset"| RESET((Reset))
 
     classDef source fill:#f4f6f7,stroke:#667681,color:#263642
     classDef fault fill:#fbecec,stroke:#b54040,color:#7a2525
@@ -1102,60 +1147,68 @@ flowchart LR
     class RESET reset
 ```
 
-A critical fault from any operational state has precedence over all normal
-events and transitions to `FAULT`, even when an individual arrow is omitted
-from the diagram for readability.
+The current transition table implements only the `BOOT + INIT_FAIL` path into
+`FAULT`. Global critical-fault preemption from every operational state remains
+a planned policy and is intentionally shown with a dashed line. It shall not be
+treated as implemented until the public event, precedence rule, transitions and
+tests are added to the Lock Control Service.
 
 ### State Responsibilities
 
-| State | Purpose | Actuator command | Accepted input |
+| State | Purpose | Required actuator behavior | Accepted LCS event |
 | --- | --- | --- | --- |
-| `BOOT` | Establish safe output, inspect initialization results and prepare UI | Safe/off | None |
-| `LOCKED_IDLE` | Normal secure idle state and prompt for a new credential | Safe/off | Digit starts entry; other keys do not authenticate |
-| `CREDENTIAL_ENTRY` | Collect, mask, clear and time the candidate PIN | Safe/off | Digits, `*`, `#` |
-| `AUTHENTICATING` | Perform side-effect-free credential validation | Safe/off | None |
-| `ACCESS_GRANTED` | Maintain authorized bounded unlock and success indication | Energized only within deadline | Ignored/limited |
-| `ACCESS_DENIED` | Report failure and select retry or lockout path | Safe/off | Ignored during denial interval |
-| `LOCKOUT` | Reject authentication until lockout deadline expires | Safe/off | System events only |
-| `FAULT` | Latch critical failure and preserve safe output | Safe/off | Controlled reset/recovery only |
+| `BOOT` | Await startup validation before normal FSM processing | Safe/off | `INIT_OK`, `INIT_FAIL` |
+| `LOCKED` | Secure idle state awaiting a credential-entry request | Safe/off | `CREDENTIAL_ENTRY_REQUESTED` |
+| `CREDENTIAL_SESSION_ACTIVE` | Authorize the application-managed credential-entry session | Safe/off | `CREDENTIAL_CANCELLED`, `CANDIDATE_READY`, `ENTRY_TIMEOUT` |
+| `AUTHENTICATING` | Await the result of application-coordinated authentication | Safe/off | `AUTH_SUCCESS`, `AUTH_FAILURE` |
+| `ACCESS_GRANTED_UNLOCKED` | Represent the bounded authorized-unlock interval | Energized only within the deadline | `UNLOCK_TIMEOUT` |
+| `ACCESS_DENIED_LOCKED` | Preserve the lock while bounded denial feedback completes | Safe/off | `DENIED_ACCESS_TIMEOUT` |
+| `LOCKOUT` | Reject credential entry until the lockout interval expires | Safe/off | `LOCKOUT_TIMEOUT` |
+| `FAULT` | Latch startup failure and request controlled reset | Safe/off | No outgoing transition currently defined |
 
-### State Entry and Exit Actions
+The actuator column is an application safety obligation. LCS never drives the
+actuator; it communicates the required product operation through a semantic
+action.
 
-| State | Entry actions | Exit actions/conditions |
+### Transition and Application Actions
+
+| Transition or condition | LCS-owned effect | Semantic action executed by the application |
 | --- | --- | --- |
-| `BOOT` | Force actuator safe; clear credential; evaluate init bitmap | `EV_INIT_OK` only when all critical dependencies are valid |
-| `LOCKED_IDLE` | Force safe; clear credential; show locked prompt; set locked indication | First digit is forwarded as the first candidate digit |
-| `CREDENTIAL_ENTRY` | Start/restart 15 s inactivity timing; show masked count | Always erase candidate when leaving the state |
-| `AUTHENTICATING` | Validate exactly four digits; immediately erase candidate after comparison | Emit success/failure inside Application Task |
-| `ACCESS_GRANTED` | Reset failed attempts; request 3 s unlock; start success UI | Force safe when deadline expires or on any fault |
-| `ACCESS_DENIED` | Saturating increment of failed attempts; start denial UI and bounded denial interval | Go to lockout at three attempts; otherwise return idle |
-| `LOCKOUT` | Force safe; clear credential; show lockout; start 30 s deadline | Reset failed-attempt counter when lockout completes |
-| `FAULT` | Force safe; clear credential; stop normal sound/UI; latch fault; show limited fault indication | Hardware reset or explicitly approved recovery only |
+| `BOOT + INIT_OK` | Activate the service and enter `LOCKED` | None |
+| `BOOT + INIT_FAIL` | Enter `FAULT` | Preserve safe outputs and request controlled reset |
+| `LOCKED + CREDENTIAL_ENTRY_REQUESTED` | Enter `CREDENTIAL_SESSION_ACTIVE` | Wake UI, begin CES session and start entry timing |
+| Entry cancellation or timeout | Return to `LOCKED` | End and erase the CES session; restore locked UI |
+| Complete candidate | Enter `AUTHENTICATING` | Copy/erase candidate, authenticate and report the result |
+| Authentication success | Reset failure count; enter `ACCESS_GRANTED_UNLOCKED` | Coordinate bounded unlock and granted feedback |
+| Authentication failure | Saturating failure increment; enter `ACCESS_DENIED_LOCKED` | Preserve safe lock and coordinate denial feedback |
+| Denial timeout below failure limit | Return to `LOCKED` | Restore safe locked-idle mode |
+| Denial timeout at failure limit | Enter `LOCKOUT` | Reject entry and start lockout feedback/timing |
+| Unlock timeout | Return to `LOCKED` | Force safe lock and restore locked-idle mode |
+| Lockout timeout | Reset failure count; return to `LOCKED` | Restore safe locked-idle mode |
 
 ### Credential Entry Rules
 
 | Current condition | Input | Behavior |
 | --- | --- | --- |
-| `LOCKED_IDLE` | Digit | Enter `CREDENTIAL_ENTRY` and store it as digit 1 |
-| `LOCKED_IDLE` | `#` | Do not authenticate; optional incomplete feedback |
-| `LOCKED_IDLE` | `*` | Remain idle |
-| Entry length below 4 | Digit | Append digit and restart entry timeout |
-| Entry length equal to 4 | Digit | Ignore/reject without buffer overflow |
-| Entry length equal to 4 | `#` | Enter `AUTHENTICATING` |
-| Entry length below 4 | `#` | Report incomplete; remain in entry |
+| `LOCKED` | Any debounced key | Dispatch `CREDENTIAL_ENTRY_REQUESTED`; wake the UI and begin entry without storing the initiating key |
+| Entry length below 6 | Digit | Append digit and restart entry timeout |
+| Entry length equal to 6 | Digit | Ignore/reject without buffer overflow |
+| Entry length equal to 6 | `#` | CES reports a ready candidate; the application dispatches `CANDIDATE_READY` |
+| Entry length below 6 | `#` | Report incomplete; remain in the active entry session |
 | Non-empty entry | `*` | Erase candidate; remain in entry with length zero |
-| Empty entry | `*` | Cancel session and return to `LOCKED_IDLE` |
-| Active entry | 15 s inactivity | Erase candidate and return to `LOCKED_IDLE` |
+| Empty entry | `*` | CES reports cancellation; the application dispatches `CREDENTIAL_CANCELLED` |
+| Active entry | 15 s inactivity | Dispatch `ENTRY_TIMEOUT`, erase the candidate and return to `LOCKED` |
 
 ### Mandatory FSM Invariants
 
 1. The actuator is electrically safe in every state except bounded
-   `ACCESS_GRANTED` operation.
-2. `FAULT` preempts user-interface events.
+   `ACCESS_GRANTED_UNLOCKED` operation.
+2. `INIT_FAIL` enters `FAULT`; global operational fault preemption remains a
+   pending extension.
 3. `LOCKOUT` never accepts or authenticates a credential.
 4. The failed-attempt counter saturates and never wraps.
 5. Authentication success resets the failed-attempt counter.
-6. A candidate buffer never contains more than four digits.
+6. A candidate buffer never contains more than six digits.
 7. Candidate data is erased on every terminal path.
 8. Unlock timeout is independent from LCD, LED and buzzer completion.
 9. Reset during unlock immediately returns the output to its hardware safe
@@ -1198,22 +1251,23 @@ sequenceDiagram
 1. The user submits a complete but invalid credential.
 2. Authentication returns failure without hardware side effects.
 3. The candidate is erased immediately.
-4. The Lock Controller increments the consecutive-failure counter using a
-   saturating operation.
+4. The Lock Control Service increments the consecutive-failure counter using a
+   saturating internal effect.
 5. Display, LED and buzzer services start non-blocking denial feedback.
-6. If the counter is below three, the application returns to `LOCKED_IDLE`
+6. If the counter is below three, LCS returns to `LOCKED`
    after the bounded denial interval.
-7. On the third failure, the application enters `LOCKOUT` for 30 seconds.
+7. On the third failure, LCS returns `ENTER_LOCKOUT` and the application starts
+   the 30-second lockout interval and feedback.
 8. Keyboard scanning continues, but credential events are ignored while
    locked out.
-9. After the lockout deadline, the failed-attempt counter is reset and the
-   application returns to `LOCKED_IDLE`.
+9. After the lockout deadline, LCS resets the failed-attempt counter and
+   returns to `LOCKED`.
 
 ### Peripheral Failure During Access
 
 If LCD, LED or buzzer operation fails while access is granted:
 
-- the failure is reported to the Lock Controller;
+- the failure is reported to the application action dispatcher;
 - the actuator deadline remains active and independent;
 - unlock is not extended;
 - the actuator is forced safe at the original deadline;
@@ -1239,8 +1293,8 @@ hardware pulse. They shall never represent an application state.
 | Key debounce interval | 40 ms | Matrix Keyboard component | Monotonic timestamps |
 | Application heartbeat | 10 ms maximum | Application Task | Bounded queue wait |
 | Credential-entry timeout | 15 s | Timeout Validation service | Application timestamp |
-| Actuator unlock interval | 3 s | Lock Control service | Independent deadline |
-| Lockout interval | 30 s | Lock Controller | Application timestamp |
+| Actuator unlock interval | 3 s | Application and Lock Actuator Driver | Independent deadline |
+| Lockout interval | 30 s | Application action dispatcher | Application timestamp |
 | Single I2C transaction | 20 ms maximum | I2C Platform | HAL timeout plus status |
 | LED pattern update | 10 ms maximum cadence | Status Indication service | Application heartbeat |
 | Sound pattern update | 10 ms maximum cadence | Sound Generator service | Application heartbeat |
@@ -1319,11 +1373,11 @@ flowchart TD
     Peripherals --> Platform["Construct Platform objects"]
     Platform --> Actuator["Initialize actuator and<br/> force LOCKED"]
     Actuator --> Components["Initialize keyboard, LCD,<br/> LEDs and buzzer"]
-    Components --> Services["Initialize services and<br/> Lock Controller"]
+    Components --> Services["Initialize services and<br/> action dispatcher"]
     Services --> RTOS["Create static queue<br/> and tasks"]
     RTOS --> Scheduler["Start scheduler"]
     Scheduler --> Boot["BOOT state self-check<br/> summary"]
-    Boot -->|Critical path valid| Locked["LOCKED_IDLE"]
+    Boot -->|Critical path valid| Locked["LOCKED"]
     Boot -->|Critical failure| Fault["FAULT"]
 ```
 
@@ -1340,8 +1394,8 @@ The detailed order is:
    explicitly commanded to its safe, locked state.
 7. The monotonic time source is initialized and validated.
 8. Keyboard, PCF8574, LCD, backlight, LED and buzzer components are initialized.
-9. Services and the Lock Controller are initialized with validated dependency
-   pointers and configuration.
+9. Services and the application action dispatcher are initialized with
+   validated dependencies and configuration.
 10. The event queue and both tasks are created from static memory.
 11. The scheduler starts; the Application Task evaluates the collected startup
     results while in `BOOT`.
@@ -1363,7 +1417,9 @@ No startup animation or sound may delay the actuator-safe operation.
 
 Degraded operation never relaxes authentication, lockout or actuator safety.
 If the remaining feedback is insufficient to communicate normal use safely,
-the Lock Controller may escalate the condition to `FAULT`.
+the application shall preserve safe outputs and follow the configured fault or
+controlled-reset policy. Global runtime-fault dispatch into LCS remains a
+planned extension.
 
 ### Scheduler Failure Hooks
 
@@ -1400,8 +1456,8 @@ after startup is not part of normal behavior.
   without hiding the original failure class.
 - Services return domain-level results such as success, denied, busy, invalid
   argument or device failure.
-- Only the Lock Controller decides whether a reported failure is ignored,
-  retried, degraded or promoted to `FAULT`.
+- Only the application fault policy decides whether a reported peripheral
+  failure is ignored, retried, degraded or promoted to the safe reset path.
 - A function that cannot complete its contract shall not return success.
 - Failed output updates must not silently extend a product deadline.
 
@@ -1473,7 +1529,7 @@ The Power Management service shall eventually:
 It shall not:
 
 - drive GPIO, I2C or PWM directly;
-- bypass the Lock Controller;
+- bypass the Lock Control Service policy or application action dispatcher;
 - enter deep sleep while the actuator may be unlocked;
 - silently discard a pending application event;
 - use low battery as a reason to relax authentication or safety behavior.
@@ -1531,8 +1587,8 @@ flowchart LR
 | `PM_RESUME` | Hardware and timebase restoration | Restore clocks, peripherals and debounce input before use |
 | `PM_FAULT` | Safe power transition cannot be guaranteed | Keep or force lock safe and report critical failure |
 
-Power state is orthogonal to the Electronic Lock FSM. For example,
-`LOCKED_IDLE` may be either `PM_ACTIVE` or `PM_IDLE`; `ACCESS_GRANTED` is always
+Power state is orthogonal to the Electronic Lock FSM. For example, `LOCKED`
+may be either `PM_ACTIVE` or `PM_IDLE`; `ACCESS_GRANTED_UNLOCKED` is always
 `PM_ACTIVE`. The two state machines exchange explicit requests and conditions
 rather than sharing internal state.
 
@@ -1540,7 +1596,7 @@ rather than sharing internal state.
 
 Deep sleep may be entered only when all of the following are true:
 
-1. the product FSM is in an approved locked state, initially `LOCKED_IDLE` or
+1. the product FSM is in an approved locked state, initially `LOCKED` or
    `LOCKOUT`;
 2. the lock actuator is commanded safe and no unlock deadline is active;
 3. the application event queue is empty at the final guard check;
@@ -1658,7 +1714,7 @@ layers instead of triggering a broad repository reorganization during the MVP.
 | Path | Responsibility |
 | --- | --- |
 | `App/Core/` | Composition root and FreeRTOS task entry points |
-| `App/Lock_Controller/` | Product FSM and application policy |
+| `Libs/Services/Lock_Control/` | Table-driven product FSM and consecutive-failure policy |
 | `Core/` | STM32Cube-generated startup, HAL glue and IRQ code |
 | `Drivers/` | STM32Cube HAL and CMSIS packages |
 | `Libs/Components/Buzzer/` | Passive-buzzer component driver |
@@ -1896,7 +1952,7 @@ domain behavior:
 
 If a service participates in a state machine, its README links to this document
 and explains only the states or transitions it owns. It shall not redefine the
-global Lock Controller FSM.
+authoritative Lock Control Service FSM.
 
 ### Documentation Quality Rules
 
@@ -1921,7 +1977,7 @@ target; finally the product behavior is exercised end to end.
 
 | Level | Primary subjects | Method |
 | --- | --- | --- |
-| Host unit | Authentication, credential entry, timeout validation, Lock Controller FSM | Native C tests with fake time and fake services |
+| Host unit | Authentication, credential entry, timeout validation and Lock Control FSM | Native C tests using production logic without STM32 HAL |
 | Host component | Driver logic that depends only on abstract interfaces | Fake GPIO, I2C, PWM and Time implementations |
 | Target component | GPIO polarity, PWM frequencies, I2C protocol, LCD timing, keyboard scan | Instrumented tests on STM32F411 board |
 | RTOS integration | Task cadence, queue behavior, ownership, stack margin | Trace points, counters and target stress tests |
@@ -2054,7 +2110,7 @@ bounded test command can never leave the actuator unlocked past its deadline.
 
 ### Phase 4 - Product FSM Integration
 
-- implement the full Lock Controller FSM;
+- integrate the implemented Lock Control Service FSM with the application action dispatcher;
 - connect services, UI feedback and lock control;
 - validate boot, normal access, denial, timeout, lockout and fault paths;
 - exercise degraded UI behavior and reset-during-unlock safety.
@@ -2105,7 +2161,7 @@ known mistake can never be corrected.
 | `ARCH-004` | The Application Task is the only owner of services and output drivers | Avoids mutexes and split state ownership |
 | `ARCH-005` | Keyboard events cross one bounded static queue | Makes the concurrency boundary explicit |
 | `ARCH-006` | Application behavior is event-driven with a 10 ms maximum heartbeat | Combines responsiveness and non-blocking effects |
-| `ARCH-007` | The full eight-state Lock Controller FSM is implemented | Makes boot, denial, lockout and fault behavior explicit |
+| `ARCH-007` | The eight-state product FSM belongs to the Lock Control Service | Keeps transition policy table-driven, explicit and host-testable |
 | `ARCH-008` | Every unlock is finite and independently deadline-protected | Core safety invariant |
 | `ARCH-009` | Services and drivers do not depend on FreeRTOS | Keeps business and hardware modules host-testable |
 | `ARCH-010` | Application RTOS objects use static allocation | Predictable memory and startup behavior |
@@ -2166,14 +2222,13 @@ implemented yet.
 | LED driver | Implemented baseline with README | Used only through Status Indication service |
 | Matrix Keyboard plus GPIO adapter | Implemented baseline with README | Owned by Keyboard Task |
 | PCF8574 driver | Implemented baseline with README | Owned through the LCD bus adapter |
-| Application Core | Skeleton | Composition root, static RTOS objects and task entry points |
-| Lock Controller | Skeleton | Full Electronic Lock FSM |
-| Six initial services | API/source skeletons | Implement and test contracts defined here |
+| Application Core | Rework pending | Composition root, semantic action dispatcher, static RTOS objects and task entry points |
+| Seven domain/UI services | Implemented incrementally | Integrate and test contracts defined here |
 | Lock Actuator component | Not present | Required before product integration |
-| Lock Control service | Not present | Required before product integration |
+| Lock Control service | Table-driven FSM implemented and host-tested | Integrate semantic actions with the application and actuator path |
 | Power Management service | Not present | PM0/PM1 skeleton during MVP; deep sleep later |
 | FreeRTOS integration | Not present | Two static tasks and one static event queue |
-| Automated tests | Not present | Host unit suite plus target and product acceptance tests |
+| Automated tests | Initial host tests present | Expand host unit suite plus target and product acceptance tests |
 
 ### Known Baseline Corrections Before Integration
 
