@@ -157,6 +157,12 @@ static const DRS_ScreenContent_t DRS_ScreenContentMap[DRS_SCREEN_COUNT] =
     {
         .first_line  = "Access Denied!",
         .second_line = ""
+    },
+
+    [DRS_SCREEN_LOCKOUT] =
+    {
+        .first_line  = "Lockout!",
+        .second_line = ""
     }
 };
 
