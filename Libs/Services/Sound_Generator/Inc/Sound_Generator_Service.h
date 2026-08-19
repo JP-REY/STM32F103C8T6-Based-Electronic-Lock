@@ -86,6 +86,8 @@ typedef enum
 
     SGS_RINGTONE_ERROR,          /*< Descending feedback pattern for an error.       */
 
+    SGS_RINGTONE_LOCKOUT,        /*< Feedback pattern for lockout entry.             */
+
     SGS_RINGTONE_COUNT           /*< Number of patterns and invalid ringtone marker. */
 
 }SGS_Ringtone_t;
