@@ -54,14 +54,13 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED_ON_BOARD_GPIO_Port, LED_ON_BOARD_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, MKB_COL0_Pin|MKB_COL1_Pin|MKB_COL2_Pin|MKB_COL3_Pin
-                          |STATUS_LED_BLUE_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(STATUS_LED_RED_GPIO_Port, STATUS_LED_RED_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, LOW_BATTERY_INDICATION_LED_Pin|LOCK_STATUS_INDICATION_LED_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LOCKER_PIN_GPIO_Port, LOCKER_PIN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LOCK_ACTUATOR_GPIO_Port, LOCK_ACTUATOR_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : LED_ON_BOARD_Pin */
   GPIO_InitStruct.Pin = LED_ON_BOARD_Pin;
@@ -70,39 +69,27 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_ON_BOARD_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : MKB_ROW3_Pin MKB_ROW2_Pin MKB_ROW1_Pin MKB_ROW0_Pin */
-  GPIO_InitStruct.Pin = MKB_ROW3_Pin|MKB_ROW2_Pin|MKB_ROW1_Pin|MKB_ROW0_Pin;
+  /*Configure GPIO pins : KEYBOARD_ROW_3_Pin KEYBOARD_ROW_2_Pin KEYBOARD_ROW_1_Pin KEYBOARD_ROW_0_Pin */
+  GPIO_InitStruct.Pin = KEYBOARD_ROW_3_Pin|KEYBOARD_ROW_2_Pin|KEYBOARD_ROW_1_Pin|KEYBOARD_ROW_0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : MKB_COL0_Pin MKB_COL1_Pin MKB_COL2_Pin MKB_COL3_Pin */
-  GPIO_InitStruct.Pin = MKB_COL0_Pin|MKB_COL1_Pin|MKB_COL2_Pin|MKB_COL3_Pin;
+  /*Configure GPIO pins : KEYBOARD_COL_3_Pin KEYBOARD_COL_2_Pin KEYBOARD_COL_1_Pin KEYBOARD_COL_0_Pin
+                           LOW_BATTERY_INDICATION_LED_Pin LOCK_STATUS_INDICATION_LED_Pin */
+  GPIO_InitStruct.Pin = KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin
+                          |LOW_BATTERY_INDICATION_LED_Pin|LOCK_STATUS_INDICATION_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : STATUS_LED_RED_Pin */
-  GPIO_InitStruct.Pin = STATUS_LED_RED_Pin;
+  /*Configure GPIO pin : LOCK_ACTUATOR_Pin */
+  GPIO_InitStruct.Pin = LOCK_ACTUATOR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(STATUS_LED_RED_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : STATUS_LED_BLUE_Pin */
-  GPIO_InitStruct.Pin = STATUS_LED_BLUE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-  HAL_GPIO_Init(STATUS_LED_BLUE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LOCKER_PIN_Pin */
-  GPIO_InitStruct.Pin = LOCKER_PIN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LOCKER_PIN_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(LOCK_ACTUATOR_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
