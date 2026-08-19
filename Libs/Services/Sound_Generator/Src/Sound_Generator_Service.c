@@ -51,7 +51,6 @@ typedef enum
 {
     SGS_PRIORITY_KEYPRESS, /*< Replaceable acknowledgement priority.      */
     SGS_PRIORITY_FEEDBACK, /*< Access-result and error feedback priority. */
-    SGS_PRIORITY_LOCKOUT   /*< Lockout feedback priority. */
 
 }SGS_priority_t;
 
@@ -127,6 +126,37 @@ static const SGS_Phase_t SGS_Keypressphases[] =
 };
 
 /**
+ * @brief   Short acknowledgement emitted for an incomplete entry.
+ *
+ * @details Defines one enabled 4600 Hz tone phase with a nominal duration of
+ *          40 milliseconds.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EntryIncompletephases[] =
+{
+    { .frequency_hz = 4600U, .duration_ms =  40U, .output_enabled = true }
+};
+
+/**
+ * @brief   Short acknowledgement emitted for an entry timeout.
+ *
+ * @details Defines an 80 ms tone at 5000 Hz, 60 ms of silence, an 
+ *          80 ms tone at 5000 Hz, 60 ms of silence followed by an
+ *          100ms tone ate 500hz.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EntryTimeoutphases[] =
+{
+    { .frequency_hz = 5000U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  60U, .output_enabled = false },
+    { .frequency_hz = 5000U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  60U, .output_enabled = false },
+    { .frequency_hz = 5000U, .duration_ms = 100U, .output_enabled = true  }
+};
+
+/**
  * @brief   Rising two-tone pattern emitted after access is granted.
  *
  * @details Defines an 80 ms tone at 2000 Hz, 40 ms of silence and a 140 ms tone
@@ -157,14 +187,13 @@ static const SGS_Phase_t SGS_Errorphases[] =
 };
 
 /**
- * @brief    Sound phase sequence played when the system enters lockout.
+ * @brief   Sound pattern emitted when the system enters lockout.
  *
- * @details  Plays two identical descending tone sequences of 1200 Hz,
- *           900 Hz and 600 Hz. Short silent intervals separate the tones,
- *           and a 300 ms pause separates the two sequences.
+ * @details Plays one descending 1200 Hz, 900 Hz and 600 Hz sequence,
+ *          followed by three rapid 2400 Hz beeps indicating that
+ *          credential entry has been locked.
  *
- * @note     The complete pattern lasts 2080 ms and is intended to provide
- *           a distinct audible indication that the system has been locked.
+ * @note    The complete pattern lasts 1540 milliseconds.
  */
 static const SGS_Phase_t SGS_Lockoutphases[] =
 {
@@ -173,12 +202,12 @@ static const SGS_Phase_t SGS_Lockoutphases[] =
     { .frequency_hz =  900U, .duration_ms = 180U, .output_enabled = true  },
     { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
     { .frequency_hz =  600U, .duration_ms = 450U, .output_enabled = true  },
-    { .frequency_hz =    0U, .duration_ms = 300U, .output_enabled = false },
-    { .frequency_hz = 1200U, .duration_ms = 120U, .output_enabled = true  },
-    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
-    { .frequency_hz =  900U, .duration_ms = 180U, .output_enabled = true  },
-    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
-    { .frequency_hz =  600U, .duration_ms = 450U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms = 250U, .output_enabled = false },
+    { .frequency_hz = 2400U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  60U, .output_enabled = false },
+    { .frequency_hz = 2400U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  60U, .output_enabled = false },
+    { .frequency_hz = 2400U, .duration_ms = 120U, .output_enabled = true  }
 };
 
 /**
@@ -200,6 +229,20 @@ static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
         .priority    = SGS_PRIORITY_KEYPRESS
     },
 
+    [SGS_RINGTONE_ENTRY_INCOMPLETE] =
+    {
+        .phases      = SGS_EntryIncompletephases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryIncompletephases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_ENTRY_TIMEOUT] =
+    {
+        .phases      = SGS_EntryTimeoutphases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryTimeoutphases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
     [SGS_RINGTONE_ACCESS_GRANTED] =
     {
         .phases      = SGS_AccessGrantedphases,
@@ -218,7 +261,7 @@ static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
     {
         .phases      = SGS_Lockoutphases,
         .phase_count = SGS_ARRAY_LENGTH(SGS_Lockoutphases),
-        .priority    = SGS_PRIORITY_LOCKOUT
+        .priority    = SGS_PRIORITY_FEEDBACK
     }
 };
 
