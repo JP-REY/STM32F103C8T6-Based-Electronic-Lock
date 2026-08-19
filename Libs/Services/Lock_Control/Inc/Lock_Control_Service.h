@@ -112,7 +112,7 @@ typedef enum
 
     LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,   /*< Wake the UI, begin credential entry and establish its inactivity timing.    */
 
-    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION, /*< */
+    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION, /*< Refresh the UI and erase the candidate while preserving the active session. */
 
     LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,     /*< End and erase the entry session, then restore the locked-idle presentation. */
 
