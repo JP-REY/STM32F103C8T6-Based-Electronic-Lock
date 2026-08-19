@@ -80,15 +80,19 @@ typedef enum
  */
 typedef enum
 {
-    SGS_RINGTONE_KEYPRESS,       /*< Short acknowledgement for an accepted keypress. */
+    SGS_RINGTONE_KEYPRESS,          /*< Short acknowledgement for an accepted keypress. */
 
-    SGS_RINGTONE_ACCESS_GRANTED, /*< Rising feedback pattern for granted access.     */
+    SGS_RINGTONE_ENTRY_INCOMPLETE,  /*< Short feedback for an entry incomplete.         */
 
-    SGS_RINGTONE_ERROR,          /*< Descending feedback pattern for an error.       */
+    SGS_RINGTONE_ENTRY_TIMEOUT,     /*< Short feedback for an entry timeout.            */
 
-    SGS_RINGTONE_LOCKOUT,        /*< Feedback pattern for lockout entry.             */
+    SGS_RINGTONE_ACCESS_GRANTED,    /*< Rising feedback pattern for granted access.     */
 
-    SGS_RINGTONE_COUNT           /*< Number of patterns and invalid ringtone marker. */
+    SGS_RINGTONE_ERROR,             /*< Descending feedback pattern for an error.       */
+
+    SGS_RINGTONE_LOCKOUT,           /*< Feedback pattern for lockout entry.             */
+
+    SGS_RINGTONE_COUNT              /*< Number of patterns and invalid ringtone marker. */
 
 }SGS_Ringtone_t;
 
