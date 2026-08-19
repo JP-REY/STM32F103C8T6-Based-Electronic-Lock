@@ -21,8 +21,11 @@
 #include "i2c.h"
 #include "tim.h"
 #include "gpio.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+
+#include "App_Core.h"
 
 /* USER CODE END Includes */
 
@@ -91,7 +94,12 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM2_Init();
   MX_TIM4_Init();
-  /* USER CODE BEGIN 2 */;
+  /* USER CODE BEGIN 2 */
+
+  if(App_Init() != APP_INIT_SUCCESSFULLY)
+  {
+	  Error_Handler();
+  }
 
   /* USER CODE END 2 */
 
@@ -100,6 +108,10 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+
+	  App_ReadInput();
+
+	  App_Dispatch();
 
     /* USER CODE BEGIN 3 */
   }
