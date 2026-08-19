@@ -98,6 +98,8 @@ typedef enum
 
     DRS_SCREEN_ACCESS_DENIED,    /*< Feedback indicating rejected authentication.                              */
 
+    DRS_SCREEN_LOCKOUT,           /*< Feedback indicating lockout.                                              */
+
     DRS_SCREEN_COUNT             /*< Number of screens and invalid rendered-screen marker.                     */
 
 }DRS_Screen_t;
