@@ -212,7 +212,7 @@
 #define APP_CREDENTIAL_ENTRY_DIGIT_INVALID      (0xFFU)
 
 /** @brief Maximum credential-entry inactivity interval, in milliseconds. */
-#define APP_CREDENTIAL_ENTRY_TIMEOUT_MS         (15000U)
+#define APP_CREDENTIAL_ENTRY_TIMEOUT_MS         (5000U)
 
 /** @brief Maximum authorized unlock interval, in milliseconds. */
 #define APP_UNLOCK_TIMEOUT_MS                   (3000U)
@@ -585,7 +585,7 @@ static bool          App_ForceLock                      (void);
 static bool          App_RequestUnlock                  (void);
 static void          App_SetLockedPresentation          (void);
 static void          App_SetCredentialEntryPresentation (void);
-static LCS_Event_t   App_ExecuteAction                  (LCS_Action_t Action, LCS_Event_t TriggerEvent);
+static LCS_Event_t   App_ExecuteAction                  (LCS_Action_t Action);
 static void          App_DispatchLcsEvent               (LCS_Event_t Event);
 static void          App_HandleKeyboardEvent            (const MK_Output_t* Event);
 static void          App_HandleCredentialEvent          (CES_Event_t Event);
@@ -1234,12 +1234,11 @@ static bool App_RequestUnlock(void)
  */
 static void App_SetLockedPresentation(void)
 {
-    (void)DRS_SetScreen(DRS_SCREEN_PASSWORD_ENTRY);
+    (void)DRS_SetScreen(DRS_SCREEN_IDLE);
     (void)DRS_SetEnteredDigits(0U);
     (void)DRS_Update();
     (void)LCD_BacklightOff(&App_Lcd);
     (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-    (void)SGS_Stop();
 }
 
 /**
@@ -1252,12 +1251,12 @@ static void App_SetCredentialEntryPresentation(void)
 {
     uint32_t current_time_ms = Platform_GetMillis();
 
+    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
     (void)LCD_BacklightOn(&App_Lcd);
     (void)DRS_SetScreen(DRS_SCREEN_PASSWORD_ENTRY);
     (void)DRS_SetEnteredDigits(0U);
     (void)DRS_Update();
     (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
 }
 
 /**
@@ -1268,11 +1267,10 @@ static void App_SetCredentialEntryPresentation(void)
  *          only after the current LCS_Process() call has returned.
  *
  * @param   Action       - Semantic action returned by LCS_Process().
- * @param   TriggerEvent - Event that selected Action; used only where presentation depends on the original cause.
  *
  * @return  A synchronous semantic follow-up event, or LCS_EVENT_NONE when the action is complete.
  */
-static LCS_Event_t App_ExecuteAction(LCS_Action_t Action, LCS_Event_t TriggerEvent)
+static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 {
     uint32_t current_time_ms = Platform_GetMillis();
 
@@ -1284,6 +1282,7 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action, LCS_Event_t TriggerEve
                !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 (void)CES_EndSession();
+
                 App_CancelTimeout();
 
                 return LCS_EVENT_CREDENTIAL_CANCELLED;
@@ -1293,24 +1292,32 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action, LCS_Event_t TriggerEve
 
         break;
 
+        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION:
+
+            if(CES_RefreshSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+            
+            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
+
+            App_SetCredentialEntryPresentation();
+            
+
+        break;
+
         case LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION:
 
             App_CancelTimeout();
+
             (void)CES_EndSession();
             (void)App_ForceLock();
             (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
 
-            if(TriggerEvent == LCS_EVENT_ENTRY_TIMEOUT)
-            {
-                (void)LCD_BacklightOn(&App_Lcd);
-                (void)DRS_SetScreen(DRS_SCREEN_ENTRY_TIMEOUT);
-                (void)DRS_Update();
-                (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
-            }
-            else
-            {
-                App_SetLockedPresentation();
-            }
+            App_SetLockedPresentation();
 
         break;
 
@@ -1372,18 +1379,32 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action, LCS_Event_t TriggerEve
             }
 
             (void)LCD_BacklightOn(&App_Lcd);
-            (void)DRS_SetScreen(DRS_SCREEN_ACCESS_DENIED);
+            (void)DRS_SetScreen(DRS_SCREEN_LOCKOUT);
             (void)DRS_Update();
             (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKOUT_ENTRY);
-            (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
+            (void)SGS_Ring(SGS_RINGTONE_LOCKOUT, current_time_ms);
+
+        break;
+
+        case LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT:
+
+            App_CancelTimeout();
+
+            (void)CES_EndSession();
+            (void)App_ForceLock();
+            (void)SGS_Ring(SGS_RINGTONE_ENTRY_TIMEOUT, current_time_ms);
+
+            App_SetLockedPresentation();
 
         break;
 
         case LCS_ACTION_RETURN_TO_LOCKED:
 
             App_CancelTimeout();
+
             (void)CES_EndSession();
             (void)App_ForceLock();
+
             App_SetLockedPresentation();
 
         break;
@@ -1391,10 +1412,12 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action, LCS_Event_t TriggerEve
         case LCS_ACTION_REQUEST_CONTROLLED_RESET:
 
             App_CancelTimeout();
+
             (void)CES_EndSession();
             (void)App_ForceLock();
             (void)SGS_Stop();
             (void)LCD_BacklightOff(&App_Lcd);
+
             App_RequestControlledReset();
 
         break;
@@ -1435,16 +1458,18 @@ static void App_DispatchLcsEvent(LCS_Event_t Event)
         LCS_Event_t trigger_event = pending_event;
         LCS_Action_t action = LCS_Process(trigger_event);
 
-        pending_event = App_ExecuteAction(action, trigger_event);
+        pending_event = App_ExecuteAction(action);
     }
 
     if(pending_event != LCS_EVENT_NONE)
     {
         App_CancelTimeout();
+
         (void)CES_EndSession();
         (void)App_ForceLock();
         (void)SGS_Stop();
         (void)LCD_BacklightOff(&App_Lcd);
+
         App_RequestControlledReset();
     }
 }
@@ -1488,9 +1513,7 @@ static void App_HandleCredentialEvent(CES_Event_t Event)
 
         case CES_EVENT_INCOMPLETE:
 
-            (void)DRS_SetScreen(DRS_SCREEN_ENTRY_INCOMPLETE);
-            (void)DRS_Update();
-            (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
+            App_DispatchLcsEvent(LCS_EVENT_CANDIDATE_INCOMPLETE);
 
         break;
 
@@ -1541,7 +1564,7 @@ static void App_HandleKeyboardEvent(const MK_Output_t* Event)
 
     if(wake_action == LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION)
     {
-        LCS_Event_t follow_up = App_ExecuteAction(wake_action, LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED);
+        LCS_Event_t follow_up = App_ExecuteAction(wake_action);
 
         if(follow_up != LCS_EVENT_NONE)
         {
@@ -1551,7 +1574,7 @@ static void App_HandleKeyboardEvent(const MK_Output_t* Event)
         return;
     }
 
-    LCS_Event_t unexpected_follow_up = App_ExecuteAction(wake_action, LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED);
+    LCS_Event_t unexpected_follow_up = App_ExecuteAction(wake_action);
 
     if(unexpected_follow_up != LCS_EVENT_NONE)
     {
@@ -1661,7 +1684,7 @@ App_InitStatus_t App_Init(void)
 
         LCS_Action_t failure_action = LCS_Process(LCS_EVENT_INIT_FAIL);
 
-        (void)App_ExecuteAction(failure_action, LCS_EVENT_INIT_FAIL);
+        (void)App_ExecuteAction(failure_action);
 
         return APP_INIT_FAILED;
     }
@@ -1674,20 +1697,25 @@ App_InitStatus_t App_Init(void)
 }
 
 /**
- * @brief   Executes one synchronous and non-blocking application-dispatch cycle.
+ * @brief   Acquires and processes one non-blocking keyboard input sample.
  *
- * @details Performs one Matrix Keyboard acquisition. A complete pending action is routed through wake semantics, CES, LCS and the
- *          semantic action executor. The function then evaluates the active application timeout and advances display, status
- *          indication and sound services exactly once.
+ * @details Reads the matrix keyboard once and routes any completed key action
+ *          through the credential-entry flow. When no key action is available,
+ *          the function returns without modifying the application state.
  *
- *          Keyboard acquisition failure abandons an active credential sequence conservatively and requests error feedback. A call
- *          performs no deliberate delay and never waits for a future input or timeout.
+ *          A keyboard acquisition failure invokes the application input-fault
+ *          policy, which safely abandons any active credential-entry sequence
+ *          and requests error feedback.
  *
  * @note    App_Init() shall complete successfully before the first call.
- * @note    The current execution owner shall call this operation continuously with a cadence compatible with keyboard debounce,
- *          timeout response and non-blocking UI progression requirements.
+ * 
+ * @note    This function shall be called continuously at a cadence compatible
+ *          with the matrix-keyboard debounce requirements.
+ * 
+ * @note    This function does not update presentation services or poll the
+ *          application-owned timeout; those operations belong to App_Dispatch().
  */
-void App_Dispatch(void)
+void App_ReadInput(void)
 {
     MK_Output_t keyboard_output = {0};
 
@@ -1702,6 +1730,29 @@ void App_Dispatch(void)
     {
         App_HandleInputFault();
     }
+}
 
+/**
+ * @brief   Executes one synchronous and non-blocking service-dispatch cycle.
+ *
+ * @details Polls the active application-owned timeout and dispatches its
+ *          semantic event to the Lock Control Service when the interval has
+ *          elapsed. It then advances the display, status-indication and sound
+ *          services exactly once.
+ *
+ *          The function performs no deliberate delay and never waits for a
+ *          timeout or presentation phase to complete.
+ *
+ * @note    App_Init() shall complete successfully before the first call.
+ * 
+ * @note    This function does not acquire or process keyboard input; input
+ *          acquisition is performed separately by App_ReadInput().
+ * 
+ * @note    The execution owner shall call this function periodically with a
+ *          cadence compatible with timeout-response and non-blocking
+ *          presentation-progression requirements.
+ */
+void App_Dispatch(void)
+{
     App_UpdateServices();
 }

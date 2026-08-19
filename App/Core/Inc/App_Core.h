@@ -52,8 +52,9 @@ typedef enum
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-App_InitStatus_t App_Init     (void);
-void             App_Dispatch (void);
+App_InitStatus_t App_Init      (void);
+void             App_ReadInput (void);
+void             App_Dispatch  (void);
 
 
 #ifdef __cplusplus
