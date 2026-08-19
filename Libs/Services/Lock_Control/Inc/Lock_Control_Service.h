@@ -81,6 +81,8 @@ typedef enum
 
     LCS_EVENT_AUTH_FAILURE,               /*< Authentication rejected the candidate credential.                                */
 
+    LCS_EVENT_CANDIDATE_INCOMPLETE,       /*< The bounded credential-entry was confirmed while incompleted.                    */
+
     LCS_EVENT_ENTRY_TIMEOUT,              /*< The bounded credential-entry interval elapsed.                                   */
 
     LCS_EVENT_UNLOCK_TIMEOUT,             /*< The bounded authorized-unlock interval elapsed.                                  */
@@ -106,23 +108,25 @@ typedef enum
  */
 typedef enum
 {
-    LCS_ACTION_NONE = 0U,                      /*< No application-level work is requested.                                      */
+    LCS_ACTION_NONE = 0U,                        /*< No application-level work is requested.                                     */
 
-    LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION, /*< Wake the UI, begin credential entry and establish its inactivity timing.     */
+    LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,   /*< Wake the UI, begin credential entry and establish its inactivity timing.    */
 
-    LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,   /*< End and erase the entry session, then restore the locked-idle presentation.  */
+    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION, /*< */
 
-    LCS_ACTION_REQUEST_AUTHENTICATION,         /*< Obtain, erase and authenticate the completed candidate, then report result. */
+    LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,     /*< End and erase the entry session, then restore the locked-idle presentation. */
 
-    LCS_ACTION_GRANT_ACCESS_UNLOCK,            /*< Start bounded unlock operation and access-granted feedback.                 */
+    LCS_ACTION_REQUEST_AUTHENTICATION,           /*< Obtain, erase and authenticate the completed candidate, then report result. */
 
-    LCS_ACTION_DENY_ACCESS,                    /*< Preserve the safe lock state and start bounded access-denied feedback.      */
+    LCS_ACTION_GRANT_ACCESS_UNLOCK,              /*< Start bounded unlock operation and access-granted feedback.                 */
 
-    LCS_ACTION_ENTER_LOCKOUT,                  /*< Preserve the safe lock state, reject entry and start the lockout interval.  */
+    LCS_ACTION_DENY_ACCESS,                      /*< Preserve the safe lock state and start bounded access-denied feedback.      */
 
-    LCS_ACTION_RETURN_TO_LOCKED,               /*< Restore the safe locked-idle mode and its user-interface policy.            */
+    LCS_ACTION_ENTER_LOCKOUT,                    /*< Preserve the safe lock state, reject entry and start the lockout interval.  */
 
-    LCS_ACTION_REQUEST_CONTROLLED_RESET        /*< Preserve safe outputs and request the application-controlled reset path.    */
+    LCS_ACTION_RETURN_TO_LOCKED,                 /*< Restore the safe locked-idle mode and its user-interface policy.            */
+
+    LCS_ACTION_REQUEST_CONTROLLED_RESET          /*< Preserve safe outputs and request the application-controlled reset path.    */
 
 }LCS_Action_t;
 

@@ -216,7 +216,16 @@ static const LCS_Transition_t LCS_Transitions[] =
         .guard           = LCS_GUARD_ALWAYS,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_NONE,
-        .action          = LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,
+        .action          = LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .event           = LCS_EVENT_CANDIDATE_INCOMPLETE,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION,
     },
 
     {
