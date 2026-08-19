@@ -50,7 +50,8 @@
 typedef enum
 {
     SGS_PRIORITY_KEYPRESS, /*< Replaceable acknowledgement priority.      */
-    SGS_PRIORITY_FEEDBACK  /*< Access-result and error feedback priority. */
+    SGS_PRIORITY_FEEDBACK, /*< Access-result and error feedback priority. */
+    SGS_PRIORITY_LOCKOUT   /*< Lockout feedback priority. */
 
 }SGS_priority_t;
 
@@ -156,6 +157,31 @@ static const SGS_Phase_t SGS_Errorphases[] =
 };
 
 /**
+ * @brief    Sound phase sequence played when the system enters lockout.
+ *
+ * @details  Plays two identical descending tone sequences of 1200 Hz,
+ *           900 Hz and 600 Hz. Short silent intervals separate the tones,
+ *           and a 300 ms pause separates the two sequences.
+ *
+ * @note     The complete pattern lasts 2080 ms and is intended to provide
+ *           a distinct audible indication that the system has been locked.
+ */
+static const SGS_Phase_t SGS_Lockoutphases[] =
+{
+    { .frequency_hz = 1200U, .duration_ms = 120U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
+    { .frequency_hz =  900U, .duration_ms = 180U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
+    { .frequency_hz =  600U, .duration_ms = 450U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms = 300U, .output_enabled = false },
+    { .frequency_hz = 1200U, .duration_ms = 120U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
+    { .frequency_hz =  900U, .duration_ms = 180U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
+    { .frequency_hz =  600U, .duration_ms = 450U, .output_enabled = true  },
+};
+
+/**
  * @brief   Semantic ringtone-to-pattern map.
  *
  * @details Uses SGS_Ringtone_t values as designated indexes so each playable
@@ -169,23 +195,30 @@ static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
 {
     [SGS_RINGTONE_KEYPRESS] =
     {
-        .phases     = SGS_Keypressphases,
+        .phases      = SGS_Keypressphases,
         .phase_count = SGS_ARRAY_LENGTH(SGS_Keypressphases),
-        .priority   = SGS_PRIORITY_KEYPRESS
+        .priority    = SGS_PRIORITY_KEYPRESS
     },
 
     [SGS_RINGTONE_ACCESS_GRANTED] =
     {
-        .phases     = SGS_AccessGrantedphases,
+        .phases      = SGS_AccessGrantedphases,
         .phase_count = SGS_ARRAY_LENGTH(SGS_AccessGrantedphases),
-        .priority   = SGS_PRIORITY_FEEDBACK
+        .priority    = SGS_PRIORITY_FEEDBACK
     },
 
     [SGS_RINGTONE_ERROR] =
     {
-        .phases     = SGS_Errorphases,
+        .phases      = SGS_Errorphases,
         .phase_count = SGS_ARRAY_LENGTH(SGS_Errorphases),
-        .priority   = SGS_PRIORITY_FEEDBACK
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_LOCKOUT] =
+    {
+        .phases      = SGS_Lockoutphases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_Lockoutphases),
+        .priority    = SGS_PRIORITY_LOCKOUT
     }
 };
 
