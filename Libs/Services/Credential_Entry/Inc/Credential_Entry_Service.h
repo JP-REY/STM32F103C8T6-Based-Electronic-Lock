@@ -222,6 +222,7 @@ CES_OpStatus_t CES_BeginSession     (void);
 CES_Event_t    CES_ProcessInput     (const CES_Input_t* Input);
 CES_Length_t   CES_GetCurrentLength (void);
 CES_OpStatus_t CES_GetCandidate     (CES_Candidate_t* Candidate);
+CES_OpStatus_t CES_RefreshSession   (void);
 CES_OpStatus_t CES_EndSession       (void);
 
 #ifdef __cplusplus

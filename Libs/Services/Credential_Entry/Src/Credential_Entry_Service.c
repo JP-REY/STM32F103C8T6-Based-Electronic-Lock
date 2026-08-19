@@ -258,6 +258,31 @@ CES_OpStatus_t CES_BeginSession(void)
 }
 
 /**
+ * @brief   Refreshes the active credential-entry session.
+ *
+ * @details Verifies that a credential-entry session is active and erases the
+ *          current candidate without ending the session. After a successful
+ *          refresh, the session remains ready to receive a new candidate.
+ *
+ * @note    This operation does not start a new session, update the user
+ *          interface or restart application-owned timeout handling.
+ *
+ * @return  CES_OPERATION_OK   - The candidate was erased and the session
+ *                               remains active.
+ * @return  CES_OPERATION_FAIL - No credential-entry session is active.
+ */
+CES_OpStatus_t CES_RefreshSession(void)
+{
+    if(!CES_IsActive())
+
+        return CES_OPERATION_FAIL;
+
+    CES_EraseCandidate();
+ 
+    return CES_OPERATION_OK;
+}
+
+/**
  * @brief   Ends the active credential-entry session.
  *
  * @details Erases the current candidate credential and marks the CES session
