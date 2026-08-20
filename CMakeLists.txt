@@ -71,6 +71,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Libs/Services/Sound_Generator/Src/Sound_Generator_Service.c
     Libs/Services/Status_Indication/Src/Status_Indication_Service.c
     Libs/Services/Timeout_Validation/Src/Timeout_Validation_Service.c
+    Platforms/Src/FLASH_Platform_Interface.c
 )
 
 # Add include paths
