@@ -64,6 +64,8 @@ typedef enum
 
     LCS_STATE_LOCKED,                    /*< Secure idle state awaiting a credential-entry request.              */
 
+    LCS_STATE_CREDENTIAL_REGISTER,       /*< */
+
     LCS_STATE_CREDENTIAL_SESSION_ACTIVE, /*< Credential-entry session is active and may produce domain events.   */
 
     LCS_STATE_AUTHENTICATING,            /*< A complete candidate is awaiting its authentication result.         */
@@ -193,6 +195,15 @@ static const LCS_Transition_t LCS_Transitions[] =
     },
 
     {
+        .source_state    = LCS_STATE_BOOT,
+        .event           = LCS_EVENT_CREDENTIAL_NOT_REGISTERED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_CREDENTIAL_REGISTER,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION,
+    },
+
+    {
         .source_state    = LCS_STATE_LOCKED,
         .event           = LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
         .guard           = LCS_GUARD_ALWAYS,
@@ -208,6 +219,15 @@ static const LCS_Transition_t LCS_Transitions[] =
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_NONE,
         .action          = LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_SESSION_ACTIVE,
+        .event           = LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_CREDENTIAL_REGISTER,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION,
     },
 
     {
@@ -289,6 +309,15 @@ static const LCS_Transition_t LCS_Transitions[] =
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT,
         .action          = LCS_ACTION_RETURN_TO_LOCKED,
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_REGISTER,
+        .event           = LCS_EVENT_CREDENTIAL_REGISTER_DONE,
+        .guard           = LCS_GUARD_ALWAYS,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION,
     },
 
 };

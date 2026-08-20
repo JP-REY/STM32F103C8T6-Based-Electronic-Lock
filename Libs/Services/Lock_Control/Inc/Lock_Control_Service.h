@@ -65,33 +65,39 @@ extern "C" {
  */
 typedef enum
 {
-    LCS_EVENT_NONE = 0U,                  /*< No semantic event is available; never causes a state transition.                 */
+    LCS_EVENT_NONE = 0U,                        /*< No semantic event is available; never causes a state transition.                 */
 
-    LCS_EVENT_INIT_OK,                    /*< Critical startup dependencies are valid; normal operation may begin.             */
+    LCS_EVENT_INIT_OK,                          /*< Critical startup dependencies are valid; normal operation may begin.             */
 
-    LCS_EVENT_INIT_FAIL,                  /*< Startup validation failed; the service enters its fault path.                    */
+    LCS_EVENT_INIT_FAIL,                        /*< Startup validation failed; the service enters its fault path.                    */
 
-    LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED, /*< A wake key requests credential-entry mode; the key is not a credential digit.    */
+    LCS_EVENT_CREDENTIAL_NOT_REGISTERED,        /*< The startup validation identifies that there are no registered credentials.      */
 
-    LCS_EVENT_CREDENTIAL_CANCELLED,       /*< The active credential-entry session was cancelled while its candidate was empty. */
+    LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED,    /*< Requests credential register mode entry.                                         */
 
-    LCS_EVENT_CANDIDATE_READY,            /*< A complete candidate credential is ready for authentication.                     */
+    LCS_EVENT_CREDENTIAL_REGISTER_DONE,         /*< Credential register session completed succesfully.                               */
 
-    LCS_EVENT_AUTH_SUCCESS,               /*< Authentication accepted the candidate credential.                                */
+    LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,       /*< A wake key requests credential-entry mode; the key is not a credential digit.    */
 
-    LCS_EVENT_AUTH_FAILURE,               /*< Authentication rejected the candidate credential.                                */
+    LCS_EVENT_CREDENTIAL_CANCELLED,             /*< The active credential-entry session was cancelled while its candidate was empty. */
 
-    LCS_EVENT_CANDIDATE_INCOMPLETE,       /*< The bounded credential-entry was confirmed while incompleted.                    */
+    LCS_EVENT_CANDIDATE_READY,                  /*< A complete candidate credential is ready for authentication.                     */
 
-    LCS_EVENT_ENTRY_TIMEOUT,              /*< The bounded credential-entry interval elapsed.                                   */
+    LCS_EVENT_AUTH_SUCCESS,                     /*< Authentication accepted the candidate credential.                                */
 
-    LCS_EVENT_UNLOCK_TIMEOUT,             /*< The bounded authorized-unlock interval elapsed.                                  */
+    LCS_EVENT_AUTH_FAILURE,                     /*< Authentication rejected the candidate credential.                                */
 
-    LCS_EVENT_DENIED_ACCESS_TIMEOUT,      /*< The bounded access-denied feedback interval elapsed.                             */
+    LCS_EVENT_CANDIDATE_INCOMPLETE,             /*< The bounded credential-entry was confirmed while incompleted.                    */
 
-    LCS_EVENT_LOCKOUT_TIMEOUT,            /*< The temporary lockout interval elapsed.                                          */
+    LCS_EVENT_ENTRY_TIMEOUT,                    /*< The bounded credential-entry interval elapsed.                                   */
 
-    LCS_EVENT_COUNT                       /*< Number of event identifiers; not a dispatchable event.                           */
+    LCS_EVENT_UNLOCK_TIMEOUT,                   /*< The bounded authorized-unlock interval elapsed.                                  */
+
+    LCS_EVENT_DENIED_ACCESS_TIMEOUT,            /*< The bounded access-denied feedback interval elapsed.                             */
+
+    LCS_EVENT_LOCKOUT_TIMEOUT,                  /*< The temporary lockout interval elapsed.                                          */
+
+    LCS_EVENT_COUNT                             /*< Number of event identifiers; not a dispatchable event.                           */
 
 }LCS_Event_t;
 
@@ -108,27 +114,31 @@ typedef enum
  */
 typedef enum
 {
-    LCS_ACTION_NONE = 0U,                            /*< No application-level work is requested.                                     */
-
-    LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,       /*< Wake the UI, begin credential entry and establish its inactivity timing.    */
+    LCS_ACTION_NONE = 0U,                                           /*< No application-level work is requested.                                     */
     
-    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION,     /*< Refresh the UI and erase the candidate while preserving the active session. */
+    LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION,                   /*< Begin credential register session.                                          */
     
-    LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,         /*< End and erase the entry session, then restore the locked-idle presentation. */
+    LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,                      /*< Wake the UI, begin credential entry and establish its inactivity timing.    */
     
-    LCS_ACTION_REQUEST_AUTHENTICATION,               /*< Obtain, erase and authenticate the completed candidate, then report result. */
+    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION,                    /*< Refresh the UI and erase the candidate while preserving the active session. */
     
-    LCS_ACTION_GRANT_ACCESS_UNLOCK,                  /*< Start bounded unlock operation and access-granted feedback.                 */
+    LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION,                        /*< End and erase the entry session, then restore the locked-idle presentation. */
     
-    LCS_ACTION_DENY_ACCESS,                          /*< Preserve the safe lock state and start bounded access-denied feedback.      */
+    LCS_ACTION_REQUEST_AUTHENTICATION,                              /*< Obtain, erase and authenticate the completed candidate, then report result. */
     
-    LCS_ACTION_ENTER_LOCKOUT,                        /*< Preserve the safe lock state, reject entry and start the lockout interval.  */
+    LCS_ACTION_GRANT_ACCESS_UNLOCK,                                 /*< Start bounded unlock operation and access-granted feedback.                 */
     
-    LCS_ACTION_RETURN_TO_LOCKED,                     /*< Restore the safe locked-idle mode and its user-interface policy.            */
+    LCS_ACTION_DENY_ACCESS,                                         /*< Preserve the safe lock state and start bounded access-denied feedback.      */
     
-    LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT,  /*< Restore the safe locked-idle mode and triggers timeout sound feedback.      */
+    LCS_ACTION_ENTER_LOCKOUT,                                       /*< Preserve the safe lock state, reject entry and start the lockout interval.  */
     
-    LCS_ACTION_REQUEST_CONTROLLED_RESET              /*< Preserve safe outputs and request the application-controlled reset path.    */
+    LCS_ACTION_RETURN_TO_LOCKED,                                    /*< Restore the safe locked-idle mode and its user-interface policy.            */
+    
+    LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT,                 /*< Restore the safe locked-idle mode and triggers timeout sound feedback.      */
+    
+    LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION,   /*< Restore the safe locked-idle mode after an credential register session.     */
+    
+    LCS_ACTION_REQUEST_CONTROLLED_RESET                             /*< Preserve safe outputs and request the application-controlled reset path.    */
 
 }LCS_Action_t;
 
