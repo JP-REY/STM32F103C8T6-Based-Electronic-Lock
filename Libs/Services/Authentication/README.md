@@ -2,13 +2,16 @@
 
 <p align="left">
   <big>
-    Stateless and hardware-independent domain service for validating<br>
-    fixed-length candidate credentials in embedded electronic-lock systems.
+    Stateless and hardware-independent comparison of one candidate credential<br>
+    with the installed credential supplied from application runtime storage.
   </big>
 </p>
 
 > [!IMPORTANT]
-> The Authentication Service only compares a complete caller-provided candidate with the credential configured in the firmware. It does not collect digits, access the Credential Entry Service, own candidate storage, count failed attempts, apply lockout policy, control the lock actuator, or produce user-interface effects.
+> The Authentication Service owns no credential. `AS_Authenticate()` borrows both the candidate and the installed runtime credential from the caller, compares them synchronously and retains neither pointer. Persistent loading, runtime ownership, credential replacement, attempt counting and lockout policy remain outside AS.
+
+> [!NOTE]
+> Removing the former private firmware PIN keeps AS stateless while allowing credentials registered through CRS and persisted through CSS to become the authentication reference without rebuilding the firmware.
 
 ---
 
@@ -20,6 +23,7 @@
 
   * [3.1 Layer Placement](#31-layer-placement)
   * [3.2 Application Integration](#32-application-integration)
+  * [3.3 Runtime Credential Lifecycle](#33-runtime-credential-lifecycle)
 * [4. Directory Structure](#4-directory-structure)
 * [5. Service Responsibilities](#5-service-responsibilities)
 
@@ -33,25 +37,26 @@
 * [8. Authentication Model](#8-authentication-model)
 
   * [8.1 Candidate Representation](#81-candidate-representation)
-  * [8.2 Configured Credential](#82-configured-credential)
+  * [8.2 Runtime Credential Representation](#82-runtime-credential-representation)
   * [8.3 Comparison Semantics](#83-comparison-semantics)
   * [8.4 Ownership and Lifetime](#84-ownership-and-lifetime)
 * [9. API Reference](#9-api-reference)
 
   * [9.1 AS_Authenticate](#91-as_authenticate)
-* [10. Operation Flow](#10-operation-flow)
+* [10. Operation Flows](#10-operation-flows)
 
-  * [10.1 Authentication Flow](#101-authentication-flow)
-  * [10.2 Credential Entry Integration](#102-credential-entry-integration)
+  * [10.1 Normal Authentication](#101-normal-authentication)
+  * [10.2 Startup Runtime Loading](#102-startup-runtime-loading)
+  * [10.3 Credential Replacement](#103-credential-replacement)
 * [11. Usage Example](#11-usage-example)
 * [12. Design Decisions](#12-design-decisions)
 
-  * [12.1 Stateless Service](#121-stateless-service)
-  * [12.2 No Public Handle or Singleton Instance](#122-no-public-handle-or-singleton-instance)
-  * [12.3 CES-Independent Boundary](#123-ces-independent-boundary)
-  * [12.4 Fixed-Length Contract](#124-fixed-length-contract)
-  * [12.5 Synchronous Processing](#125-synchronous-processing)
-  * [12.6 Private Configured Credential](#126-private-configured-credential)
+  * [12.1 Stateless Two-Buffer Contract](#121-stateless-two-buffer-contract)
+  * [12.2 No Private Credential](#122-no-private-credential)
+  * [12.3 No Public Handle or Singleton](#123-no-public-handle-or-singleton)
+  * [12.4 Service-Independent Buffer Boundary](#124-service-independent-buffer-boundary)
+  * [12.5 Fixed-Length Contract](#125-fixed-length-contract)
+  * [12.6 Synchronous Processing](#126-synchronous-processing)
 * [13. Error Handling](#13-error-handling)
 * [14. Timing and Concurrency](#14-timing-and-concurrency)
 * [15. Security Considerations](#15-security-considerations)
@@ -64,33 +69,42 @@
 
 ## 1. Overview
 
-The Authentication Service is a domain-level component responsible for validating one complete candidate credential.
+The Authentication Service is a domain-level component responsible for comparing one complete candidate credential with the currently installed credential supplied by the application.
 
-The service receives a caller-owned array containing exactly six normalized decimal digits and compares those digits with a private credential configured in the firmware. It returns an `AS_Result_t` value that distinguishes successful authentication, credential rejection, and an invalid argument.
+The public operation receives two caller-owned arrays containing exactly six normalized decimal digits:
 
-The service owns no mutable runtime state. It does not require initialization, a public handle, a service instance, or a lifecycle API. Each authentication request is completed synchronously from the supplied candidate and the private configured credential.
+1. `Candidate`: the credential just entered by the user.
+2. `Credential`: the installed credential retained in application runtime storage.
 
-The service is independent from the Credential Entry Service. It does not include CES headers or receive `CES_Candidate_t`. The Lock Controller retrieves a complete candidate from CES, passes the candidate digit buffer to `AS_Authenticate()`, handles the returned result, and erases the caller-owned candidate copy.
+The service compares both arrays and returns an `AS_Result_t` that distinguishes successful authentication, credential rejection and invalid API input. It does not know whether successful authentication will authorize bounded unlock or entry into credential registration; that pending-purpose decision remains in the [Lock Control Service](../Lock_Control/README.md).
 
-The acronym `AS` means **Authentication Service** and is used as the prefix for every public symbol exposed by this module.
+AS owns no mutable state and no reference credential. It does not require initialization, a public handle, a singleton instance or a credential-configuration function. Every request is completely determined by the two buffers supplied to `AS_Authenticate()`.
+
+The installed runtime credential is normally populated by the application from the [Credential Storage Service](../Credential_Storage/README.md) during startup and replaced only after a newly registered credential has been persisted successfully.
+
+The acronym `AS` means **Authentication Service** and prefixes every public symbol exposed by the module.
 
 ---
 
 ## 2. Features
 
-- Fixed-length authentication credentials containing exactly six digits.
-- Explicit authenticated, rejected, and invalid-argument results.
-- Candidate input through caller-owned storage.
-- No retained candidate pointer or internal candidate copy.
-- Independence from Credential Entry Service types and state.
-- Synchronous and deterministic processing.
-- Stateless and reentrant implementation.
-- No public handle or service instance.
-- No initialization or lifecycle API.
-- No dynamic memory allocation.
-- No direct hardware access.
-- No RTOS dependency.
-- No blocking operations.
+* Comparison of one candidate with one caller-supplied runtime credential.
+* Fixed credential length of exactly six bytes.
+* Normalized numeric representation rather than ASCII strings.
+* Explicit authenticated, rejected and invalid-argument results.
+* Candidate storage owned entirely by the caller.
+* Runtime credential storage owned entirely by the caller.
+* No retained pointers or internal credential copies.
+* No credential compiled into the Authentication module.
+* Immediate use of a newly installed runtime credential without firmware rebuild.
+* Stateless and reentrant implementation.
+* Synchronous and deterministic behavior.
+* No initialization or lifecycle API.
+* No public handle or service instance.
+* No dynamic allocation.
+* No direct hardware access.
+* No Flash, CES, CRS, CSS, LCS or RTOS dependency.
+* No blocking operation.
 
 ---
 
@@ -98,63 +112,85 @@ The acronym `AS` means **Authentication Service** and is used as the prefix for 
 
 ### 3.1 Layer Placement
 
-The Authentication Service belongs to the hardware-independent domain-services layer.
-
-It is invoked by the Lock Controller after the Credential Entry Service reports that a complete candidate is ready:
+AS belongs to the hardware-independent Services layer. App Core owns the temporary candidate and installed runtime credential passed through the public comparison boundary:
 
 ```mermaid
 flowchart LR
     subgraph INPUT["Credential Input"]
-        MK["Matrix Keyboard Driver"]
-        CES["Credential Entry Service"]
+        CES["Credential Entry Service<br/>complete candidate"]
     end
 
-    subgraph APPLICATION["Application Layer"]
-        CTRL["Lock Controller"]
+    subgraph PERSISTENCE["Persistent Source"]
+        CSS["Credential Storage Service<br/>validated Flash record"]
+    end
+
+    subgraph APP["Application Layer"]
+        CORE["App Core<br/>orchestration"]
+        CANDIDATE["Temporary candidate<br/>caller-owned"]
+        RUNTIME["Installed credential<br/>runtime object"]
     end
 
     subgraph SERVICES["Domain Services"]
-        AUTH["Authentication Service"]
+        AUTH["Authentication Service<br/>stateless comparison"]
+        LCS["Lock Control Service<br/>result policy"]
     end
 
-    subgraph OUTPUT["Application Effects"]
-        LOCK["Lock Actuation"]
-        UI["Display / LED / Sound"]
-    end
-
-    MK --> CES
-    CES -->|"complete candidate copy"| CTRL
-    CTRL -->|"candidate digits"| AUTH
-    AUTH -->|"AS_Result_t"| CTRL
-    CTRL --> LOCK
-    CTRL --> UI
+    CES --> CORE
+    CORE --> CANDIDATE
+    CSS -->|"startup load / verified replacement"| RUNTIME
+    CANDIDATE -->|"Candidate"| AUTH
+    RUNTIME -->|"Credential"| AUTH
+    AUTH -->|"AS_Result_t"| CORE
+    CORE <-->|"LCS events / actions"| LCS
 ```
 
-The diagram describes responsibility boundaries rather than direct dependencies. In particular, the Authentication Service does not call CES and does not control application effects.
+The arrows describe application orchestration rather than direct service-to-service calls. AS does not invoke CES, CSS or LCS and does not access App Core state by itself.
 
 ### 3.2 Application Integration
 
-The Lock Controller is the integration boundary between credential entry and authentication.
+The expected normal authentication sequence is:
 
-The expected application sequence is:
+1. CES reports a complete candidate.
+2. App Core obtains a bounded caller-owned copy with `CES_GetCandidate()`.
+3. App Core ends the CES session so CES erases its internal candidate.
+4. App Core verifies that the installed runtime credential is available.
+5. App Core calls `AS_Authenticate(Candidate.Digits, RuntimeCredential)`.
+6. App Core maps the result into `LCS_EVENT_AUTH_SUCCESS` or `LCS_EVENT_AUTH_FAILURE`.
+7. App Core erases the complete candidate copy.
 
-1. CES reports `CES_EVENT_READY`.
-2. The Lock Controller obtains a complete candidate copy with `CES_GetCandidate()`.
-3. The Lock Controller ends the CES session so that CES erases its internal candidate.
-4. The Lock Controller passes `Candidate.Digits` to `AS_Authenticate()`.
-5. The Lock Controller interprets the returned `AS_Result_t` according to product policy.
-6. The Lock Controller erases the complete caller-owned candidate copy.
+The runtime credential remains available for later requests. It is not a temporary authentication candidate and shall not be erased after every comparison.
 
-Authentication success or rejection does not directly unlock the device or begin credential registration. The Lock Controller
-remains responsible for deciding the corresponding state transition and side effects from its current state and pending
-authentication purpose.
+### 3.3 Runtime Credential Lifecycle
+
+The installed runtime credential belongs to App Core or to a future dedicated runtime-credential owner. Its lifecycle is separate from AS:
+
+```text
+startup
+  -> CSS_GetCredential(runtime)
+  -> repeated AS_Authenticate(candidate, runtime)
+  -> successful credential replacement
+  -> CSS_SaveCredential(new credential)
+  -> update runtime only after CSS success
+```
+
+Recommended ownership rules:
+
+| Condition | Runtime credential handling |
+|---|---|
+| CSS returns a valid credential during startup | Mark runtime object valid and use it as the AS reference. |
+| CSS reports no installed credential | Keep runtime object invalid and enter first-registration flow. |
+| CSS startup read fails | Keep runtime object invalid and enter controlled fault policy. |
+| Authentication completes | Preserve runtime credential; erase only the candidate. |
+| New credential is persisted successfully | Replace the runtime credential with the verified new value. |
+| Persistent replacement fails | Do not publish the proposed credential as the installed runtime reference. |
+| Controlled reset or terminal fault | Erase runtime storage when the platform execution path permits it. |
 
 ---
 
 ## 4. Directory Structure
 
 ```text
-Authentication/
+Libs/Services/Authentication/
 ├── Inc/
 │   └── Authentication_Service.h
 ├── Src/
@@ -166,18 +202,19 @@ Authentication/
 
 `Inc/Authentication_Service.h` contains:
 
-- The fixed credential-length macro.
-- The public authentication-result type.
-- The `AS_Authenticate()` function prototype and contract.
+* The fixed credential-length macro.
+* The authentication-result enumeration.
+* The two-buffer `AS_Authenticate()` function prototype.
 
 ### Private Implementation
 
 `Src/Authentication_Service.c` contains:
 
-- The private digit representation.
-- The credential configured in the firmware.
-- Argument validation.
-- Fixed-length credential comparison.
+* Validation of both borrowed pointers.
+* A bounded six-element comparison loop.
+* Immediate authenticated or rejected result selection.
+
+It contains no configured credential constant or mutable service data.
 
 ---
 
@@ -187,61 +224,68 @@ Authentication/
 
 The Authentication Service is responsible for:
 
-- Accepting one complete fixed-length candidate credential.
-- Rejecting a null candidate pointer.
-- Comparing exactly `AS_CREDENTIAL_LENGTH` candidate bytes.
-- Reporting whether the candidate matches the configured credential.
-- Keeping the configured credential private to the implementation file.
-- Completing authentication without retaining caller-owned candidate data.
+* Accepting one complete fixed-length candidate.
+* Accepting one complete fixed-length installed runtime credential.
+* Rejecting a `NULL` pointer argument.
+* Comparing exactly `AS_CREDENTIAL_LENGTH` bytes from each buffer.
+* Reporting complete equality as authenticated.
+* Reporting any byte difference as rejected.
+* Completing comparison without modifying either caller-owned buffer.
+* Completing comparison without retaining either pointer.
 
 ### 5.2 Explicit Non-Responsibilities
 
 The Authentication Service is not responsible for:
 
-- Reading a physical keyboard.
-- Interpreting physical key codes.
-- Collecting or editing candidate digits.
-- Starting, ending, or clearing credential-entry sessions.
-- Calling `CES_GetCandidate()` or any other CES operation.
-- Receiving or exposing `CES_Candidate_t`.
-- Validating a candidate length supplied at runtime.
-- Verifying that each candidate byte is in the decimal range from `0U` through `9U`.
-- Erasing caller-owned candidate storage.
-- Counting successful or rejected attempts.
-- Applying retry, lockout, alarm, or timeout policy.
-- Persisting or changing the configured credential.
-- Controlling the lock actuator.
-- Producing display, LED, or sound effects.
-- Performing Lock Controller state transitions.
+* Reading a physical keyboard.
+* Collecting or editing candidate digits.
+* Beginning, refreshing or ending CES sessions.
+* Calling `CES_GetCandidate()`.
+* Receiving or exposing `CES_Candidate_t`.
+* Loading a credential from CSS or Flash.
+* Owning or maintaining the runtime credential object.
+* Staging or confirming a proposed new credential.
+* Persisting or replacing the installed credential.
+* Determining whether a runtime credential is currently available.
+* Validating buffer capacity at runtime.
+* Validating that each supplied byte is between `0U` and `9U`.
+* Erasing caller-owned candidate or runtime storage.
+* Counting successful or rejected attempts.
+* Applying lockout, timeout, alarm or retry policy.
+* Selecting LCS transitions.
+* Unlocking the actuator.
+* Producing display, LED or sound effects.
 
 ---
 
 ## 6. Dependencies
 
-The public interface depends only on the standard fixed-width integer header:
+The public interface depends only on:
 
 ```c
-#include "stdint.h"
+#include <stdint.h>
 ```
 
 The implementation additionally uses:
 
 ```c
-#include "stddef.h"
-#include "string.h"
+#include <stddef.h>
 ```
 
-`stddef.h` provides `NULL`, and `string.h` provides `memcmp()`.
+`stddef.h` provides `NULL`. Credential comparison is implemented with a bounded element loop and requires no standard string or
+memory-comparison function.
 
-The service does not depend on:
+AS does not include or link against:
 
-- STM32 HAL or LL headers.
-- Platform interfaces.
-- Matrix Keyboard Driver headers.
-- Credential Entry Service headers.
-- Lock Controller headers.
-- FreeRTOS headers or primitives.
-- Dynamic memory allocation.
+* STM32 HAL or LL interfaces.
+* Platform Flash interfaces.
+* Credential Entry Service types.
+* Credential Register Service types.
+* Credential Storage Service types.
+* Lock Control Service types.
+* App Core state.
+* FreeRTOS facilities.
+* Dynamic-memory functions.
 
 ---
 
@@ -253,11 +297,13 @@ The service does not depend on:
 #define AS_CREDENTIAL_LENGTH (6U)
 ```
 
-`AS_CREDENTIAL_LENGTH` defines the exact number of candidate bytes read by `AS_Authenticate()` and the number of digits stored in the configured credential.
+`AS_CREDENTIAL_LENGTH` is the exact number of bytes read from both `Candidate` and `Credential` by `AS_Authenticate()`.
 
-The value is part of the public API contract. A caller shall provide storage containing at least this many readable bytes.
+Both arrays contain numeric decimal digits and have no string terminator. The normalized representation of digit three is `3U`, not ASCII `'3'` or `0x33U`.
 
-The macro describes credential length, not a string length. The candidate contains numeric values and has no null terminator.
+The caller shall provide at least `AS_CREDENTIAL_LENGTH` readable bytes for each non-NULL pointer. C array-parameter syntax documents the required capacity but does not enforce or recover the actual object size.
+
+CES, CRS, CSS and AS currently expose independent V1 length constants. App Core shall ensure these contracts remain compatible when moving credential copies between service boundaries.
 
 ### 7.2 Authentication Result
 
@@ -271,15 +317,13 @@ typedef enum
 }AS_Result_t;
 ```
 
-`AS_Result_t` reports the complete outcome of one synchronous authentication request:
-
 | Result | Meaning |
 |---|---|
-| `AS_RESULT_AUTHENTICATED` | Every candidate digit matches the configured credential. |
-| `AS_RESULT_REJECTED` | At least one candidate digit differs from the configured credential. |
-| `AS_RESULT_INVALID_ARGUMENT` | The supplied candidate pointer is `NULL`. |
+| `AS_RESULT_AUTHENTICATED` | Every candidate byte equals the runtime credential byte at the same index. |
+| `AS_RESULT_REJECTED` | At least one candidate byte differs from the runtime credential. |
+| `AS_RESULT_INVALID_ARGUMENT` | Candidate or runtime credential pointer is `NULL`. |
 
-`AS_RESULT_REJECTED` is a valid domain outcome. It does not indicate an API failure or internal service malfunction.
+`AS_RESULT_REJECTED` is an ordinary domain result. `AS_RESULT_INVALID_ARGUMENT` indicates an application integration or programming error and shall not consume normal authentication policy as though the user entered a wrong credential.
 
 ---
 
@@ -287,52 +331,57 @@ typedef enum
 
 ### 8.1 Candidate Representation
 
-A candidate is represented as exactly `AS_CREDENTIAL_LENGTH` consecutive `uint8_t` values:
+The candidate is one caller-owned fixed-length array:
 
 ```text
 Index:      0    1    2    3    4    5
-Candidate: [d0] [d1] [d2] [d3] [d4] [d5]
+Candidate: [c0] [c1] [c2] [c3] [c4] [c5]
 ```
 
-Each value is expected to be a normalized decimal digit in the inclusive range from `0U` through `9U`. The values are not ASCII characters. For example, decimal digit three is represented as `3U`, not `'3'` or `0x33U`.
+It normally originates from a completed CES session. AS does not know that origin and can accept an equivalent trusted buffer from another application input path.
 
-Digit-range validation belongs to the component constructing the candidate. The current Authentication Service compares bytes exactly and does not reject nondecimal values separately.
+### 8.2 Runtime Credential Representation
 
-### 8.2 Configured Credential
+The installed reference is supplied in a second caller-owned array:
 
-The configured credential is a private, immutable array in `Authentication_Service.c`:
-
-```c
-static const AS_CandidateDigit_t
-AS_ConfiguredPin[AS_CREDENTIAL_LENGTH] = { /* configured digits */ };
+```text
+Index:       0    1    2    3    4    5
+Credential: [r0] [r1] [r2] [r3] [r4] [r5]
 ```
 
-Because the symbol is `static`, it has internal linkage and cannot be referenced directly from another translation unit. Because the array is `const`, the service does not modify it during normal execution.
+AS neither creates nor persists this object. During normal startup, App Core obtains it from `CSS_GetCredential()`. After successful registration, App Core updates it only after `CSS_SaveCredential()` reports verified success.
 
-The current V1 configuration is compiled into the firmware. No public API is provided for reading, replacing, or persisting the credential.
+This runtime object replaces the former private `AS_ConfiguredPin` constant. Authentication behavior can therefore follow the credential installed by the user rather than one value fixed in the firmware image.
 
 ### 8.3 Comparison Semantics
 
-After validating the candidate pointer, the service compares exactly `sizeof(AS_ConfiguredPin)` bytes with `memcmp()`.
+Authentication compares exactly `AS_CREDENTIAL_LENGTH` bytes:
 
-Authentication succeeds only when every compared byte is equal and appears at the same index. A difference at any position produces `AS_RESULT_REJECTED`.
+```text
+authenticated <=> Candidate[i] == Credential[i]
+                  for every i in [0, AS_CREDENTIAL_LENGTH)
+```
 
-The configured array size is used deliberately. Inside a C function, an array parameter is adjusted to a pointer, so `sizeof(Candidate)` would return the pointer size rather than the credential length.
+Any difference returns `AS_RESULT_REJECTED`. AS does not report the first mismatching index, matching prefix length or number of differences.
+
+The comparison length shall be expressed with `AS_CREDENTIAL_LENGTH` or an equivalent full-array byte count known outside the adjusted parameters. Inside a function, both array parameters are adjusted to pointers; `sizeof(Candidate)` and `sizeof(Credential)` therefore produce pointer size, not credential length.
+
+AS compares byte values exactly and does not separately reject nondecimal digits. Decimal-range validation remains a precondition guaranteed by the trusted buffer producers.
 
 ### 8.4 Ownership and Lifetime
 
-Candidate storage always belongs to the caller.
+Both buffers remain caller-owned:
 
-During `AS_Authenticate()` the service:
+| Property | Candidate | Runtime credential |
+|---|---|---|
+| Owner | App Core temporary authentication context | App Core or future runtime-credential owner |
+| Typical source | `CES_GetCandidate()` | `CSS_GetCredential()` or verified registration output |
+| Expected lifetime | One authentication request | Repeated requests during active runtime |
+| Modified by AS | No | No |
+| Pointer retained by AS | No | No |
+| Cleanup | Immediately after authentication result is consumed | Replacement, controlled fault/reset or runtime termination policy |
 
-- Borrows the candidate pointer.
-- Reads exactly `AS_CREDENTIAL_LENGTH` bytes.
-- Does not modify the bytes.
-- Does not retain the pointer.
-- Does not create an internal candidate copy.
-- Returns before the caller may reuse or erase the storage.
-
-The caller shall ensure that the buffer remains readable for the complete function call and shall erase sensitive candidate data immediately after processing the result.
+Both objects shall remain readable and unchanged until the synchronous call returns.
 
 ---
 
@@ -344,307 +393,381 @@ The caller shall ensure that the buffer remains readable for the complete functi
 
 ```c
 AS_Result_t AS_Authenticate(
-    const uint8_t Candidate[AS_CREDENTIAL_LENGTH]
-);
+    const uint8_t Candidate[AS_CREDENTIAL_LENGTH],
+    const uint8_t Credential[AS_CREDENTIAL_LENGTH]);
 ```
 
 #### Parameters
 
-`Candidate` points to an array containing exactly `AS_CREDENTIAL_LENGTH` normalized credential digits in their original order.
+`Candidate` points to the complete caller-owned credential entered for the current request.
 
-Although the declaration uses array notation to document the required size, C adjusts the parameter to a pointer. The function cannot determine the actual capacity of the caller's storage.
+`Credential` points to the complete caller-owned installed credential currently valid in runtime storage.
+
+Each non-NULL pointer shall provide at least `AS_CREDENTIAL_LENGTH` readable bytes in normalized digit order.
 
 #### Preconditions
 
-- `Candidate` is `NULL`, or it points to at least `AS_CREDENTIAL_LENGTH` readable bytes.
-- Candidate bytes use the expected normalized representation.
-- Candidate storage remains valid until the function returns.
+* Candidate and runtime credential storage remain readable and unchanged until the function returns.
+* Both non-NULL buffers contain at least `AS_CREDENTIAL_LENGTH` bytes.
+* Both buffers use the same normalized representation.
+* App Core has established that the runtime credential is valid before calling AS.
 
-Passing a non-null pointer to a shorter or otherwise invalid object violates the API contract and causes undefined behavior.
+Passing a non-NULL pointer to insufficient, expired or unreadable storage violates the API contract and causes undefined behavior.
 
 #### Return
 
-- `AS_RESULT_AUTHENTICATED` when all candidate bytes match.
-- `AS_RESULT_REJECTED` when at least one candidate byte differs.
-- `AS_RESULT_INVALID_ARGUMENT` when `Candidate` is `NULL`.
+* `AS_RESULT_AUTHENTICATED` when all six bytes are equal.
+* `AS_RESULT_REJECTED` when at least one byte differs.
+* `AS_RESULT_INVALID_ARGUMENT` when either pointer is `NULL`.
 
 #### Side Effects
 
-The operation has no externally visible side effects. It does not modify the candidate, configured credential, application state, hardware, or persistent storage.
+The operation has no externally visible side effect. It does not modify either array, retain pointers, change application state, access Flash or invoke LCS.
+
+#### Caller Obligations
+
+* Treat rejection as a normal authentication result.
+* Treat invalid argument as an integration fault.
+* Map valid results into the appropriate LCS event.
+* Erase the candidate after result processing.
+* Preserve the installed runtime credential for future requests.
 
 ---
 
-## 10. Operation Flow
+## 10. Operation Flows
 
-### 10.1 Authentication Flow
+### 10.1 Normal Authentication
 
 ```mermaid
 flowchart TD
-    CALL["AS_Authenticate"] --> NULL{"Candidate == NULL?"}
-    NULL -->|"Yes"| INVALID["INVALID_ARGUMENT"]
-    NULL -->|"No"| COMPARE["Compare all configured bytes"]
-    COMPARE --> MATCH{"Complete match?"}
+    CALL["AS_Authenticate<br/>(candidate, runtime)"] --> CNULL{"Candidate is NULL?"}
+    CNULL -->|"Yes"| INVALID["INVALID_ARGUMENT"]
+    CNULL -->|"No"| RNULL{"Runtime credential = NULL?"}
+    RNULL -->|"Yes"| INVALID
+    RNULL -->|"No"| COMPARE["Compare exactly six bytes"]
+    COMPARE --> MATCH{"Complete equality?"}
     MATCH -->|"Yes"| AUTH["AUTHENTICATED"]
     MATCH -->|"No"| REJECT["REJECTED"]
 ```
 
-Every branch returns synchronously to the caller.
+Every branch returns synchronously. The application handles product policy after the call.
 
-### 10.2 Credential Entry Integration
+The App Core integration sequence is:
 
 ```mermaid
 sequenceDiagram
-    participant CTRL as Lock Controller
-    participant CES as Credential Entry Service
-    participant AUTH as Authentication Service
+    participant CES as Credential Entry
+    participant APP as App Core
+    participant AS as Authentication
+    participant LCS as Lock Control
 
-    CES-->>CTRL: CES_EVENT_READY
-    CTRL->>CES: CES_GetCandidate(&candidate)
-    CES-->>CTRL: Candidate copied
-    CTRL->>CES: CES_EndSession()
-    CTRL->>AUTH: AS_Authenticate(candidate.Digits)
-    AUTH-->>CTRL: AS_Result_t
-    CTRL->>CTRL: Apply pending-purpose and failure policy
-    CTRL->>CTRL: Erase complete candidate copy
+    CES-->>APP: Complete candidate ready
+    APP->>CES: CES_GetCandidate(copy)
+    APP->>CES: CES_EndSession()
+    APP->>AS: AS_Authenticate(candidate, runtime credential)
+    AS-->>APP: AS_Result_t
+
+    alt Authenticated
+        APP->>LCS: LCS_EVENT_AUTH_SUCCESS
+    else Rejected
+        APP->>LCS: LCS_EVENT_AUTH_FAILURE
+    else Invalid argument
+        APP->>APP: Controlled integration-fault policy
+    end
+
+    APP->>APP: Erase candidate copy
 ```
 
-CES and AS never call each other. The Lock Controller owns orchestration and the temporary boundary between their public data models.
+### 10.2 Startup Runtime Loading
+
+AS is not called until App Core has completed the startup credential decision:
+
+```mermaid
+flowchart TD
+    BOOT["Application startup"] --> GET["CSS_GetCredential<br/>(runtime)"]
+    GET --> RESULT{"CSS result"}
+    RESULT -->|"OK"| READY["Mark runtime credential <br/>valid"]
+    RESULT -->|"NOT_FOUND"| REGISTER["Dispatch first-registration <br/>route"]
+    RESULT -->|"STORAGE_ERROR"| FAULT["Controlled fault/reset policy"]
+    READY --> AUTH["Enable AS authentication <br/>requests"]
+```
+
+Reading Flash before every authentication is not required. The application retains the installed reference in RAM and passes it to stateless AS whenever a complete candidate is ready.
+
+### 10.3 Credential Replacement
+
+After CRS confirms a proposed credential:
+
+1. App Core obtains the validated copy from CRS.
+2. App Core calls `CSS_SaveCredential()`.
+3. CSS writes and verifies the persistent record.
+4. Only after `CSS_OPERATION_OK` does App Core replace the installed runtime credential.
+5. Subsequent `AS_Authenticate()` calls receive the new runtime reference.
+6. All transient registration and caller-owned temporary buffers are cleared.
+
+AS requires no notification or reinitialization because it owns no credential state.
 
 ---
 
 ## 11. Usage Example
 
-The following example shows the intended synchronous integration after CES reports `CES_EVENT_READY`:
+The following example shows the two-buffer contract after CES reports a complete candidate:
 
 ```c
 #include "Authentication_Service.h"
 #include "Credential_Entry_Service.h"
-#include "string.h"
 
-CES_Candidate_t candidate = {0};
+static uint8_t App_RuntimeCredential[AS_CREDENTIAL_LENGTH];
+static bool App_RuntimeCredentialValid;
 
-if (CES_GetCandidate(&candidate) == CES_OPERATION_OK)
+static void App_AuthenticateReadyCandidate(void)
 {
-    AS_Result_t result;
+    CES_Candidate_t candidate = {0};
+
+    if(!App_RuntimeCredentialValid)
+    {
+        App_EnterControlledFaultPolicy();
+        return;
+    }
+
+    if(CES_GetCandidate(&candidate) != CES_OPERATION_OK)
+    {
+        App_EnterControlledFaultPolicy();
+        return;
+    }
 
     (void)CES_EndSession();
 
-    result = AS_Authenticate(candidate.Digits);
+    AS_Result_t result = AS_Authenticate(candidate.Digits,
+                                         App_RuntimeCredential);
 
-    switch (result)
+    App_ClearSensitiveObject(&candidate, sizeof(candidate));
+
+    if(result == AS_RESULT_AUTHENTICATED)
     {
-        case AS_RESULT_AUTHENTICATED:
-            /* Request the authenticated application transition. */
-            break;
-
-        case AS_RESULT_REJECTED:
-            /* Apply rejected-attempt policy in the Lock Controller. */
-            break;
-
-        case AS_RESULT_INVALID_ARGUMENT:
-        default:
-            /* Handle an integration or API-contract failure. */
-            break;
+        App_DispatchLcsEvent(LCS_EVENT_AUTH_SUCCESS);
     }
-
-    (void)memset(&candidate, 0, sizeof(candidate));
+    else if(result == AS_RESULT_REJECTED)
+    {
+        App_DispatchLcsEvent(LCS_EVENT_AUTH_FAILURE);
+    }
+    else
+    {
+        App_EnterControlledFaultPolicy();
+    }
 }
 ```
 
-The example uses `memset()` to communicate the required cleanup step. A production security review should determine whether the selected compiler and C library guarantee that this erasure is not optimized away. Where available, a project-approved explicit-zeroization routine is preferable.
+`App_ClearSensitiveObject()`, `App_DispatchLcsEvent()` and `App_EnterControlledFaultPolicy()` are application placeholders, not AS functions. Production code shall use the project-approved cleanup mechanism and ensure the runtime credential object was populated successfully by CSS.
 
 ---
 
 ## 12. Design Decisions
 
-### 12.1 Stateless Service
+### 12.1 Stateless Two-Buffer Contract
 
-The candidate is supplied directly to `AS_Authenticate()` and is not retained after the call. The configured credential is immutable.
+Supplying both values makes the authentication result a pure function of current input:
 
-Consequently, the service has no mutable runtime state and no dependency on call order. A separate access-candidate operation would introduce unnecessary state, pointer-lifetime concerns, and the possibility of authenticating stale data.
+```text
+result = compare(candidate, installed runtime credential)
+```
 
-### 12.2 No Public Handle or Singleton Instance
+No prior AS configuration call, hidden module state or call ordering is required.
 
-Only one authentication service exists conceptually in the product, but the implementation does not require a singleton object.
+### 12.2 No Private Credential
 
-A singleton instance is useful when a service owns mutable state that must exist exactly once. AS has no such state, so a module-level function provides the simpler contract. There is no handle to initialize, retain, validate, or synchronize.
+The previous design stored `AS_ConfiguredPin` as a private firmware constant. That prevented a newly registered credential from becoming authoritative without changing or rebuilding firmware.
 
-### 12.3 CES-Independent Boundary
+The new API removes that constant. App Core supplies the reference currently loaded from persistent storage, so AS remains stateless while supporting runtime credential replacement.
 
-`AS_Authenticate()` accepts a standard fixed-width integer buffer rather than `CES_Candidate_t`.
+### 12.3 No Public Handle or Singleton
 
-This boundary prevents AS from depending on CES layout, lifecycle, naming, or headers. The same authentication operation could receive an equivalent candidate from another trusted input path without changing AS.
+AS owns no mutable fields and therefore needs neither a public instance nor a private singleton. There is no handle to initialize, configure, validate, synchronize or reset.
 
-Using a typed byte pointer is intentional. A `void *` parameter would hide the representation without providing meaningful type safety or ownership semantics.
+### 12.4 Service-Independent Buffer Boundary
 
-### 12.4 Fixed-Length Contract
+`AS_Authenticate()` accepts two `uint8_t` arrays rather than CES, CRS, CSS or App Core structures. This keeps authentication independent from how the candidate was collected and how the installed reference was loaded.
 
-Credential length is fixed by `AS_CREDENTIAL_LENGTH`, so the API does not require a separate runtime length parameter.
+The application owns translations and verifies that all participating fixed-length contracts agree.
 
-This keeps the operation small and prevents partial candidates from being interpreted as complete credentials. The tradeoff is that callers must honor the required buffer capacity because C array-parameter syntax does not enforce it.
+### 12.5 Fixed-Length Contract
 
-### 12.5 Synchronous Processing
+Credential length is fixed by `AS_CREDENTIAL_LENGTH`; no runtime length argument exists. This keeps the API small and prevents a partial caller-declared length from becoming an authentication input.
 
-Authentication completes during the function call. The service creates no worker task, queue, callback, event group, or asynchronous request object.
+The caller must nevertheless supply two full buffers because array notation does not communicate actual object capacity at runtime.
 
-Synchronous processing keeps candidate lifetime explicit and allows the caller to erase the temporary credential immediately after the result is available.
+### 12.6 Synchronous Processing
 
-### 12.6 Private Configured Credential
-
-The configured credential has internal linkage in the implementation file. It is not part of the public API and cannot be accessed through the service header.
-
-This is encapsulation, not secure storage. The credential remains present in the firmware image and may be recoverable by inspecting or extracting that image.
+Comparison completes during the function call. AS creates no task, queue, callback, event group or asynchronous request. Both borrowed buffer lifetimes therefore remain explicit and bounded.
 
 ---
 
 ## 13. Error Handling
 
-The public operation distinguishes invalid input from credential rejection:
+The API distinguishes integration failure from ordinary credential rejection:
 
-- A `NULL` pointer returns `AS_RESULT_INVALID_ARGUMENT` without attempting comparison.
-- A valid buffer with any mismatching byte returns `AS_RESULT_REJECTED`.
-- A complete matching buffer returns `AS_RESULT_AUTHENTICATED`.
+| Condition | Result | Application meaning |
+|---|---|---|
+| Candidate is `NULL` | `AS_RESULT_INVALID_ARGUMENT` | Candidate integration failure. |
+| Runtime credential is `NULL` | `AS_RESULT_INVALID_ARGUMENT` | Runtime credential is unavailable or incorrectly supplied. |
+| Both pointers are valid and any byte differs | `AS_RESULT_REJECTED` | Normal rejected authentication attempt. |
+| Both pointers are valid and all bytes match | `AS_RESULT_AUTHENTICATED` | Normal successful authentication. |
 
-The service does not expose which digit differed or how many digits matched. The application should present a generic rejection response rather than leaking comparison detail.
+AS does not expose which index differed or how many bytes matched. App Core shall present generic denial feedback and let LCS apply the consecutive-failure policy.
 
-The service cannot detect:
+AS cannot detect:
 
-- A non-null pointer to insufficient storage.
-- A dangling or otherwise unreadable pointer.
-- A candidate represented with ASCII digits instead of normalized values.
-- Candidate values outside the decimal range.
+* A non-NULL pointer to fewer than six readable bytes.
+* A dangling, unaligned for its declared type or otherwise invalid pointer.
+* An incorrectly marked runtime object containing stale data.
+* ASCII values or other nondecimal bytes in either buffer.
 
-These conditions are violations of the caller contract rather than recoverable AS results.
+These are caller-contract violations or upstream integration errors.
 
 ---
 
 ## 14. Timing and Concurrency
 
-`AS_Authenticate()` executes synchronously and has a fixed upper bound determined by `AS_CREDENTIAL_LENGTH`.
+`AS_Authenticate()` is synchronous and bounded by `AS_CREDENTIAL_LENGTH`.
 
 The implementation:
 
-- Does not block.
-- Does not wait for hardware or another task.
-- Does not allocate memory.
-- Does not access mutable shared service state.
-- Does not invoke callbacks.
+* Performs no blocking operation.
+* Waits for no hardware or task.
+* Allocates no memory.
+* Accesses no mutable module state.
+* Invokes no callback.
+* Retains no pointer.
 
-Because all shared service data is immutable, concurrent calls do not create a data race within AS. Each caller remains independently responsible for ensuring that its candidate buffer is not modified or erased by another execution context during authentication.
+Concurrent calls do not race on AS-owned data because no such mutable data exists. Each caller remains responsible for ensuring that its candidate and runtime credential buffers remain stable for the complete call.
 
-`memcmp()` may stop at the first mismatching byte. Therefore, execution time can vary with the position of the first difference. See the security considerations for the implications of this behavior.
+The comparison loop returns at the first different byte, so execution time may vary with the mismatch position.
 
 ---
 
 ## 15. Security Considerations
 
-Credentials are sensitive data even when represented as short numeric arrays.
+Both arguments are sensitive even though AS only borrows them.
 
 Integration code shall:
 
-- Never log or display the candidate or configured credential.
-- Keep candidate copies short-lived.
-- Erase the entire caller-owned candidate object after authentication.
-- Avoid retaining candidate pointers beyond the synchronous call.
-- Restrict debug access in production configurations where supported.
-- Apply failed-attempt and lockout policy in the Lock Controller.
-- Present generic rejection feedback that does not reveal matching positions.
+* Never log or display either credential buffer.
+* Keep candidate copies short-lived.
+* Erase the complete candidate after every authentication attempt.
+* Keep the runtime object private to its application owner.
+* Replace runtime data only after CSS verifies persistent success.
+* Erase invalid or obsolete runtime data before publishing replacement.
+* Restrict production debug access according to the threat model.
+* Apply attempt counting and lockout in LCS.
+* Present rejection feedback that does not reveal comparison position.
 
-Current V1 security limitations include:
+Security properties improved by the new contract:
 
-- The configured credential is stored in plaintext in the firmware image.
-- No cryptographic hash, keyed verification, or secure element is used.
-- No protected persistent credential store is provided.
-- No runtime credential-provisioning or credential-change mechanism exists.
-- Standard `memcmp()` is not guaranteed to execute in constant time.
-- Ordinary `memset()` cleanup may be removed by an optimizing compiler when the erased object is no longer used.
+* AS no longer embeds a fixed plaintext PIN in its own firmware module.
+* Runtime replacement requires no AS setter or retained mutable credential.
+* Authentication uses the credential selected by the application's verified storage path.
 
-For a higher-security product, consider protected credential storage, a project-approved constant-time comparison routine, explicit zeroization, secure provisioning, debug-port protection, and a system-level retry and lockout policy.
+Remaining limitations:
+
+* The runtime credential exists as plaintext numeric data in SRAM.
+* The CSS persistent representation is not encrypted.
+* The early-return comparison loop is not constant time.
+* AS does not validate decimal range.
+* AS cannot erase caller-owned buffers.
+* Ordinary cleanup may be optimized away without a project-approved explicit-zeroization primitive.
 
 ---
 
 ## 16. Usage Constraints
 
-Callers shall observe the following constraints:
+Callers shall:
 
-- Supply exactly `AS_CREDENTIAL_LENGTH` readable candidate bytes.
-- Supply normalized numeric values rather than ASCII characters.
-- Keep the candidate buffer valid and unchanged until the call returns.
-- Treat `AS_RESULT_REJECTED` as a normal authentication outcome.
-- Treat `AS_RESULT_INVALID_ARGUMENT` as an integration or programming error.
-- Apply product-level authentication policy outside AS.
-- Erase caller-owned candidate storage after every completed attempt.
-- Never rely on AS to validate buffer capacity or digit range.
-- Never attempt to access `AS_ConfiguredPin` from another module.
+* Supply exactly `AS_CREDENTIAL_LENGTH` readable bytes for both arguments.
+* Supply normalized numeric values rather than ASCII characters.
+* Verify that the runtime credential is valid before authentication.
+* Keep both buffers unchanged until the call returns.
+* Treat rejection as a normal domain result.
+* Treat invalid argument as an integration fault.
+* Apply product policy outside AS.
+* Erase the candidate after result processing.
+* Preserve the runtime credential for later requests.
+* Never use `sizeof()` on an adjusted array parameter to determine comparison length.
+* Never rely on AS to load, own, replace or persist the reference credential.
 
 ---
 
 ## 17. Testing and Acceptance Criteria
 
-The service should be validated with unit tests covering at least the following cases.
+A native AS test suite should cover at least:
 
 ### Argument Validation
 
-- A `NULL` candidate returns `AS_RESULT_INVALID_ARGUMENT`.
-- A null request does not access candidate memory.
+* `NULL` candidate returns `AS_RESULT_INVALID_ARGUMENT`.
+* `NULL` runtime credential returns `AS_RESULT_INVALID_ARGUMENT`.
+* Both pointers `NULL` return `AS_RESULT_INVALID_ARGUMENT` without comparison.
 
 ### Successful Authentication
 
-- A candidate equal to the configured credential returns `AS_RESULT_AUTHENTICATED`.
-- Repeated valid requests produce the same result without initialization.
+* Two equal six-byte buffers return `AS_RESULT_AUTHENTICATED`.
+* Credentials containing boundary digits `0U` and `9U` compare correctly.
+* Repeated equal calls produce the same result without initialization.
 
 ### Credential Rejection
 
-- A mismatch at the first digit returns `AS_RESULT_REJECTED`.
-- A mismatch at every intermediate digit returns `AS_RESULT_REJECTED`.
-- A mismatch at the final digit returns `AS_RESULT_REJECTED`.
-- A candidate with every digit different returns `AS_RESULT_REJECTED`.
-- A candidate containing ASCII digit values does not accidentally authenticate.
+* Mismatch at the first byte returns `AS_RESULT_REJECTED`.
+* Mismatch at each intermediate byte returns `AS_RESULT_REJECTED`.
+* Mismatch at the sixth byte returns `AS_RESULT_REJECTED`.
+* Every byte different returns `AS_RESULT_REJECTED`.
+* Equal prefixes cannot authenticate when any later byte differs.
 
-### Ownership and State
+### Ownership and Statelessness
 
-- Authentication does not modify the candidate array.
-- One authentication result does not affect a subsequent request.
-- Independent candidate buffers may be authenticated sequentially.
-- Concurrent calls using independent stable buffers do not modify shared data.
+* Authentication modifies neither input buffer.
+* One result does not affect a later request.
+* Changing the caller-owned runtime credential immediately changes later results.
+* Independent callers with stable buffers share no AS mutable state.
+
+### Comparison Length
+
+* All six bytes participate in comparison on 32-bit and 64-bit hosts.
+* The implementation does not use `sizeof(Candidate)` or `sizeof(Credential)` on adjusted parameters.
 
 ### Build Validation
 
-- The service compiles without CES include paths.
-- The public header compiles as both C and C++.
-- The implementation compiles with warnings treated as errors.
-- No dynamic-allocation, hardware, or RTOS symbol is referenced.
+* The public header compiles as C and C++.
+* The implementation builds with warnings treated as errors.
+* No CES, CRS, CSS, LCS, HAL or RTOS include path is required.
+* No private configured credential symbol remains in the AS object.
+
+The service is accepted when the two-buffer API, implementation, tests and this README agree on null handling, full six-byte comparison and caller ownership.
 
 ---
 
 ## 18. Limitations and Future Improvements
 
-Current V1 limitations include:
+Current limitations include:
 
-- Credentials contain exactly six bytes.
-- The expected representation is numeric decimal values.
-- Candidate length is not supplied at runtime and cannot be validated.
-- Candidate digit range is not validated by AS.
-- The configured credential is fixed at build time.
-- The configured credential is stored directly in the firmware image.
-- No runtime provisioning or credential-change API is provided.
-- No nonvolatile or secure credential storage is integrated.
-- No cryptographic credential verification is implemented.
-- Comparison through `memcmp()` is not guaranteed to be constant-time.
-- Candidate cleanup remains a caller responsibility.
-- Failed-attempt counting and lockout policy are external.
-- Authentication-result auditing is external.
+* Credentials contain exactly six bytes.
+* Length is not supplied at runtime and actual capacity cannot be checked.
+* Decimal digit range is not validated by AS.
+* Runtime credential validity is maintained by the caller.
+* Runtime and candidate buffers are plaintext in RAM.
+* The current early-return comparison is not constant time.
+* Candidate and runtime cleanup remain caller responsibilities.
+* Failed-attempt counting, lockout and auditing are external.
+* AS supports one reference per call but has no identity or multi-user model.
 
-Possible future improvements depend on product security requirements and may include:
+Possible future improvements include:
 
-- A protected credential-storage interface.
-- Secure credential provisioning and replacement.
-- Constant-time credential comparison.
-- A guaranteed explicit-zeroization utility.
-- Authentication against a derived or keyed credential representation.
-- Support for multiple credential identities without coupling AS to CES.
+* A shared credential-domain type used by CES, CRS, CSS, AS and App Core.
+* Compile-time credential-length compatibility assertions.
+* A project-approved constant-time comparison routine.
+* A guaranteed non-elidable zeroization utility.
+* Authentication against a derived or keyed representation.
+* Protected runtime-storage strategies aligned with the hardware threat model.
+* Native host tests for all argument, mismatch-position and length cases.
 
-These improvements should preserve the current separation between candidate collection, credential validation, and application policy.
+Future changes shall preserve the central boundary: AS compares caller-supplied values and shall not absorb persistent storage, credential-entry lifecycle or Lock Control policy.
 
 ---
 
