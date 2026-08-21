@@ -145,7 +145,9 @@ The expected application sequence is:
 5. The Lock Controller interprets the returned `AS_Result_t` according to product policy.
 6. The Lock Controller erases the complete caller-owned candidate copy.
 
-Authentication success or rejection does not directly unlock the device. The Lock Controller remains responsible for deciding the corresponding state transition and side effects.
+Authentication success or rejection does not directly unlock the device or begin credential registration. The Lock Controller
+remains responsible for deciding the corresponding state transition and side effects from its current state and pending
+authentication purpose.
 
 ---
 
@@ -402,7 +404,7 @@ sequenceDiagram
     CTRL->>CES: CES_EndSession()
     CTRL->>AUTH: AS_Authenticate(candidate.Digits)
     AUTH-->>CTRL: AS_Result_t
-    CTRL->>CTRL: Apply product policy
+    CTRL->>CTRL: Apply pending-purpose and failure policy
     CTRL->>CTRL: Erase complete candidate copy
 ```
 

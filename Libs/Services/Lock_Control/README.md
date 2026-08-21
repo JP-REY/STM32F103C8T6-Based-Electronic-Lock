@@ -39,7 +39,8 @@
 
   * [8.1 States](#81-states)
   * [8.2 Singleton Handle](#82-singleton-handle)
-  * [8.3 Runtime Invariants](#83-runtime-invariants)
+  * [8.3 Pending Authentication Purpose](#83-pending-authentication-purpose)
+  * [8.4 Runtime Invariants](#84-runtime-invariants)
 * [9. Transition Model](#9-transition-model)
 
   * [9.1 Transition Record](#91-transition-record)
@@ -62,9 +63,11 @@
 * [13. Operation Flows](#13-operation-flows)
 
   * [13.1 Successful Access](#131-successful-access)
-  * [13.2 Rejected Access and Lockout](#132-rejected-access-and-lockout)
-  * [13.3 Cancellation or Entry Timeout](#133-cancellation-or-entry-timeout)
-  * [13.4 Ignored Events](#134-ignored-events)
+  * [13.2 Authorized Credential Registration](#132-authorized-credential-registration)
+  * [13.3 First-Boot Registration Route](#133-first-boot-registration-route)
+  * [13.4 Rejected Access and Lockout](#134-rejected-access-and-lockout)
+  * [13.5 Cancellation or Entry Timeout](#135-cancellation-or-entry-timeout)
+  * [13.6 Ignored Events](#136-ignored-events)
 * [14. API Reference](#14-api-reference)
 
   * [14.1 LCS_Process](#141-lcs_process)
@@ -80,7 +83,7 @@
 
 ## 1. Overview
 
-The Lock Control Service is the hardware-independent domain service that owns the authoritative operating state of the electronic lock and its consecutive authentication-failure policy.
+The Lock Control Service is the hardware-independent domain service that owns the authoritative operating state of the electronic lock, the consecutive authentication-failure policy, and the purpose of the credential operation awaiting authentication.
 
 The service processes one semantic event at a time through `LCS_Process()`. For each event, it searches an immutable transition table, evaluates the transition guard, applies a private internal effect, commits the target state, and returns a semantic action to the application.
 
@@ -88,6 +91,10 @@ The FSM answers two questions:
 
 1. **What is the next product state?**
 2. **What application-level operation is now required?**
+
+For an installed credential, the same credential-entry and authentication path authorizes two distinct operations. A private
+pending-request value records whether success shall grant bounded unlock or delegate control to a credential-register session.
+This avoids duplicating entry and authentication states while keeping the result deterministic.
 
 It deliberately does not answer how that operation is physically performed. For example, granting access may require the application to coordinate:
 
@@ -110,6 +117,7 @@ The acronym `LCS` means **Lock Control Service** and is used as the prefix for e
 
 - Linear, immutable, table-driven finite-state machine.
 - Explicit source state, event, guard, target state, internal effect, and action per transition.
+- Explicit pending-operation discriminator for authentication-success routing.
 - First-match transition selection with bounded linear lookup.
 - Semantic event input independent from hardware representations.
 - Semantic action output independent from action implementation.
@@ -118,6 +126,9 @@ The acronym `LCS` means **Lock Control Service** and is used as the prefix for e
 - Saturating failure counter.
 - Temporary lockout after three consecutive failures.
 - Failure-counter reset after successful authentication or completed lockout.
+- Shared authentication path for unlock and credential-register authorization.
+- Explicit pending-request cleanup on success, failure, cancellation, timeout, and delegated-session completion.
+- Credential-register delegation state that exposes no registration-session internals.
 - Safe rejection of events that are invalid in the current state.
 - Boot gating through explicit initialization-result events.
 - Synchronous and deterministic processing.
@@ -143,6 +154,7 @@ flowchart LR
         INPUT["Debounced user input"]
         CES["Credential Entry Service"]
         AUTH["Authentication Service"]
+        REGISTER["Credential Register owner"]
         TIME["Timeout owner"]
         BOOT["Startup validation"]
     end
@@ -166,6 +178,7 @@ flowchart LR
     INPUT --> DISPATCH
     CES --> DISPATCH
     AUTH --> DISPATCH
+    REGISTER --> DISPATCH
     TIME --> DISPATCH
     BOOT --> DISPATCH
     DISPATCH -->|"LCS_Event_t"| LCS
@@ -190,7 +203,9 @@ semantic fact -> Lock Control decision -> semantic action -> application executi
 The Lock Control Service owns decisions such as:
 
 - Whether credential entry is currently allowed.
+- Whether active entry is authorizing unlock or credential registration.
 - Whether an authentication result can grant or deny access.
+- Whether successful authentication delegates control to credential registration.
 - Whether the failure limit requires lockout.
 - Whether an elapsed timeout returns the product to locked mode.
 
@@ -199,6 +214,7 @@ The application owns execution such as:
 - Beginning and ending a Credential Entry Service session.
 - Copying and erasing a candidate credential.
 - Invoking authentication.
+- Beginning, running, and completing the credential-register session.
 - Rendering an access-granted or access-denied message.
 - Selecting LED and buzzer patterns.
 - Starting or stopping timeout measurement.
@@ -209,7 +225,8 @@ Consequently, the service can be tested on a native host without providing mocks
 
 ### 3.3 Singleton Ownership
 
-The source file allocates one private `LCS_Handle_t` instance. It is the single authoritative runtime context for the product lock FSM.
+The source file allocates one private `LCS_Handle_t` instance. It is the single authoritative runtime context for the product lock
+FSM, including the operation currently awaiting authentication.
 
 The singleton is appropriate while the firmware owns exactly one physical lock and invokes the service from one serialized application context. No public handle is exposed, so callers cannot mutate the current state, failure counter, or initialization flag directly.
 
@@ -255,6 +272,8 @@ The Lock Control Service is responsible for:
 - Accepting semantic events from the application.
 - Selecting at most one authorized transition per processed event.
 - Evaluating private guards against private policy state.
+- Distinguishing the unlock and credential-register destinations of successful authentication.
+- Owning and clearing the pending authentication purpose.
 - Applying private internal effects.
 - Committing the target state of an accepted transition.
 - Returning the semantic action associated with an accepted transition.
@@ -263,6 +282,7 @@ The Lock Control Service is responsible for:
 - Counting consecutive authentication failures with saturation.
 - Selecting lockout after the configured failure limit.
 - Resetting the failure count after authentication success or completed lockout.
+- Delegating credential registration without modeling its internal session states.
 - Preserving its domain and hardware independence.
 
 ### 5.2 Explicit Non-Responsibilities
@@ -272,6 +292,8 @@ The Lock Control Service is **not responsible** for:
 - Reading keyboard GPIOs or matrix scan codes.
 - Debouncing physical keys.
 - Collecting, storing, copying, comparing, or erasing credential digits.
+- Implementing the internal credential-register workflow.
+- Persisting a newly registered credential.
 - Calling the Credential Entry Service.
 - Calling the Authentication Service.
 - Reading a clock or measuring elapsed time.
@@ -329,11 +351,15 @@ The service does not depend on:
 | `LCS_EVENT_NONE` | No semantic event is available. It never causes a transition. |
 | `LCS_EVENT_INIT_OK` | Critical startup dependencies are valid and normal operation may begin. |
 | `LCS_EVENT_INIT_FAIL` | Startup validation failed and the controlled fault path is required. |
+| `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` | Startup validation found no stored credential and requires an initial registration session. |
+| `LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED` | The active entry session shall restart as authorization for credential registration. |
+| `LCS_EVENT_CREDENTIAL_REGISTER_DONE` | The delegated credential-register session completed successfully. |
 | `LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED` | A wake key requests entry mode. The wake key is not a credential digit. |
 | `LCS_EVENT_CREDENTIAL_CANCELLED` | The active credential-entry session was cancelled while its candidate was empty. |
 | `LCS_EVENT_CANDIDATE_READY` | A complete candidate credential is ready for authentication. |
 | `LCS_EVENT_AUTH_SUCCESS` | Authentication accepted the candidate credential. |
 | `LCS_EVENT_AUTH_FAILURE` | Authentication rejected the candidate credential. |
+| `LCS_EVENT_CANDIDATE_INCOMPLETE` | The active candidate was confirmed before reaching the required length. |
 | `LCS_EVENT_ENTRY_TIMEOUT` | The bounded credential-entry interval elapsed. |
 | `LCS_EVENT_UNLOCK_TIMEOUT` | The bounded authorized-unlock interval elapsed. |
 | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` | The bounded access-denied feedback interval elapsed. |
@@ -349,13 +375,18 @@ Events contain no hardware codes, peripheral handles, pointers, timestamps, or c
 | Action | Application intent |
 |---|---|
 | `LCS_ACTION_NONE` | No application coordination is requested. |
+| `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION` | Delegate control to the credential-register session owner. |
+| `LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` | Erase/restart active entry so the next complete candidate authorizes credential registration. |
 | `LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION` | Wake the UI, begin credential entry, and establish its inactivity timing. |
+| `LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION` | Erase the incomplete candidate, preserve the session, and restart entry timing. |
 | `LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION` | End and erase the entry session, then restore the locked-idle presentation. |
 | `LCS_ACTION_REQUEST_AUTHENTICATION` | Obtain, erase, and authenticate the completed candidate, then report the result. |
 | `LCS_ACTION_GRANT_ACCESS_UNLOCK` | Start bounded unlock operation and access-granted feedback. |
 | `LCS_ACTION_DENY_ACCESS` | Preserve the safe lock state and start bounded access-denied feedback. |
 | `LCS_ACTION_ENTER_LOCKOUT` | Preserve the safe lock state, reject entry, and start the lockout interval. |
 | `LCS_ACTION_RETURN_TO_LOCKED` | Restore the safe locked-idle mode and its user-interface policy. |
+| `LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` | End entry, restore locked idle, and provide entry-timeout feedback. |
+| `LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` | Restore locked idle after delegated registration completes. |
 | `LCS_ACTION_REQUEST_CONTROLLED_RESET` | Preserve safe outputs and request the application-controlled reset path. |
 
 Actions are intentionally semantic. `LCS_ACTION_GRANT_ACCESS_UNLOCK`, for example, is not a GPIO command. Its application handler may coordinate an actuator interface, a display view, LEDs, a sound pattern, and a timeout as one product operation.
@@ -384,6 +415,7 @@ The transition occurs and private runtime state changes even though the applicat
 |---|---|
 | `LCS_STATE_BOOT` | Awaiting the application startup-validation result. |
 | `LCS_STATE_LOCKED` | Secure idle state awaiting a credential-entry request. |
+| `LCS_STATE_CREDENTIAL_REGISTER` | Control is delegated to credential registration; LCS waits for its completion event. |
 | `LCS_STATE_CREDENTIAL_SESSION_ACTIVE` | Credential entry is active and may produce session events. |
 | `LCS_STATE_AUTHENTICATING` | A complete candidate is awaiting its authentication result. |
 | `LCS_STATE_ACCESS_GRANTED_UNLOCKED` | Access was granted and the bounded unlock interval is active. |
@@ -398,41 +430,44 @@ The current state topology is:
 flowchart TB
     START((Start)) --> BOOT["BOOT"]
 
-    BOOT -->|"INIT_OK<br/>effect: activate<br/>service"| LOCKED["LOCKED"]
-    BOOT -->|"INIT_FAIL<br/>action: request<br/>controlled reset"| FAULT["FAULT"]
+    BOOT -->|T01| LOCKED["LOCKED"]
+    BOOT -->|T02| FAULT["FAULT"]
+    BOOT -->|T03| REGISTER["CREDENTIAL<br/>REGISTER"]
 
-    LOCKED -->|"CREDENTIAL_ENTRY_<br/>REQUESTED<br/>action: begin<br/>entry session"| ENTRY["CREDENTIAL SESSION<br/>ACTIVE"]
-    ENTRY -->|"CANDIDATE_READY<br/>action: request<br/>authentication"| AUTH["AUTHENTICATING"]
-    ENTRY -->|"CREDENTIAL_<br/>CANCELLED<br/>or ENTRY_TIMEOUT<br/>action: end<br/>entry session"| TO_LOCKED["Target state:<br/>LOCKED"]
+    LOCKED -->|T04| ENTRY["CREDENTIAL SESSION<br/>ACTIVE<br/>T06 / T08 ↺"]
+    ENTRY -->|T09| AUTH["AUTHENTICATING"]
+    ENTRY -->|"T05 / T07"| TO_LOCKED["LOCKED<br/>return destination"]
 
-    AUTH -->|"AUTH_SUCCESS<br/>effect: reset<br/>failure count<br/>action: grant<br/>access / unlock"| GRANTED["ACCESS GRANTED<br/>UNLOCKED"]
-    AUTH -->|"AUTH_FAILURE<br/>effect: increment<br/>failure count<br/>action: deny access"| DENIED["ACCESS DENIED<br/>LOCKED"]
+    AUTH -->|T10| REGISTER
+    AUTH -->|T11| GRANTED["ACCESS GRANTED<br/>UNLOCKED"]
+    AUTH -->|T13| DENIED["ACCESS DENIED<br/>LOCKED"]
 
-    GRANTED -->|"UNLOCK_TIMEOUT<br/>action: return<br/>to locked"| TO_LOCKED
-    DENIED -->|"DENIED_ACCESS_<br/>TIMEOUT"| LIMIT{"Attempt limit<br/>reached?"}
-    LIMIT -->|"No<br/>guard: under<br/>attempt limit<br/>action: return<br/>to locked"| TO_LOCKED
-    LIMIT -->|"Yes<br/>guard: attempt<br/>limit reached<br/>action: enter<br/>lockout"| LOCKOUT["LOCKOUT"]
-    LOCKOUT -->|"LOCKOUT_TIMEOUT<br/>effect: reset<br/>failure count<br/>action: return<br/>to locked"| TO_LOCKED
+    GRANTED -->|T12| TO_LOCKED
+    DENIED -->|T14| TO_LOCKED
+    DENIED -->|T15| LOCKOUT["LOCKOUT"]
+    LOCKOUT -->|T16| TO_LOCKED
+    REGISTER -->|T17| TO_LOCKED
     TO_LOCKED --> LOCKED
 
     classDef initial fill:#f4f6f7,stroke:#667681,color:#263642
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
     classDef active fill:#eaf4fb,stroke:#3478a8,color:#17324d
     classDef denied fill:#fff2e5,stroke:#d77a27,color:#5e3514
-    classDef decision fill:#fff8d9,stroke:#ad8b00,color:#4d4100
     classDef connector fill:#f4f6f7,stroke:#667681,color:#263642,stroke-dasharray: 5 3
     classDef fault fill:#fbecec,stroke:#b54040,color:#7a2525
 
     class START initial
     class BOOT,LOCKED secure
-    class ENTRY,AUTH,GRANTED active
+    class ENTRY,AUTH,GRANTED,REGISTER active
     class DENIED,LOCKOUT denied
-    class LIMIT decision
     class TO_LOCKED connector
     class FAULT fault
 ```
 
-Every complete path between state boxes summarizes behavior represented by `LCS_Transitions`. `START` is only the static-initialization marker, `LIMIT` is only a visual decision node, and `TO_LOCKED` only separates the converging return routes; none of them is an `LCS_State_t` value. The two paths through `LIMIT` represent the mutually exclusive guards attached to the two `DENIED_ACCESS_TIMEOUT` records.
+Every edge corresponds to the transition identifier in [Section 9.4](#94-transition-table). `START` is only the static-initialization
+marker and `TO_LOCKED` only separates converging return routes; neither is an `LCS_State_t` value. `LOCKED` is drawn twice for
+layout only. `T06` and `T08` are distinct self-transitions: registration request changes the pending purpose and incomplete entry
+preserves it.
 
 Event names in the diagram omit the common `LCS_EVENT_` prefix, and action labels omit `LCS_ACTION_`, to keep the graph readable. The transition table in [Section 9.4](#94-transition-table) remains the normative record-by-record representation of the implementation.
 
@@ -443,9 +478,10 @@ The private runtime handle contains:
 ```c
 typedef struct
 {
-    LCS_State_t current_state;
-    uint8_t     failed_attempt_count;
-    bool        initialized;
+    LCS_State_t   current_state;
+    uint8_t       failed_attempt_count;
+    LCS_Pending_t pending_request;
+    bool          initialized;
 
 }LCS_Handle_t;
 ```
@@ -454,21 +490,45 @@ typedef struct
 |---|---|
 | `current_state` | Authoritative source state used during transition lookup. |
 | `failed_attempt_count` | Saturating number of consecutive rejected authentications. |
+| `pending_request` | Operation selected after successful authentication: none, unlock, or credential registration. |
 | `initialized` | Enables normal event processing only after successful startup. |
 
 The transition table is not part of the mutable handle because it is immutable module policy stored in read-only static data.
 
-### 8.3 Runtime Invariants
+### 8.3 Pending Authentication Purpose
+
+`LCS_Pending_t` is private routing context, not a public action and not a second FSM state. It has three values:
+
+| Pending value | Meaning |
+|---|---|
+| `LCS_PENDING_NONE` | No operation awaits authentication. |
+| `LCS_PENDING_UNLOCK` | Authentication success shall enter bounded unlock. |
+| `LCS_PENDING_CREDENTIAL_REGISTER` | Authentication success shall delegate credential registration. |
+
+Normal entry from `LOCKED` sets `LCS_PENDING_UNLOCK`. While entry remains active,
+`LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED` replaces that purpose with `LCS_PENDING_CREDENTIAL_REGISTER` and asks the application
+to erase/restart the candidate. Entry refresh and the move to `AUTHENTICATING` preserve the pending value. Success, failure,
+cancellation and timeout resolve the request and clear it.
+
+This context makes the two `AUTH_SUCCESS` records deterministic without duplicating the credential-entry and authentication
+states. `AUTH_SUCCESS` with `LCS_PENDING_NONE` is rejected without mutation.
+
+### 8.4 Runtime Invariants
 
 The implementation preserves these invariants:
 
 - The initial state is `LCS_STATE_BOOT`.
 - The initial failure count is zero.
+- The initial pending request is `LCS_PENDING_NONE`.
 - Normal processing is initially inactive.
 - Only `LCS_EVENT_INIT_OK` can set `initialized` to `true`.
 - Before activation, non-initialization events cannot mutate runtime state.
 - The failure counter never exceeds `LCS_FAILURE_ATTEMPTS_LIMIT`.
 - Authentication success resets the consecutive-failure counter.
+- `LOCKED` has no pending request after every completed, failed, cancelled, or timed-out operation.
+- Active entry and authentication preserve exactly one pending purpose.
+- Authentication success is accepted only when its record's pending-operation discriminator equals `pending_request`.
+- Authentication failure clears the pending request before denial feedback begins.
 - Lockout completion resets the consecutive-failure counter.
 - Invalid current-state/event combinations do not mutate runtime state.
 - At most one transition is committed by one `LCS_Process()` call.
@@ -487,6 +547,7 @@ typedef struct
     LCS_State_t          source_state;
     LCS_Event_t          event;
     LCS_Guard_t          guard;
+    LCS_Pending_t        pending_op;
     LCS_State_t          target_state;
     LCS_InternalEffect_t internal_effect;
     LCS_Action_t         action;
@@ -501,6 +562,7 @@ The fields have distinct responsibilities:
 | `source_state` | State in which the record may be selected. |
 | `event` | Semantic fact required by the record. |
 | `guard` | Runtime condition that authorizes the record. |
+| `pending_op` | Required pending purpose for an authentication-success route; `NONE` on records that do not use this discriminator. |
 | `target_state` | State committed after the transition is accepted. |
 | `internal_effect` | Private mutation performed inside LCS. |
 | `action` | Semantic work returned to the application. |
@@ -532,8 +594,13 @@ The current private internal effects are:
 |---|---|
 | `LCS_INTERNAL_EFFECT_NONE` | Preserves all runtime fields except the mandatory target-state commit. |
 | `LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE` | Marks successful startup activation. |
+| `LCS_INTERNAL_EFFECT_SET_PENDING_REGISTER_SESSION` | Routes the next successful authentication to credential registration. |
+| `LCS_INTERNAL_EFFECT_SET_PENDING_UNLOCK` | Routes the next successful authentication to bounded unlock. |
+| `LCS_INTERNAL_EFFECT_CLEAR_PENDING` | Restores the no-pending-request invariant. |
 | `LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT` | Saturating increment of consecutive authentication failures. |
 | `LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT` | Clears the failure counter. |
+| `LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_INCREMENT_ATTEMPT_COUNT` | Clears the pending purpose and records one rejected authentication. |
+| `LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_RESET_ATTEMPT_COUNT` | Clears the pending purpose and all consecutive failures. |
 
 An internal effect is not a user-visible product action and must not call external modules. It exists so transition-local changes to LCS-owned data remain declarative in the table instead of being hidden in event-specific branches.
 
@@ -541,34 +608,48 @@ Target-state assignment is mandatory for every accepted transition and is theref
 
 ### 9.4 Transition Table
 
-The current table contains only valid transitions:
+The current table contains the following declared transition records:
 
-| # | Source state | Event | Guard | Target state | Internal effect | Returned action |
-|---:|---|---|---|---|---|---|
-| 1 | `BOOT` | `INIT_OK` | Always | `LOCKED` | Set service active | `NONE` |
-| 2 | `BOOT` | `INIT_FAIL` | Always | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
-| 3 | `LOCKED` | `CREDENTIAL_ENTRY_REQUESTED` | Always | `CREDENTIAL_SESSION_ACTIVE` | None | `BEGIN_CREDENTIAL_ENTRY_SESSION` |
-| 4 | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_CANCELLED` | Always | `LOCKED` | None | `END_CREDENTIAL_ENTRY_SESSION` |
-| 5 | `CREDENTIAL_SESSION_ACTIVE` | `ENTRY_TIMEOUT` | Always | `LOCKED` | None | `END_CREDENTIAL_ENTRY_SESSION` |
-| 6 | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_READY` | Always | `AUTHENTICATING` | None | `REQUEST_AUTHENTICATION` |
-| 7 | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | `ACCESS_GRANTED_UNLOCKED` | Reset failure count | `GRANT_ACCESS_UNLOCK` |
-| 8 | `ACCESS_GRANTED_UNLOCKED` | `UNLOCK_TIMEOUT` | Always | `LOCKED` | None | `RETURN_TO_LOCKED` |
-| 9 | `AUTHENTICATING` | `AUTH_FAILURE` | Always | `ACCESS_DENIED_LOCKED` | Increment failure count | `DENY_ACCESS` |
-| 10 | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | `LOCKED` | None | `RETURN_TO_LOCKED` |
-| 11 | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | `LOCKOUT` | None | `ENTER_LOCKOUT` |
-| 12 | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
+| ID | Source state | Event | Guard | Pending discriminator | Target state | Internal effect | Returned action |
+|---:|---|---|---|---|---|---|---|
+| `T01` | `BOOT` | `INIT_OK` | Always | None | `LOCKED` | Set service active | `NONE` |
+| `T02` | `BOOT` | `INIT_FAIL` | Always | None | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
+| `T03` | `BOOT` | `CREDENTIAL_NOT_REGISTERED` | Always | None | `CREDENTIAL_REGISTER` | None | `BEGIN_CREDENTIAL_REGISTER_SESSION` |
+| `T04` | `LOCKED` | `CREDENTIAL_ENTRY_REQUESTED` | Always | None | `CREDENTIAL_SESSION_ACTIVE` | Set pending unlock | `BEGIN_CREDENTIAL_ENTRY_SESSION` |
+| `T05` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Clear pending | `END_CREDENTIAL_ENTRY_SESSION` |
+| `T06` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_REGISTER_REQUESTED` | Always | None | `CREDENTIAL_SESSION_ACTIVE` | Set pending register session | `REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` |
+| `T07` | `CREDENTIAL_SESSION_ACTIVE` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` |
+| `T08` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_SESSION_ACTIVE` | None | `REFRESH_CREDENTIAL_ENTRY_SESSION` |
+| `T09` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_READY` | Always | None | `AUTHENTICATING` | None | `REQUEST_AUTHENTICATION` |
+| `T10` | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | Credential register | `CREDENTIAL_REGISTER` | Clear pending and reset failures | `BEGIN_CREDENTIAL_REGISTER_SESSION` |
+| `T11` | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | Unlock | `ACCESS_GRANTED_UNLOCKED` | Clear pending and reset failures | `GRANT_ACCESS_UNLOCK` |
+| `T12` | `ACCESS_GRANTED_UNLOCKED` | `UNLOCK_TIMEOUT` | Always | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
+| `T13` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `ACCESS_DENIED_LOCKED` | Clear pending and increment failures | `DENY_ACCESS` |
+| `T14` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
+| `T15` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
+| `T16` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
+| `T17` | `CREDENTIAL_REGISTER` | `CREDENTIAL_REGISTER_DONE` | Always | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
 
 ### 9.5 Selection Rules
 
-`LCS_FindTransition()` scans the table from the first record to the last. A record is selected only when all three conditions are true:
+`LCS_FindTransition()` scans the table from the first record to the last. A record is selected only when the common conditions are
+true:
 
 1. `source_state` equals the current runtime state.
 2. `event` equals the event supplied to `LCS_Process()`.
 3. The private guard evaluates to `true`.
 
+For `AUTHENTICATING + AUTH_SUCCESS`, one additional condition applies:
+
+4. `pending_op` equals the singleton `pending_request` and that request is not `LCS_PENDING_NONE`.
+
 The first authorized record wins. If none is found, the event is ignored, no runtime field changes, and `LCS_ACTION_NONE` is returned.
 
-The linear representation stores only valid transitions. It avoids a dense state-by-event matrix containing mostly empty cells and naturally supports multiple guarded outcomes for one source/event pair.
+The pending discriminator makes the two authentication-success routes mutually exclusive. The attempt-count guards likewise make
+the two denied-timeout routes mutually exclusive. Therefore, every complete runtime context selects at most one record.
+
+The linear representation stores only declared transition records. It avoids a dense state-by-event matrix containing mostly
+empty cells and naturally supports multiple policy-selected outcomes for one source/event pair.
 
 ---
 
@@ -583,7 +664,7 @@ flowchart TD
     INIT -->|"No"| NONE["Return LCS_ACTION_NONE<br/>without mutation"]
     INIT -->|"Yes"| FIND["Scan ordered <br/>transition table"]
     ACTIVE -->|"Yes"| FIND
-    FIND --> MATCH{"Source + event + guard <br/>match?"}
+    FIND --> MATCH{"Source + event + guard<br/>and required pending match?"}
     MATCH -->|"No record"| NONE
     MATCH -->|"First authorized record"| EFFECT["Apply private internal effect"]
     EFFECT --> COMMIT["Commit target state"]
@@ -603,7 +684,7 @@ The service never recursively dispatches an event and never executes the returne
 Transition behavior is data-driven rather than distributed across nested conditionals. Each rule can be read as one row:
 
 ```text
-source + event + guard -> target + internal effect + semantic action
+source + event + guard + pending discriminator -> target + internal effect + semantic action
 ```
 
 This provides several extension advantages:
@@ -611,6 +692,7 @@ This provides several extension advantages:
 - Valid behavior is visible in one ordered list.
 - A new route between existing states generally requires one new record.
 - Multiple outcomes for one event can be expressed with guards.
+- Successful authentication can select its authorized destination from private pending-request context.
 - Internal policy mutations remain explicit beside the transition that triggers them.
 - Application effects remain semantic and do not introduce hardware dependencies.
 - State/event combinations absent from the table are rejected by default.
@@ -675,13 +757,22 @@ Only a genuinely new application intent requires changing the action dispatcher.
 
 ### 11.3 Ordering and Ambiguity
 
-Because selection uses first-match semantics, table order is behavior when two records can both match the same source, event, and runtime context.
+Because selection uses first-match semantics, table order is behavior when two records can both match the same complete runtime
+context.
 
 Records sharing a source/event pair should normally use guards that are demonstrably mutually exclusive. The current denied-timeout pair follows this rule:
 
 ```text
 failed_attempt_count < 3  -> return to LOCKED
 failed_attempt_count >= 3 -> enter LOCKOUT
+```
+
+The authentication-success pair uses a different mutually exclusive discriminator:
+
+```text
+pending_request == UNLOCK              -> enter ACCESS_GRANTED_UNLOCKED
+pending_request == CREDENTIAL_REGISTER -> enter CREDENTIAL_REGISTER
+pending_request == NONE                -> reject AUTH_SUCCESS
 ```
 
 If deliberate priority is introduced later, it shall be documented beside those records and validated by tests. Accidental overlapping guards should be treated as a transition-table defect.
@@ -701,8 +792,20 @@ static void APP_DispatchLockEvent(LCS_Event_t Event)
 
     switch(action)
     {
+        case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION:
+            /* Delegate to the registration-session owner; later dispatch CREDENTIAL_REGISTER_DONE. */
+            break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION:
+            /* Erase/restart CES and presentation so the next candidate authorizes registration. */
+            break;
+
         case LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION:
             /* Begin CES, wake/render the display, set indication, and start entry timing. */
+            break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION:
+            /* Erase the incomplete candidate, preserve CES, and restart entry timing. */
             break;
 
         case LCS_ACTION_REQUEST_AUTHENTICATION:
@@ -724,6 +827,14 @@ static void APP_DispatchLockEvent(LCS_Event_t Event)
         case LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION:
         case LCS_ACTION_RETURN_TO_LOCKED:
             /* End sensitive sessions, enforce locked output, stop obsolete timing, and restore idle UI. */
+            break;
+
+        case LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT:
+            /* End entry, enforce lock, restore idle UI, and provide timeout feedback. */
+            break;
+
+        case LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION:
+            /* End delegated registration ownership and restore locked idle. */
             break;
 
         case LCS_ACTION_REQUEST_CONTROLLED_RESET:
@@ -753,9 +864,15 @@ That event requests entry mode and returns `LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SE
 
 The initiating key is a **wake/session-request key only**. It shall not be forwarded as the first credential digit. Credential commands are processed only after the application has executed the begin-session action. This prevents the same physical press from both waking the interface and silently entering data.
 
+While that session is active, a product-specific command may dispatch `LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED`. LCS preserves the
+entry state, replaces the pending purpose with credential registration, and returns
+`LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION`. The application shall erase the existing candidate and restart entry
+presentation/timing so digits originally entered for unlock cannot be reused silently as registration authorization.
+
 ### 12.3 Authentication Feedback
 
-When LCS returns `LCS_ACTION_REQUEST_AUTHENTICATION`, the authoritative state is already `LCS_STATE_AUTHENTICATING`.
+When LCS returns `LCS_ACTION_REQUEST_AUTHENTICATION`, the authoritative state is already `LCS_STATE_AUTHENTICATING` and exactly
+one pending purpose identifies the operation being authorized.
 
 The application may then:
 
@@ -765,7 +882,10 @@ The application may then:
 4. Erase the application-owned candidate copy.
 5. Dispatch `LCS_EVENT_AUTH_SUCCESS` or `LCS_EVENT_AUTH_FAILURE` only after the original `LCS_Process()` call has returned.
 
-The FSM does not receive the credential bytes and does not know how authentication is implemented.
+On failure, LCS clears the pending purpose and applies the same denial/lockout policy to both requests. On success, it clears the
+purpose, resets consecutive failures, and returns either `LCS_ACTION_GRANT_ACCESS_UNLOCK` or
+`LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION`. The FSM does not receive credential bytes and does not know how authentication is
+implemented.
 
 ### 12.4 Timeout Ownership
 
@@ -797,6 +917,7 @@ sequenceDiagram
     U->>APP: Debounced wake key
     APP->>LCS: CREDENTIAL_ENTRY_REQUESTED
     LCS-->>APP: BEGIN_CREDENTIAL_ENTRY_SESSION
+    Note over LCS: pending_request = UNLOCK
     APP->>FX: Wake UI and start entry session/timing
     APP->>LCS: CANDIDATE_READY
     LCS-->>APP: REQUEST_AUTHENTICATION
@@ -804,15 +925,64 @@ sequenceDiagram
     AUTH-->>APP: Authenticated
     APP->>LCS: AUTH_SUCCESS
     LCS-->>APP: GRANT_ACCESS_UNLOCK
+    Note over LCS: pending_request = NONE<br/>failure count = 0
     APP->>FX: Unlock + granted feedback + unlock timing
     APP->>LCS: UNLOCK_TIMEOUT
     LCS-->>APP: RETURN_TO_LOCKED
     APP->>FX: Enforce lock and restore idle presentation
 ```
 
-Authentication success resets the consecutive-failure counter before the unlock action is returned.
+Normal entry establishes `LCS_PENDING_UNLOCK`. Authentication success selects only the unlock transition, clears that pending
+purpose, and resets the consecutive-failure counter before the unlock action is returned.
 
-### 13.2 Rejected Access and Lockout
+### 13.2 Authorized Credential Registration
+
+The runtime registration route reuses the same credential-entry and authentication states:
+
+```mermaid
+sequenceDiagram
+    participant U as User Input
+    participant APP as Application
+    participant LCS as Lock Control Service
+    participant AUTH as Authentication Service
+    participant REG as Registration Session Owner
+
+    U->>APP: Wake / begin entry
+    APP->>LCS: CREDENTIAL_ENTRY_REQUESTED
+    LCS-->>APP: BEGIN_CREDENTIAL_ENTRY_SESSION
+    Note over LCS: pending_request = UNLOCK
+    U->>APP: Request credential registration
+    APP->>LCS: CREDENTIAL_REGISTER_REQUESTED
+    LCS-->>APP: REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION
+    Note over LCS: pending_request = CREDENTIAL_REGISTER
+    APP->>APP: Erase and restart credential entry
+    APP->>LCS: CANDIDATE_READY
+    LCS-->>APP: REQUEST_AUTHENTICATION
+    APP->>AUTH: Current credential candidate
+    AUTH-->>APP: Authenticated
+    APP->>LCS: AUTH_SUCCESS
+    LCS-->>APP: BEGIN_CREDENTIAL_REGISTER_SESSION
+    Note over LCS: pending_request = NONE
+    APP->>REG: Delegate registration workflow
+    REG-->>APP: Registration completed
+    APP->>LCS: CREDENTIAL_REGISTER_DONE
+    LCS-->>APP: RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION
+```
+
+LCS authorizes entry into registration but does not model registration digits, confirmation attempts, persistence, or the internal
+states of the delegated session.
+
+### 13.3 First-Boot Registration Route
+
+The transition table declares a direct route from `BOOT` to `CREDENTIAL_REGISTER` when startup validation reports
+`LCS_EVENT_CREDENTIAL_NOT_REGISTERED`. It intentionally bypasses authentication because no installed credential exists. Completion
+returns the FSM to `LOCKED` through `LCS_EVENT_CREDENTIAL_REGISTER_DONE`.
+
+The current `LCS_Process()` activation gate admits only `INIT_OK` and `INIT_FAIL` while `initialized == false`; consequently, this
+declared boot transition is not yet reachable in the implementation. The gate and activation effect must be reconciled before App
+Core can use the first-boot route. This is recorded as a current limitation rather than being hidden by the diagram.
+
+### 13.4 Rejected Access and Lockout
 
 For each rejected candidate:
 
@@ -827,16 +997,18 @@ Entry requests have no valid transition during lockout and are ignored. When `LC
 
 Lockout is deliberately selected after the third denial-feedback interval ends, not immediately inside the `AUTH_FAILURE` transition. This allows the application to complete the access-denied presentation before beginning the lockout presentation and timer.
 
-### 13.3 Cancellation or Entry Timeout
+### 13.5 Cancellation or Entry Timeout
 
 Both of these active-session events return the FSM to `LOCKED`:
 
 - `LCS_EVENT_CREDENTIAL_CANCELLED`
 - `LCS_EVENT_ENTRY_TIMEOUT`
 
-Both return `LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION`, asking the application to erase entry data, stop entry timing, and restore the locked-idle presentation.
+Cancellation returns `LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION`; timeout returns
+`LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` so the application can add distinct timeout feedback. Both clear the pending
+purpose before committing `LOCKED`, erase entry data through the application action, and stop entry timing.
 
-### 13.4 Ignored Events
+### 13.6 Ignored Events
 
 An event is ignored when:
 
@@ -873,13 +1045,15 @@ Returns the semantic application action associated with the accepted transition,
 For an accepted transition, the function:
 
 1. Selects the first authorized table record.
-2. Applies its private internal effect.
-3. Commits its target state.
-4. Returns its semantic action.
+2. For authentication success, requires the record's pending discriminator to match `pending_request`.
+3. Applies its private internal effect.
+4. Commits its target state.
+5. Returns its semantic action.
 
 #### Preconditions
 
 - The service shall be activated with `LCS_EVENT_INIT_OK` before normal events are expected to work.
+- Every path into `AUTHENTICATING` shall retain a nonzero pending purpose established by LCS itself.
 - Events shall be dispatched from one serialized execution context.
 - Result events produced by executing an action shall be dispatched after the current call returns.
 
@@ -897,7 +1071,8 @@ The transition table separates the stable processing mechanism from evolving pro
 
 ### Sparse Linear Representation
 
-Only valid transitions consume storage. The current table has twelve records, while a dense matrix for eight runtime states and twelve dispatchable event identifiers would reserve many unused cells.
+Only valid transitions consume storage. The current table has seventeen records, while a dense matrix for nine runtime states and
+fifteen dispatchable event identifiers would reserve many unused cells.
 
 ### Private State Representation
 
@@ -915,6 +1090,17 @@ Actions represent product intent rather than calls or electrical commands. This 
 
 Private policy mutations are declared in transition records and handled by a small internal interpreter. They remain distinct from target-state commit and application-visible action execution.
 
+### Shared Authentication with Explicit Purpose
+
+Unlock and credential-register authorization share one entry/authentication path. A private pending value records the purpose,
+and each authentication-success record stores the purpose required to select it. This avoids duplicated states and keeps routing
+explicit in the table.
+
+### Delegated Registration State
+
+`LCS_STATE_CREDENTIAL_REGISTER` represents only product-level ownership: normal lock operation is suspended while another session
+owner performs registration. LCS does not model that session's digits, confirmation, storage, or internal states.
+
 ### One Event and One Action per Call
 
 Each invocation consumes one event and returns at most one action. This keeps call ordering explicit and makes state evolution straightforward to test.
@@ -926,6 +1112,8 @@ The failure counter stops at the configured policy limit. Repeated or malformed 
 ### Explicit Boot Gate
 
 The singleton begins in a safe inactive state. Normal events are ignored until startup validation dispatches `LCS_EVENT_INIT_OK`.
+The declared `CREDENTIAL_NOT_REGISTERED` boot route still requires an implementation change to this activation gate before it can
+be dispatched successfully.
 
 ---
 
@@ -977,6 +1165,9 @@ An ISR should normally publish a semantic fact to the application event mechanis
 - Three consecutive failures lead to temporary lockout after denial feedback completes.
 - Entry requests are rejected by omission while lockout is active.
 - Invalid events cannot directly force an unlock transition.
+- Authentication success cannot select a destination without a pending purpose established by an accepted LCS transition.
+- Registration authorization uses the same failed-attempt and lockout policy as unlock authorization.
+- Pending operation context contains no credential bytes and is cleared on terminal paths.
 - The wake key does not become an implicit credential digit.
 - The service requests unlock semantically; only the application can operate the actuator.
 - A returned unlock action is not proof that the physical lock successfully moved.
@@ -989,48 +1180,18 @@ The in-memory failure counter is not persistent. Resetting or power-cycling the 
 
 ## 19. Testing and Acceptance Criteria
 
-The native host smoke test is located at:
-
-```text
-Tests/Host/Lock_Control_Service_Test.c
-```
-
-Run it from the project root with:
-
-```sh
-make -C Tests/Host test
-```
-
-The host Makefile compiles the production `Lock_Control_Service.c` with GCC using C11 and strict warnings:
-
-```text
--Wall -Wextra -Wpedantic -Werror
-```
-
-The current 24-step scenario validates:
-
-- Rejection of a credential-entry request before initialization.
-- Successful startup activation.
-- First and second failed attempts returning to locked mode.
-- Third failed attempt entering lockout.
-- Rejection of entry requests during lockout.
-- Lockout completion and return to locked mode.
-- Successful authentication and bounded unlock completion.
-- Credential-entry timeout.
-- Credential-entry cancellation.
-
-Expected successful output:
-
-```text
-PASS Lock Control Service steps=24
-```
-
-Additional focused tests should be added as the service evolves, especially for:
+No dedicated native host test for LCS is currently committed in this repository. Acceptance coverage should be added for:
 
 - Every transition record.
 - Invalid events in every state.
 - Guard boundary conditions.
 - Counter-reset behavior after success and lockout.
+- Pending unlock selection after normal entry.
+- Pending registration selection after active entry is reclassified.
+- Pending preservation through incomplete entry and the move to `AUTHENTICATING`.
+- Pending cleanup after success, failure, cancellation, timeout, unlock completion, and registration completion.
+- Rejection of `AUTH_SUCCESS` when no request is pending.
+- The first-boot registration route after its activation-gate limitation is resolved.
 - Startup-failure behavior in an isolated process.
 - Any future critical runtime-fault precedence.
 - Any future action-execution failure feedback.
@@ -1047,6 +1208,7 @@ Current limitations include:
 - No public reset, snapshot, state-query, or diagnostic API.
 - No event payload; all event values are identifier-only.
 - One semantic action returned per processed event.
+- Pending-operation discrimination is specialized to `AUTHENTICATING + AUTH_SUCCESS` in the lookup helper.
 - First-match behavior makes overlapping guard order significant.
 - Linear lookup cost grows with the number of transition records.
 - The failure limit is a private compile-time policy constant.
@@ -1054,6 +1216,8 @@ Current limitations include:
 - Startup failure is currently the only modeled fault transition.
 - No global critical runtime-fault precedence is currently modeled.
 - No transition exists out of `LCS_STATE_FAULT`.
+- The `BOOT + CREDENTIAL_NOT_REGISTERED` record is unreachable while the inactive-service gate rejects that event.
+- Credential registration currently has only a successful completion event; cancellation and failure outcomes are not modeled.
 - No explicit feedback event reports that an application action failed to execute.
 - No automatic static validation currently checks table reachability, duplicate unconditional records, or guard overlap.
 

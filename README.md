@@ -62,6 +62,10 @@ The prototype does not provide persistent users, credential updates, access
 logs, connectivity, tamper protection, mechanical position feedback or
 certified access-control guarantees.
 
+LCS now models authenticated delegation to a credential-register session, but
+App Core does not yet emit or execute that registration contract. Credential
+updates therefore remain unavailable in the current product integration.
+
 ---
 
 ## Product Contract
@@ -209,7 +213,7 @@ display, two indication instances and sound once. See the
 
 | Service | Responsibility | Detailed documentation |
 | --- | --- | --- |
-| Lock Control | Authoritative FSM and consecutive-failure policy | [README](Libs/Services/Lock_Control/README.md) |
+| Lock Control | Authoritative FSM, authentication-purpose routing and consecutive-failure policy | [README](Libs/Services/Lock_Control/README.md) |
 | Credential Entry | Active session, normalized candidate and clear/cancel semantics | [README](Libs/Services/Credential_Entry/README.md) |
 | Authentication | Synchronous comparison of one complete candidate | [README](Libs/Services/Authentication/README.md) |
 | Timeout Validation | Rollover-safe evaluation of caller-owned intervals | [README](Libs/Services/Timeout_Validation/README.md) |

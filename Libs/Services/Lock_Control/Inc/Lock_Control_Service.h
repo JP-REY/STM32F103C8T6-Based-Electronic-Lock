@@ -9,6 +9,10 @@
  *          current state, evaluates its private guard, applies any private runtime effect and returns one LCS_Action_t for the
  *          application layer to execute.
  *
+ *          Credential authentication is shared by unlock and credential-register authorization. The service records the pending
+ *          request while credential entry is active and uses it to select the deterministic destination of a successful
+ *          authentication: bounded unlock or delegation to the credential-register session.
+ *
  *          Actions are semantic coordination requests rather than hardware commands. The application remains responsible for
  *          grouping the Credential Entry, Authentication, Display Render, Status Indication, Sound Generator, timeout and
  *          actuator-control operations required to realize each returned action.
@@ -33,9 +37,13 @@
  * @note    LCS_EVENT_INIT_OK activates normal operation from the initial boot state. LCS_EVENT_INIT_FAIL enters the fault state
  *          and requests controlled reset behavior.
  *
+ * @note    LCS_EVENT_CREDENTIAL_NOT_REGISTERED reserves the direct first-registration route. The current implementation gate does
+ *          not yet admit that event while the singleton is inactive; startup integration shall not rely on it until the gate and
+ *          activation effect are reconciled.
+ *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 18, 2026
+ * @version 1.1.0
+ * @date    Aug 21, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_SERVICES_LOCK_CONTROL_INC_LOCK_CONTROL_SERVICE_H_
@@ -71,11 +79,11 @@ typedef enum
 
     LCS_EVENT_INIT_FAIL,                        /*< Startup validation failed; the service enters its fault path.                    */
 
-    LCS_EVENT_CREDENTIAL_NOT_REGISTERED,        /*< The startup validation identifies that there are no registered credentials.      */
+    LCS_EVENT_CREDENTIAL_NOT_REGISTERED,        /*< Startup validation found no credential and requires initial registration.       */
 
-    LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED,    /*< Requests credential register mode entry.                                         */
+    LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED,    /*< Reclassifies the active entry as authorization for credential registration.     */
 
-    LCS_EVENT_CREDENTIAL_REGISTER_DONE,         /*< Credential register session completed succesfully.                               */
+    LCS_EVENT_CREDENTIAL_REGISTER_DONE,         /*< The delegated credential-register session completed successfully.               */
 
     LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,       /*< A wake key requests credential-entry mode; the key is not a credential digit.    */
 
@@ -87,7 +95,7 @@ typedef enum
 
     LCS_EVENT_AUTH_FAILURE,                     /*< Authentication rejected the candidate credential.                                */
 
-    LCS_EVENT_CANDIDATE_INCOMPLETE,             /*< The bounded credential-entry was confirmed while incompleted.                    */
+    LCS_EVENT_CANDIDATE_INCOMPLETE,             /*< The active credential candidate was confirmed before reaching full length.       */
 
     LCS_EVENT_ENTRY_TIMEOUT,                    /*< The bounded credential-entry interval elapsed.                                   */
 
@@ -116,7 +124,9 @@ typedef enum
 {
     LCS_ACTION_NONE = 0U,                                           /*< No application-level work is requested.                                     */
     
-    LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION,                   /*< Begin credential register session.                                          */
+    LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SESSION,                   /*< Delegate control to a credential-register session.                         */
+
+    LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION,        /*< Restart entry to authenticate a credential-register request.               */
     
     LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION,                      /*< Wake the UI, begin credential entry and establish its inactivity timing.    */
     
@@ -136,7 +146,7 @@ typedef enum
     
     LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT,                 /*< Restore the safe locked-idle mode and triggers timeout sound feedback.      */
     
-    LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION,   /*< Restore the safe locked-idle mode after an credential register session.     */
+    LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION,   /*< Restore locked idle after the delegated register session completes.         */
     
     LCS_ACTION_REQUEST_CONTROLLED_RESET                             /*< Preserve safe outputs and request the application-controlled reset path.    */
 

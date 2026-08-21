@@ -187,7 +187,7 @@ The intended startup mapping is:
 | CSS result | Application interpretation |
 |:---|:---|
 | `CSS_OPERATION_OK` | runtime credential is ready; continue normal initialization |
-| `CSS_OPERATION_NOT_FOUND` | dispatch the no-credential path and begin first registration |
+| `CSS_OPERATION_NOT_FOUND` | dispatch `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` and begin first registration |
 | `CSS_OPERATION_STORAGE_ERROR` | persistent storage is not trustworthy; enter the application fault policy |
 | `CSS_OPERATION_INVALID_ARGUMENT` | integration defect; destination contract was violated |
 
@@ -615,6 +615,11 @@ flowchart TD
 Using one retrieval avoids reading the record twice and preserves the difference
 between a normal first boot and a storage integration failure.
 
+The LCS table already declares the `CREDENTIAL_NOT_REGISTERED` boot route, but
+its current inactive-service gate admits only `INIT_OK` and `INIT_FAIL`.
+Therefore, the diagram above remains the intended integration until that gate
+and the route's activation effect are reconciled.
+
 ### 11.2 Credential Registration Completion
 
 The intended registration completion order is:
@@ -636,7 +641,7 @@ sequenceDiagram
     CSS-->>APP: CSS_OPERATION_OK or failure
     alt save verified
         APP->>RAM: update runtime credential
-        APP->>LCS: credential-register-done event
+        APP->>LCS: LCS_EVENT_CREDENTIAL_REGISTER_DONE
     else save failed
         APP->>LCS: fault/cancel policy event
     end
