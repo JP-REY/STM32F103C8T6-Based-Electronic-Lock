@@ -142,10 +142,10 @@ flowchart LR
     end
 
     subgraph SERVICES["Services Layer"]
-        CRS["Credential Register Service<br/>future registration FSM"]
+        CRS["Credential Register Service<br/>staging + comparison"]
         CSS["Credential Storage Service<br/>persistent policy and record"]
         AS["Authentication Service<br/>candidate comparison"]
-        LCS["Lock Control Service<br/>authoritative product FSM"]
+        LCS["Lock Control Service<br/>authoritative FSM <br/>including registration"]
     end
 
     subgraph PLATFORM["Platform Layer"]
@@ -156,18 +156,20 @@ flowchart LR
         SECTOR7["Internal Flash sector 7<br/>reserved persistence"]
     end
 
-    APP_CORE --> CRS
-    CRS -->|"confirmed six digits"| CSS
+    APP_CORE <-->|"LCS events / actions"| LCS
+    APP_CORE -->|"stage / compare"| CRS
+    APP_CORE -->|"confirmed six digits"| CSS
     CSS --> FLASH
     FLASH --> SECTOR7
     CSS -->|"copy valid digits"| RUNTIME
     RUNTIME --> AS
-    APP_CORE --> LCS
 ```
 
-The Credential Register Service shown in the diagram is the intended owner of
-the registration-session state machine. It is not implemented by CSS and is
-not required for the CSS module to compile or perform direct storage calls.
+LCS owns the registration states and retry policy. The Credential Register
+Service shown in the diagram has the narrower role of temporarily staging the
+first candidate and comparing the confirmation candidate. App Core executes
+LCS actions and maps CRS/CSS results back into LCS events; neither CRS nor CSS
+calls LCS directly.
 
 ### 3.2 Application Integration
 
@@ -190,6 +192,10 @@ The intended startup mapping is:
 | `CSS_OPERATION_NOT_FOUND` | dispatch `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` and begin first registration |
 | `CSS_OPERATION_STORAGE_ERROR` | persistent storage is not trustworthy; enter the application fault policy |
 | `CSS_OPERATION_INVALID_ARGUMENT` | integration defect; destination contract was violated |
+
+During credential registration, `CSS_OPERATION_OK` maps to
+`LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS`; every failed save or readback
+verification maps to `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE`.
 
 ---
 
@@ -258,8 +264,8 @@ CSS does not own:
 * dynamic allocation or RTOS synchronization;
 * Flash wear leveling, multiple records or transaction journaling.
 
-These responsibilities belong to input services, the future Credential Register
-Service, Authentication, App Core, Lock Control, presentation services, the
+These responsibilities belong to input services, Credential Register staging,
+Authentication, App Core, Lock Control, presentation services, the
 Flash Platform or a future security/storage design.
 
 ---
@@ -608,17 +614,17 @@ flowchart TD
     C -->|"OK"| D["Runtime credential ready"]
     D --> E["Activate normal locked <br/>operation"]
     C -->|"NOT_FOUND"| F["Dispatch credential not <br/>registered path"]
-    F --> G["Begin Credential Register<br/> session"]
+    F --> G["LCS enters Register<br/>First Entry"]
     C -->|"STORAGE_ERROR<br/>INVALID_ARGUMENT"| H["Enter application fault policy"]
 ```
 
 Using one retrieval avoids reading the record twice and preserves the difference
 between a normal first boot and a storage integration failure.
 
-The LCS table already declares the `CREDENTIAL_NOT_REGISTERED` boot route, but
-its current inactive-service gate admits only `INIT_OK` and `INIT_FAIL`.
-Therefore, the diagram above remains the intended integration until that gate
-and the route's activation effect are reconciled.
+The `CREDENTIAL_NOT_REGISTERED` boot route is admitted by the LCS inactive
+gate and activates the FSM directly in credential-register first entry. The
+remaining work is in App Core: call `CSS_GetCredential()` during startup and
+select this route when CSS reports `CSS_OPERATION_NOT_FOUND`.
 
 ### 11.2 Credential Registration Completion
 
@@ -626,14 +632,18 @@ The intended registration completion order is:
 
 ```mermaid
 sequenceDiagram
-    participant CRS as Credential Register Service
     participant APP as App Core
+    participant LCS as Lock Control Service
+    participant CRS as Credential Register Staging
     participant CSS as Credential Storage Service
     participant FLASH as Flash Platform
     participant RAM as Credential Runtime
-    participant LCS as Lock Control Service
 
-    CRS-->>APP: confirmed six-digit credential
+    LCS-->>APP: REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION
+    APP->>CRS: compare confirmation with staged first entry
+    CRS-->>APP: matching confirmed credential
+    APP->>LCS: STAGING_VALIDATION_SUCCESS
+    LCS-->>APP: REQUEST_CREDENTIAL_REGISTER_STORAGE
     APP->>CSS: CSS_SaveCredential(credential)
     CSS->>FLASH: read / unlock / optional erase / two word programs / lock
     FLASH-->>CSS: operation statuses
@@ -641,9 +651,13 @@ sequenceDiagram
     CSS-->>APP: CSS_OPERATION_OK or failure
     alt save verified
         APP->>RAM: update runtime credential
-        APP->>LCS: LCS_EVENT_CREDENTIAL_REGISTER_DONE
+        APP->>LCS: CREDENTIAL_REGISTER_STORAGE_SUCCESS
+        LCS-->>APP: END_CREDENTIAL_REGISTER_SAVING_SESSION
+        APP->>APP: run bounded success feedback
+        APP->>LCS: CREDENTIAL_REGISTER_DONE
     else save failed
-        APP->>LCS: fault/cancel policy event
+        APP->>LCS: CREDENTIAL_REGISTER_STORAGE_FAILURE
+        LCS-->>APP: REQUEST_CONTROLLED_RESET
     end
 ```
 
