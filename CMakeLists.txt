@@ -66,6 +66,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Services
     Libs/Services/Authentication/Src/Authentication_Service.c
     Libs/Services/Credential_Entry/Src/Credential_Entry_Service.c
+    Libs/Services/Credential_Register/Src/Credential_Register_Service.c
     Libs/Services/Credential_Storage/Src/Credential_Storage_Service.c
     Libs/Services/Display_Render/Src/Display_Render_Service.c
     Libs/Services/Lock_Control/Src/Lock_Control_Service.c
@@ -93,6 +94,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Services
     Libs/Services/Authentication/Inc
     Libs/Services/Credential_Entry/Inc
+    Libs/Services/Credential_Register/Inc
     Libs/Services/Credential_Storage/Inc
     Libs/Services/Display_Render/Inc
     Libs/Services/Lock_Control/Inc
