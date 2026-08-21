@@ -1,14 +1,35 @@
 /**********************************************************************************************************************************
  * @file    FLASH_Platform_Interface.h
- * @brief   Public interface for STM32 internal Flash memory operations.
+ * @brief   Public Platform interface for STM32 internal Flash operations.
  *
- * @details Provides a platform abstraction over the STM32 HAL Flash driver,
- *          exposing basic Flash locking, unlocking, programming and readout
- *          protection configuration operations to upper software layers.
+ * @details Defines the project-owned boundary used by upper software layers to
+ *          lock and unlock the internal Flash programming interface, erase one
+ *          address-selected sector, program one value with an explicit width,
+ *          read one 64-bit value and configure supported readout-protection
+ *          levels.
  *
- *          This module contains only hardware-dependent Flash access logic.
- *          Flash memory allocation, persistent data layout and storage policies
- *          shall be handled by higher-level modules.
+ *          STM32 HAL programming constants, sector identifiers, option-byte
+ *          structures and direct memory access remain private to the Platform
+ *          implementation. Flash allocation, persistent record formats,
+ *          credential validation, wear policy and recovery decisions remain
+ *          responsibilities of higher-level storage modules.
+ *
+ *          Every operation is synchronous and uses no dynamic allocation,
+ *          task, queue, mutex or interrupt callback. The interface has no
+ *          initialization function and retains no project-owned runtime state.
+ *
+ *          The acronym PFLASH means Platform Flash and prefixes every public
+ *          function exposed by this module.
+ *
+ * @note    The current backend targets the 512 KiB internal Flash organization
+ *          of the STM32F411CEU6, from 0x08000000 through 0x0807FFFF.
+ *
+ * @note    Callers own serialization. Concurrent erase, program, protection or
+ *          lock-state operations are outside this interface contract.
+ *
+ * @warning Flash erase and programming are destructive operations. Callers
+ *          shall operate only on linker-reserved regions that they exclusively
+ *          own and shall restore the programming interface to the locked state.
  *
  * @author  Joao Pedro Rey
  * @version 1.0.0
@@ -30,60 +51,75 @@ extern "C" {
 /**********************************************************************************************************************************
  Defines
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-
 /**
- * @brief    Defines the operation status returned by the Flash Platform Interface.
+ * @brief   Result of a Platform Flash operation.
  *
- * @details  Indicates whether a requested Flash operation was successfully
- *           completed by the underlying STM32 HAL driver.
+ * @details Reports only whether the requested Platform operation completed.
+ *          STM32 HAL error codes and Flash status-register details do not cross
+ *          the Platform boundary.
  */
 typedef enum
 {
-    FLASH_OPERATION_OK,
-    FLASH_OPERATION_FAIL
+    FLASH_OPERATION_OK,   /*< Operation completed successfully.                         */
+    FLASH_OPERATION_FAIL  /*< Arguments were invalid or the STM32 operation did not complete. */
 
 } FLASH_OpStatus_t;
 
-
 /**
- * @brief    Defines the supported Flash readout protection levels.
+ * @brief   Programming widths supported by the internal Flash interface.
  *
- * @details  The platform exposes only STM32 RDP Level 0 and Level 1.
+ * @details Selects how many least-significant bits from the 64-bit Data
+ *          argument are programmed by PFLASH_Program(). The implementation
+ *          maps each project-owned value to the corresponding STM32 HAL
+ *          programming constant and enforces natural address alignment.
  *
- *           Level 0 leaves the Flash memory externally readable.
- *
- *           Level 1 enables readout protection against external debug and
- *           programming interfaces.
- *
- * @note     RDP Level 2 is intentionally not exposed because it provides
- *           irreversible protection.
+ * @warning FLASH_PROGRAM_DOUBLEWORD requires the external Vpp conditions
+ *          specified by the STM32F4 documentation. Normal 3.3 V-only operation
+ *          shall use FLASH_PROGRAM_WORD or a narrower width.
  */
 typedef enum
 {
-    FLASH_PROTECTION_LEVEL_0,
-    FLASH_PROTECTION_LEVEL_1
+    FLASH_PROGRAM_BYTE,       /*< Program 8 bits at a one-byte-aligned address.     */
+    FLASH_PROGRAM_HALFWORD,   /*< Program 16 bits at a two-byte-aligned address.    */
+    FLASH_PROGRAM_WORD,       /*< Program 32 bits at a four-byte-aligned address.   */
+    FLASH_PROGRAM_DOUBLEWORD  /*< Program 64 bits at an eight-byte-aligned address. */
+
+} FLASH_ProgramType_t;
+
+
+/**
+ * @brief   Readout-protection levels exposed by the Platform interface.
+ *
+ * @details The interface intentionally exposes only STM32 RDP Level 0 and
+ *          Level 1. Their vendor encodings remain private to the backend.
+ *
+ * @note    RDP Level 2 is not exposed because it is irreversible.
+ */
+typedef enum
+{
+    FLASH_PROTECTION_LEVEL_0, /*< External debug/programming readout remains available. */
+    FLASH_PROTECTION_LEVEL_1  /*< External debug/programming readout is protected.      */
 
 } FLASH_ProtectionLevel_t;
 
 /**********************************************************************************************************************************
  Data
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-FLASH_OpStatus_t PFLASH_Lock          (void);
-FLASH_OpStatus_t PFLASH_Unlock        (void);
-FLASH_OpStatus_t PFLASH_SetProtection (FLASH_ProtectionLevel_t ProtectionLevel);
-FLASH_OpStatus_t PFLASH_Program       (uint32_t TypeProgram, uint32_t Address,uint64_t Data);
+FLASH_OpStatus_t PFLASH_Lock            (void);
+FLASH_OpStatus_t PFLASH_Unlock          (void);
+FLASH_OpStatus_t PFLASH_SetProtection   (FLASH_ProtectionLevel_t ProtectionLevel);
+FLASH_OpStatus_t PFLASH_EraseSectorAt   (uint32_t Address);
+FLASH_OpStatus_t PFLASH_Program         (FLASH_ProgramType_t ProgramType, uint32_t Address, uint64_t Data);
+FLASH_OpStatus_t PFLASH_ReadDoubleWord  (uint32_t Address, uint64_t* Data);
 
 #ifdef __cplusplus
 }
