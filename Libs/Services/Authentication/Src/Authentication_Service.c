@@ -2,20 +2,22 @@
  * @file    Authentication_Service.c
  * @brief   Authentication Service implementation.
  *
- * @details Implements synchronous fixed-length credential validation without
- *          retaining candidate data or depending on the Credential Entry
- *          Service, application state or hardware resources.
+ * @details Implements synchronous fixed-length comparison between one borrowed candidate and one borrowed installed runtime
+ *          credential. The operation validates both pointers, compares the six uint8_t elements in order and returns on the first
+ *          difference without modifying or retaining either caller-owned buffer.
+ *
+ *          The implementation owns no configured credential, mutable runtime data or service lifecycle. It performs no hardware
+ *          access, persistent-storage operation, inter-service call, dynamic allocation or RTOS operation.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 15, 2026
+ * @version 1.1.0
+ * @date    Aug 21, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
 #include "Authentication_Service.h"
 #include "stddef.h"
-#include "string.h"
 
 /**********************************************************************************************************************************
  Private Macros
@@ -23,26 +25,9 @@
 /**********************************************************************************************************************************
  Private Types
  **********************************************************************************************************************************/
-/**
- * @brief Internal representation of one configured credential digit.
- */
-typedef uint8_t AS_CandidateDigit_t;
-
 /**********************************************************************************************************************************
  Private Constants
  **********************************************************************************************************************************/
-/**
- * @brief   Credential used as the authentication reference.
- *
- * @details The credential is immutable and stored directly in the firmware.
- *          Each element represents a normalized decimal value rather than an
- *          ASCII character.
- *
- * @warning This V1 representation is not secure against firmware inspection
- *          or extraction.
- */
-static const AS_CandidateDigit_t AS_ConfiguredPin[AS_CREDENTIAL_LENGTH] = {1U, 3U, 0U, 6U, 0U, 3U};
-
 /**********************************************************************************************************************************
  Private Data
  **********************************************************************************************************************************/
@@ -56,41 +41,46 @@ static const AS_CandidateDigit_t AS_ConfiguredPin[AS_CREDENTIAL_LENGTH] = {1U, 3
  Functions
  **********************************************************************************************************************************/
 /**
- * @brief   Authenticates one complete candidate credential.
+ * @brief   Authenticates one complete candidate against a caller-supplied runtime credential.
  *
- * @details Compares exactly AS_CREDENTIAL_LENGTH bytes from Candidate with
- *          the credential configured privately by the service.
+ * @details Validates both pointers and then compares exactly AS_CREDENTIAL_LENGTH uint8_t elements at matching indices. The first
+ *          difference returns AS_RESULT_REJECTED; reaching the fixed bound without a difference returns
+ *          AS_RESULT_AUTHENTICATED.
  *
- *          Candidate is borrowed only for this synchronous call. The service
- *          does not modify the supplied digits, retain the pointer or create
- *          an internal candidate copy.
+ *          Candidate and Credential are borrowed only for this synchronous call. The service modifies neither array, retains
+ *          neither pointer and creates no internal credential copy.
  *
- * @param   Candidate - Pointer to an array containing exactly
- *                      AS_CREDENTIAL_LENGTH normalized decimal digits in
- *                      their original entry order.
+ * @param   Candidate  - Read-only array containing exactly AS_CREDENTIAL_LENGTH candidate elements in their original order.
+ * @param   Credential - Read-only array containing exactly AS_CREDENTIAL_LENGTH installed runtime credential elements.
  *
- * @pre     Candidate shall either be NULL or point to storage containing at
- *          least AS_CREDENTIAL_LENGTH readable bytes.
+ * @pre     Each non-NULL argument shall point to at least AS_CREDENTIAL_LENGTH readable uint8_t elements and remain unchanged
+ *          until this function returns.
  *
- * @note    The array notation documents the required size but is adjusted to
- *          a pointer by the C language. The caller remains responsible for
- *          supplying a complete buffer.
+ * @note    Array notation documents the required capacity but C adjusts both parameters to pointers. The caller remains
+ *          responsible for supplying complete buffers and normalized digit values.
  *
- * @warning The caller shall erase sensitive candidate storage after this
- *          function returns. The function does not erase caller-owned data.
+ * @warning The caller shall erase the temporary Candidate after processing the result. Credential normally remains available as
+ *          the installed runtime reference for subsequent authentication requests.
  *
- * @return  AS_RESULT_AUTHENTICATED     - When every candidate digit matches;
- *          AS_RESULT_REJECTED          - When at least one digit differs;
- *          AS_RESULT_INVALID_ARGUMENT  - When Candidate is NULL.
+ * @return  AS_RESULT_AUTHENTICATED    - Every candidate element matches the supplied runtime credential;
+ * @return  AS_RESULT_REJECTED         - At least one element differs;
+ * @return  AS_RESULT_INVALID_ARGUMENT - Candidate or Credential is NULL.
  */
-AS_Result_t AS_Authenticate(const uint8_t Candidate[AS_CREDENTIAL_LENGTH])
+AS_Result_t AS_Authenticate(const uint8_t Candidate[AS_CREDENTIAL_LENGTH],
+                            const uint8_t Credential[AS_CREDENTIAL_LENGTH])
 {
-    if(Candidate == NULL)
+    if(Candidate == NULL || Credential == NULL)
     {
         return AS_RESULT_INVALID_ARGUMENT;
     }
 
-    return (memcmp(Candidate, AS_ConfiguredPin, sizeof(AS_ConfiguredPin)) == 0) ?
+    for(uint8_t digit = 0; digit < AS_CREDENTIAL_LENGTH; digit++)
+    {
+        if(Candidate[digit] != Credential[digit])
+        {
+            return AS_RESULT_REJECTED;
+        }
+    }
 
-                AS_RESULT_AUTHENTICATED : AS_RESULT_REJECTED;
+    return AS_RESULT_AUTHENTICATED;
 }

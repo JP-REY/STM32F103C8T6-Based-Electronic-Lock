@@ -62,6 +62,11 @@ The prototype does not provide persistent users, credential updates, access
 logs, connectivity, tamper protection, mechanical position feedback or
 certified access-control guarantees.
 
+LCS now models the complete product-level credential-register flow: first
+entry, confirmation, validation, persistence result and success feedback. App
+Core does not yet execute the required staging, CSS and presentation actions,
+so credential updates remain unavailable in the current product integration.
+
 ---
 
 ## Product Contract
@@ -70,8 +75,9 @@ certified access-control guarantees.
 
 | Parameter | Value | Owner |
 | --- | ---: | --- |
-| Credential length | 6 digits | Credential Entry and Authentication |
+| Credential length | 6 digits | Credential Entry, Authentication and Credential Storage |
 | Consecutive failure limit | 3 | Lock Control |
+| Credential-confirmation mismatch limit | 3 | Lock Control |
 | Keyboard debounce | 40 ms | Matrix Keyboard configuration |
 | Credential-entry inactivity | 5,000 ms | App Core timeout table |
 | Authorized unlock | 3,000 ms | App Core timeout table |
@@ -113,6 +119,7 @@ Detailed behavior:
 
 - [complete App Core reference](App/Core/README.md);
 - [FSM diagram and transition table](App/Core/README.md#12-lock-control-state-machine-integration);
+- [native host tests for the LCS FSM](Tests/README.md);
 - [timeout lifecycle](App/Core/README.md#15-application-timeout-model);
 - [service update order](App/Core/README.md#16-service-update-cycle);
 - [keyboard and physical-input model](App/Core/README.md#10-keyboard-model);
@@ -209,8 +216,9 @@ display, two indication instances and sound once. See the
 
 | Service | Responsibility | Detailed documentation |
 | --- | --- | --- |
-| Lock Control | Authoritative FSM and consecutive-failure policy | [README](Libs/Services/Lock_Control/README.md) |
+| Lock Control | Authoritative FSM, authentication-purpose routing, registration phases and retry policies | [README](Libs/Services/Lock_Control/README.md) |
 | Credential Entry | Active session, normalized candidate and clear/cancel semantics | [README](Libs/Services/Credential_Entry/README.md) |
+| Credential Storage | Persistent six-digit credential record, integrity validation and Flash transaction policy | [README](Libs/Services/Credential_Storage/README.md) |
 | Authentication | Synchronous comparison of one complete candidate | [README](Libs/Services/Authentication/README.md) |
 | Timeout Validation | Rollover-safe evaluation of caller-owned intervals | [README](Libs/Services/Timeout_Validation/README.md) |
 

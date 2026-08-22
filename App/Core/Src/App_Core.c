@@ -10,16 +10,16 @@
  *          App_Init(). Stateless services and services that own an internal singleton runtime do not require an additional
  *          application-side handle.
  *
- *          App_Dispatch() uses the resulting object graph to acquire physical inputs, translate them into semantic domain inputs,
- *          evaluate application-owned timeouts and execute semantic actions without exposing concrete hardware dependencies
- *          through App_Core.h.
+ *          App_ReadInput() acquires and translates physical input, while App_Dispatch() evaluates application-owned timeouts and
+ *          advances presentation services. Both paths may synchronously execute semantic Lock Control actions without exposing
+ *          concrete hardware dependencies through App_Core.h.
  *
  * @note    All objects in this translation unit have static storage duration because drivers, adapters and services retain
  *          borrowed pointers to their dependencies after initialization.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 18, 2026
+ * @version 1.1.0
+ * @date    Aug 22, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -34,6 +34,8 @@
  */
 #include "Timeout_Validation_Service.h"
 #include "Credential_Entry_Service.h"
+#include "Credential_Register_Service.h"
+#include "Credential_Storage_Service.h"
 #include "Authentication_Service.h"
 #include "Lock_Control_Service.h"
 
@@ -223,6 +225,9 @@
 /** @brief Duration for which credential entry remains blocked after the attempt limit, in milliseconds. */
 #define APP_LOCKOUT_TIMEOUT_MS                  (10000U)
 
+/** @brief Duration of credential-register save feedback before the FSM advances, in milliseconds. */
+#define APP_CRS_SAVED_TIMEOUT_MS                (1500U)
+
 /** @brief Maximum number of synchronous LCS follow-up events processed in one dispatch chain. */
 #define APP_MAX_LCS_DISPATCH_DEPTH              (4U)
 
@@ -252,6 +257,8 @@ typedef enum
     APP_TIMEOUT_ACCESS_DENIED,            /*< Access-denied feedback interval.             */
 
     APP_TIMEOUT_LOCKOUT,                  /*< Temporary credential-entry lockout interval. */
+
+    APP_TIMEOUT_CRS_SAVED,                /*< Credential-register saved feedback interval. */
 
     APP_TIMEOUT_COUNT,                    /*< Number of concrete timeout definitions.      */
 
@@ -352,17 +359,31 @@ static const App_TimeoutDefinition_t App_TimeoutDefinitions[APP_TIMEOUT_COUNT] =
     {
         .DurationMs   = APP_LOCKOUT_TIMEOUT_MS,
         .ElapsedEvent = LCS_EVENT_LOCKOUT_TIMEOUT
+    },
+
+    [APP_TIMEOUT_CRS_SAVED] =
+    {
+        .DurationMs   = APP_CRS_SAVED_TIMEOUT_MS,
+        .ElapsedEvent = LCS_EVENT_CREDENTIAL_REGISTER_DONE
     }
 };
 
 /**
  * @brief   Verifies that credential size contracts remain compatible across the participating services.
  *
- * @details Authentication consumes the exact digit array copied from Credential Entry, while Display Render masks the same
- *          logical number of digits. A compile-time failure prevents silent truncation if one module changes independently.
+ * @details Authentication, registration staging, persistent storage and Display Render all operate on the credential collected
+ *          by CES. Compile-time failures prevent silent truncation if any participating service changes its length independently.
  */
 _Static_assert(CES_CREDENTIAL_LENGTH == AS_CREDENTIAL_LENGTH,
                "Credential Entry and Authentication lengths must match");
+
+_Static_assert(CES_CREDENTIAL_LENGTH == CRS_CREDENTIAL_LENGTH,
+               "Credential Entry and Credential Register lengths must match");
+
+
+_Static_assert(CES_CREDENTIAL_LENGTH == CSS_CREDENTIAL_LENGTH,
+               "Credential Entry and Credential Storage lengths must match");
+
 _Static_assert(CES_CREDENTIAL_LENGTH == DRS_ENTRY_DIGIT_CAPACITY,
                "Credential Entry and Display Render capacities must match");
 
@@ -414,8 +435,8 @@ static MK_Key_t App_KeyboardKeys[APP_KEYBOARD_KEY_COUNT] = {0};
 /**
  * @brief   Matrix Keyboard Driver instance owned by the application.
  *
- * @details Retains the scan interface, immutable configuration and per-key runtime references. App_Dispatch() performs one
- *          non-blocking acquisition from this instance per call.
+ * @details Retains the scan interface, immutable configuration and per-key runtime references. 
+ *          App_ReadInput() performs one non-blocking acquisition from this instance per call.
  */
 static MK_Handle_t App_Keyboard = {0};
 
@@ -532,7 +553,7 @@ static SIS_Handle_t App_LockStatusIndication = {0};
  * @details Is bound to the CubeMX LOCKER_PIN output and temporarily realizes the actuator boundary until a dedicated Lock Actuator
  *          Driver is introduced. GPIO reset is the safe locked state; GPIO set requests physical unlock.
  *
- * @note    Only App_Dispatch() and the action helpers it calls access this descriptor after initialization.
+ * @note    Only serialized application action paths access this descriptor after initialization.
  */
 static GPIO_Handle_t App_LockActuatorGpio = {0};
 
@@ -540,14 +561,26 @@ static GPIO_Handle_t App_LockActuatorGpio = {0};
  Credential and Timeout Runtime Objects
  **********************************************************************************************************************************/
 /**
- * @brief   Caller-owned copy of a complete credential awaiting authentication.
+ * @brief   Caller-owned transient copy of a complete credential candidate.
  *
- * @details Receives one bounded copy from CES_GetCandidate(), is read synchronously by AS_Authenticate() and is explicitly erased
- *          immediately afterward. The object never crosses the application boundary.
+ * @details Receives bounded copies from CES_GetCandidate() for authentication, first-entry staging and confirmation validation.
+ *          Each synchronous consumer finishes before App_ClearRuntimeCandidate() explicitly erases the complete object.
  *
- * @warning Credential bytes must never be logged, displayed or retained after authentication completes.
+ * @warning Candidate bytes must never be logged, displayed or retained after their synchronous consumer completes.
  */
 static CES_Candidate_t App_RuntimeCandidate = {0};
+
+/**
+ * @brief   Application-owned reference to the currently installed credential.
+ *
+ * @details Is loaded lazily from Credential Storage before the first authentication and is replaced only after
+ *          CSS_SaveCredential() reports verified persistence of a newly registered credential. Authentication borrows the array
+ *          synchronously and never owns it.
+ *
+ * @warning This longer-lived secret is explicitly erased before a controlled reset. It must never be logged, displayed or exposed
+ *          through the public App Core interface.
+ */
+static uint8_t App_RuntimeCredential[AS_CREDENTIAL_LENGTH] = {0};
 
 /**
  * @brief   Single active application-timeout runtime.
@@ -555,7 +588,7 @@ static CES_Candidate_t App_RuntimeCandidate = {0};
  * @details Owns only timeout lifecycle data. Elapsed-time arithmetic remains delegated to the stateless Timeout Validation Service,
  *          and semantic timeout events remain consumed by the Lock Control Service.
  *
- * @note    App_Dispatch() and the synchronous action chain it invokes are the sole runtime readers and writers.
+ * @note    Serialized action chains initiated by App_ReadInput() or App_Dispatch() are the sole runtime readers and writers.
  */
 static App_TimeoutRuntime_t App_ActiveTimeout =
 {
@@ -567,31 +600,122 @@ static App_TimeoutRuntime_t App_ActiveTimeout =
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
-static bool          App_InitLcd                        (void);
-static bool          App_InitKeyboard                   (void);
-static bool          App_InitBuzzer                     (void);
-static bool          App_InitLockStatusIndication       (void);
-static bool          App_InitLowBatteryStatusIndication (void);
-static bool          App_InitLockActuator               (void);
-static MK_OpStatus_t App_ReadKeyboard                   (MK_Output_t* Output);
-static CES_Input_t   App_TranslateKeyToDigit            (const MK_Output_t* Input);
-static CES_Event_t   App_ProcessCredentialInput         (const CES_Input_t* Input);
-static LCS_Event_t   App_ProcessAuthentication          (void);
-static void          App_ClearRuntimeCandidate          (void);
-static bool          App_StartTimeout                   (App_TimeoutId_t Timeout);
-static void          App_CancelTimeout                  (void);
-static LCS_Event_t   App_PollTimeout                    (void);
-static bool          App_ForceLock                      (void);
-static bool          App_RequestUnlock                  (void);
-static void          App_SetLockedPresentation          (void);
-static void          App_SetCredentialEntryPresentation (void);
-static LCS_Event_t   App_ExecuteAction                  (LCS_Action_t Action);
-static void          App_DispatchLcsEvent               (LCS_Event_t Event);
-static void          App_HandleKeyboardEvent            (const MK_Output_t* Event);
-static void          App_HandleCredentialEvent          (CES_Event_t Event);
-static void          App_UpdateServices                 (void);
-static void          App_HandleInputFault               (void);
-static void          App_RequestControlledReset         (void);
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Application Dependency Initialization
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Initializes the LCD hardware, adapters, backlight and Display Render Service path. */
+static bool App_InitLcd(void);
+
+/** @brief Initializes the matrix-keyboard GPIO, scan adapter and driver path. */
+static bool App_InitKeyboard(void);
+
+/** @brief Initializes the PWM, Buzzer Driver and Sound Generator Service path. */
+static bool App_InitBuzzer(void);
+
+/** @brief Initializes the lock-status LED and its Status Indication Service instance. */
+static bool App_InitLockStatusIndication(void);
+
+/** @brief Initializes the low-battery LED and its Status Indication Service instance. */
+static bool App_InitLowBatteryStatusIndication(void);
+
+/** @brief Initializes the temporary GPIO-based lock actuator and immediately forces its safe state. */
+static bool App_InitLockActuator(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Keyboard Acquisition and Translation
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Acquires one non-blocking output from the Matrix Keyboard Driver. */
+static MK_OpStatus_t App_ReadKeyboard(MK_Output_t* Output);
+
+/** @brief Translates a physical keyboard output into a semantic Credential Entry Service input. */
+static CES_Input_t App_TranslateKeyToInputKind(const MK_Output_t* KeyboardOutput);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Credential Entry and Authentication
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Processes one semantic input through the Credential Entry Service. */
+static CES_Event_t App_ProcessCredentialInput(const CES_Input_t* Input);
+
+/** @brief Copies and erases the CES candidate, authenticates it and returns the corresponding LCS event. */
+static LCS_Event_t App_ProcessAuthentication(void);
+
+/** @brief Explicitly erases the application-owned transient credential candidate. */
+static void App_ClearRuntimeCandidate(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Application Timeout Management
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Starts or replaces the single active application timeout with the selected definition. */
+static bool App_StartTimeout(App_TimeoutId_t Timeout);
+
+/** @brief Cancels the active application timeout and restores its inactive sentinel state. */
+static void App_CancelTimeout(void);
+
+/** @brief Polls the active timeout and returns its semantic LCS event exactly once after expiration. */
+static LCS_Event_t App_PollTimeout(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Lock Actuator Control
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Forces the lock-actuator GPIO into its safe locked state. */
+static bool App_ForceLock(void);
+
+/** @brief Requests actuator unlock after a finite unlock timeout has been established. */
+static bool App_RequestUnlock(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Presentation Coordination
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Restores the locked-idle display, backlight and lock-status indication policy. */
+static void App_SetLockedPresentation(void);
+
+/** @brief Presents a newly opened normal Credential Entry Service session. */
+static void App_SetCESPresentation(void);
+
+/** @brief Presents installed-credential authorization for a credential-replacement request. */
+static void App_SetCRSAuthPresentation(void);
+
+/** @brief Presents the first-entry phase of credential registration. */
+static void App_SetCRSFirstEntryPresentation(void);
+
+/** @brief Presents the confirmation-entry phase while CRS retains the staged credential. */
+static void App_SetCRSConfirmEntryPresentation(void);
+
+/** @brief Presents successful credential persistence during the bounded saved-feedback interval. */
+static void App_SetCRSSavedPresentation(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Lock Control Action and Event Orchestration
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Executes one semantic LCS action and returns any synchronous follow-up event it produces. */
+static LCS_Event_t App_ExecuteAction(LCS_Action_t Action);
+
+/** @brief Dispatches one LCS event and its bounded synchronous action/event follow-up chain. */
+static void App_DispatchLcsEvent(LCS_Event_t Event);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Input and Credential Event Handling
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Applies wake-key, registration-command and CES-routing policy to one keyboard event. */
+static void App_HandleKeyboardEvent(const MK_Output_t* Event);
+
+/** @brief Maps a CES outcome into presentation, timeout management or a semantic LCS event. */
+static void App_HandleCredentialEvent(CES_Event_t Event);
+
+/** @brief Safely abandons an untrustworthy keyboard-input sequence and requests error feedback. */
+static void App_HandleInputFault(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Periodic Service Coordination
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Polls application timing and advances display, indication and sound services once. */
+static void App_UpdateServices(void);
+
+/*---------------------------------------------------------------------------------------------------------------------------------
+ Fail-Safe Reset Endpoint
+ ---------------------------------------------------------------------------------------------------------------------------------*/
+/** @brief Disables interrupts and requests the target system reset after fail-safe cleanup is complete. */
+static void App_RequestControlledReset(void);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -611,9 +735,9 @@ static void          App_RequestControlledReset         (void);
 static bool App_InitLcd(void)
 {
     if(PCF8574_Init(&App_LcdIoExpander,
-                  APP_LCD_IO_EXPANDER_ADDRESS,
-                  APP_LCD_IO_EXPANDER_I2C_CONTEXT)
-                  != PCF8574_OPERATION_OK)
+                     APP_LCD_IO_EXPANDER_ADDRESS,
+                     APP_LCD_IO_EXPANDER_I2C_CONTEXT)
+                     != PCF8574_OPERATION_OK)
     {
         return false;
     }
@@ -904,8 +1028,8 @@ static bool App_InitLowBatteryStatusIndication(void)
 static bool App_InitLockActuator(void)
 {
     if(PGPIO_Init(&App_LockActuatorGpio,
-                  APP_LOCK_ACTUATOR_GPIO_PORT,
-                  APP_LOCK_ACTUATOR_PIN_NUMBER) != GPIO_OPERATION_OK)
+                   APP_LOCK_ACTUATOR_GPIO_PORT,
+                   APP_LOCK_ACTUATOR_PIN_NUMBER) != GPIO_OPERATION_OK)
     {
         return false;
     }
@@ -919,7 +1043,7 @@ static bool App_InitLockActuator(void)
  * @details Delegates matrix scanning, debounce processing and pending-action retrieval to MK_Read() while retaining ownership of
  *          the keyboard instance inside the App Core composition root.
  *
- * @param[out] Output - Caller-owned value object that receives the current key code and key action; must not be NULL.
+ * @param   Output - Caller-owned value object that receives the current key code and key action; must not be NULL.
  *
  * @return  MK_OPERATION_OK   - When keyboard acquisition and processing complete successfully.
  * @return  MK_OPERATION_FAIL - When Output is invalid or the Matrix Keyboard Driver reports failure.
@@ -935,20 +1059,20 @@ static MK_OpStatus_t App_ReadKeyboard(MK_Output_t* Output)
 }
 
 /**
- * @brief   Translates a Matrix Keyboard Driver output into a Credential Entry Service input.
+ * @brief   Translates a Matrix Keyboard Driver output into a Credential Entry Service input kind.
  *
  * @details Maps numeric key codes to CES digit inputs, '#' to confirmation and '*' to clear/cancel. Unsupported key codes produce
  *          CES_INPUT_KIND_NONE. Command and unsupported inputs carry APP_CREDENTIAL_ENTRY_DIGIT_INVALID because their semantic
  *          meaning does not include a numeric digit.
  *
- * @param   Input - Pointer to the keyboard output whose key code shall be translated.
+ * @param   KeyboardOutput - Pointer to the keyboard output whose key code shall be translated.
  *
  * @note    A NULL input is treated as an unsupported key and produces CES_INPUT_KIND_NONE.
  *
  * @return  A fully initialized CES_Input_t value representing the supplied key code, or CES_INPUT_KIND_NONE when no supported
  *          semantic credential command can be produced.
  */
-static CES_Input_t App_TranslateKeyToDigit(const MK_Output_t* Input)
+static CES_Input_t App_TranslateKeyToInputKind(const MK_Output_t* KeyboardOutput)
 {
     CES_Input_t ces_input =
     {
@@ -956,12 +1080,12 @@ static CES_Input_t App_TranslateKeyToDigit(const MK_Output_t* Input)
         .Digit = APP_CREDENTIAL_ENTRY_DIGIT_INVALID
     };
 
-    if(Input == NULL)
+    if(KeyboardOutput == NULL)
     {
         return ces_input;
     }
 
-    MK_KeyCode_t key = Input->Key;
+    MK_KeyCode_t key = KeyboardOutput->Key;
 
     switch(key)
     {
@@ -1037,10 +1161,10 @@ static CES_Input_t App_TranslateKeyToDigit(const MK_Output_t* Input)
 /**
  * @brief   Processes one semantic credential command through the Credential Entry Service.
  *
- * @details Provides the application boundary used by App_Dispatch() so physical keyboard types never cross into CES. The
+ * @details Provides the application input boundary so physical keyboard types never cross into CES. The
  *          service remains authoritative for candidate mutation, command validation and credential-entry event production.
  *
- * @param[in] Input - Semantic input command to process; must not be NULL.
+ * @param   Input - Semantic input command to process; must not be NULL.
  *
  * @return  The CES_Event_t produced by the Credential Entry Service, or CES_EVENT_NONE when Input is NULL or no active session
  *          accepts the command.
@@ -1076,12 +1200,13 @@ static void App_ClearRuntimeCandidate(void)
 /**
  * @brief   Completes candidate transfer, authentication and credential erasure.
  *
- * @details Copies the complete candidate from CES, immediately ends the session to erase service-owned credential storage,
- *          authenticates the caller-owned digit array, and then explicitly erases the application copy. The AS result is mapped
- *          into the semantic Lock Control event expected by the authoritative FSM.
+ * @details Copies the complete candidate from CES, immediately ends the session to erase service-owned candidate storage,
+ *          authenticates it against App_RuntimeCredential, and then explicitly erases the application candidate copy. The AS
+ *          result is mapped into the semantic Lock Control event expected by the authoritative FSM.
  *
- * @note    Candidate-copy or session-ending failures conservatively produce LCS_EVENT_AUTH_FAILURE. No credential bytes are
- *          retained or exposed through diagnostics.
+ * @note    App_ExecuteAction() ensures App_RuntimeCredential is valid before calling this helper. Candidate-copy or session-ending
+ *          failures conservatively produce LCS_EVENT_AUTH_FAILURE; the installed runtime credential remains available for later
+ *          authentication attempts.
  *
  * @return  LCS_EVENT_AUTH_SUCCESS - When AS authenticates the complete candidate.
  * @return  LCS_EVENT_AUTH_FAILURE - When candidate transfer, session cleanup or authentication does not succeed.
@@ -1105,7 +1230,7 @@ static LCS_Event_t App_ProcessAuthentication(void)
         return LCS_EVENT_AUTH_FAILURE;
     }
 
-    AS_Result_t authentication_result = AS_Authenticate(App_RuntimeCandidate.Digits);
+    AS_Result_t authentication_result = AS_Authenticate(App_RuntimeCandidate.Digits, App_RuntimeCredential);
 
     App_ClearRuntimeCandidate();
 
@@ -1118,8 +1243,8 @@ static LCS_Event_t App_ProcessAuthentication(void)
  * @brief   Starts or restarts one application-owned timeout.
  *
  * @details Validates the identifier and its immutable definition, captures the current monotonic Platform timestamp and replaces
- *          the previous timeout runtime. Replacing the runtime is the intended restart mechanism for credential-entry inactivity
- *          after an accepted digit.
+ *          the previous timeout runtime. Replacement supports credential-entry restarts and transitions among every mutually
+ *          exclusive timed LCS phase.
  *
  * @param   Timeout - Concrete timeout definition to activate; must be below APP_TIMEOUT_COUNT.
  *
@@ -1227,10 +1352,11 @@ static bool App_RequestUnlock(void)
 /**
  * @brief   Restores the normal locked-idle presentation policy.
  *
- * @details Prepares an empty password-entry view for the next wake, synchronizes the LCD while its backlight is still available,
- *          turns the backlight off, selects the locked LED indication and stops any obsolete sound pattern.
+ * @details Requests the blank locked-idle view, clears retained mask progress, synchronizes the LCD while its backlight is still
+ *          available, turns the backlight off and selects the locked LED indication.
  *
  * @note    Presentation failures are treated as degraded UI behavior and cannot prevent the separate actuator safe-state request.
+ * @note    This helper does not stop sound, allowing action-specific feedback to finish after the display returns to idle.
  */
 static void App_SetLockedPresentation(void)
 {
@@ -1247,7 +1373,7 @@ static void App_SetLockedPresentation(void)
  * @details Enables the LCD backlight, requests the empty masked-password screen, selects the normal locked LED baseline and emits a
  *          short keypress acknowledgement for the wake key. The initiating key is not passed to CES.
  */
-static void App_SetCredentialEntryPresentation(void)
+static void App_SetCESPresentation(void)
 {
     uint32_t current_time_ms = Platform_GetMillis();
 
@@ -1260,22 +1386,258 @@ static void App_SetCredentialEntryPresentation(void)
 }
 
 /**
+ * @brief   Presents installed-credential authorization for a replacement request.
+ *
+ * @details Acknowledges the registration command, enables the backlight, requests the fixed Access PIN prompt and clears retained
+ *          mask progress before the authorization candidate is collected.
+ */
+static void App_SetCRSAuthPresentation(void)
+{
+    uint32_t current_time_ms = Platform_GetMillis();
+
+    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
+    (void)LCD_BacklightOn(&App_Lcd);
+    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_AUTH);
+    (void)DRS_SetEnteredDigits(0U);
+    (void)DRS_Update();
+}
+
+/**
+ * @brief   Presents a newly opened credential-register first-entry session.
+ *
+ * @details Acknowledges the phase transition, enables the backlight, requests the fixed Update PIN prompt and clears retained mask
+ *          progress before the proposed credential is collected.
+ */
+static void App_SetCRSFirstEntryPresentation(void)
+{
+    uint32_t current_time_ms = Platform_GetMillis();
+
+    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
+    (void)LCD_BacklightOn(&App_Lcd);
+    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY);
+    (void)DRS_SetEnteredDigits(0U);
+    (void)DRS_Update();
+}
+
+/**
+ * @brief   Presents a newly opened credential-register confirmation-entry session.
+ *
+ * @details Acknowledges the phase transition, enables the backlight, requests the fixed Confirm PIN prompt and clears retained mask
+ *          progress while CRS preserves the staged first entry.
+ */
+static void App_SetCRSConfirmEntryPresentation(void)
+{
+    uint32_t current_time_ms = Platform_GetMillis();
+
+    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
+    (void)LCD_BacklightOn(&App_Lcd);
+    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY);
+    (void)DRS_SetEnteredDigits(0U);
+    (void)DRS_Update();
+}
+
+/**
+ * @brief   Presents successful credential-persistence feedback.
+ *
+ * @details Enables the backlight, requests the fixed PIN-updated screen and starts the access-granted sound pattern. The action
+ *          executor separately owns the bounded APP_TIMEOUT_CRS_SAVED interval.
+ */
+static void App_SetCRSSavedPresentation(void)
+{
+    uint32_t current_time_ms = Platform_GetMillis();
+
+    (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, current_time_ms);
+    (void)LCD_BacklightOn(&App_Lcd);
+    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_SAVED);
+    (void)DRS_Update();
+}
+
+/**
  * @brief   Executes one semantic Lock Control action and optionally produces a synchronous follow-up event.
  *
- * @details Coordinates credential lifecycle, timeout ownership, actuator safety, display, status indication and sound according to
- *          the action selected by LCS. Authentication and fail-safe fallbacks may produce a new LCS event that must be dispatched
- *          only after the current LCS_Process() call has returned.
+ * @details Coordinates CES sessions, CRS staging and validation, CSS loading and persistence, authentication, timeout ownership,
+ *          actuator safety and presentation according to the action selected by LCS. Synchronous outcomes are returned as
+ *          follow-up events so they are dispatched only after the current LCS_Process() call has returned.
  *
- * @param   Action       - Semantic action returned by LCS_Process().
+ * @note    The function-local runtime_credential_valid flag prevents repeated Flash reads after the installed credential has been
+ *          loaded or successfully replaced. The controlled-reset path erases the runtime reference and clears that flag.
+ *
+ * @param   Action - Semantic action returned by LCS_Process().
  *
  * @return  A synchronous semantic follow-up event, or LCS_EVENT_NONE when the action is complete.
  */
 static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 {
+    static bool runtime_credential_valid = false;
+
     uint32_t current_time_ms = Platform_GetMillis();
 
     switch(Action)
     {
+        case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
+
+            (void)CRS_ClearStaging();
+            App_ClearRuntimeCandidate();
+
+            if(CES_BeginSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                (void)CES_EndSession();
+                (void)CRS_ClearStaging();
+
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+
+            App_SetCRSFirstEntryPresentation();
+
+        break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
+
+            if(CES_RefreshSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+
+            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
+
+            App_SetCRSFirstEntryPresentation();
+
+        break;
+
+        case LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
+
+            App_CancelTimeout();
+
+            (void)CES_EndSession();
+            (void)CRS_ClearStaging();
+
+            App_ClearRuntimeCandidate();
+
+            (void)App_ForceLock();
+
+            App_SetLockedPresentation();
+
+        break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION:
+        {
+            App_CancelTimeout();
+            App_ClearRuntimeCandidate();
+
+            if(CES_GetCandidate(&App_RuntimeCandidate) != CES_OPERATION_OK)
+            {
+                goto controlled_reset;
+            }
+
+            CRS_OpStatus_t staging_status = CRS_StageCredential(App_RuntimeCandidate.Digits);
+
+            App_ClearRuntimeCandidate();
+
+            if(staging_status != CRS_OPERATION_OK)
+            {
+                goto controlled_reset;
+            }
+
+            if(CES_RefreshSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                (void)CES_EndSession();
+                (void)CRS_ClearStaging();
+
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+
+            App_SetCRSConfirmEntryPresentation();
+        }
+        break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION:
+
+            if(CES_RefreshSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+
+            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
+
+            App_SetCRSConfirmEntryPresentation();
+
+        break;
+
+        case LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION:
+
+            App_CancelTimeout();
+
+            (void)CES_EndSession();
+            (void)CRS_ClearStaging();
+
+            App_ClearRuntimeCandidate();
+
+            (void)App_ForceLock();
+
+            (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
+
+            App_SetLockedPresentation();
+
+        break;
+
+        case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION:
+
+            App_CancelTimeout();
+
+        break;
+
+        case LCS_ACTION_END_CREDENTIAL_REGISTER_SAVING_SESSION:
+
+            App_CancelTimeout();
+
+            (void)CES_EndSession();
+            (void)CRS_ClearStaging();
+
+            App_ClearRuntimeCandidate();
+
+            (void)App_ForceLock();
+
+            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
+
+            App_SetCRSSavedPresentation();
+
+            (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, current_time_ms);
+
+            if(!App_StartTimeout(APP_TIMEOUT_CRS_SAVED))
+            {
+                return LCS_EVENT_CREDENTIAL_REGISTER_DONE;
+            }
+
+        break;
+
+        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION:
+
+            if(CES_RefreshSession() != CES_OPERATION_OK ||
+               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+            {
+                (void)CES_EndSession();
+
+                App_CancelTimeout();
+
+                return LCS_EVENT_CREDENTIAL_CANCELLED;
+            }
+
+            App_SetCRSAuthPresentation();
+
+        break;
+
         case LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION:
 
             if(CES_BeginSession() != CES_OPERATION_OK ||
@@ -1288,7 +1650,7 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
                 return LCS_EVENT_CREDENTIAL_CANCELLED;
             }
 
-            App_SetCredentialEntryPresentation();
+            App_SetCESPresentation();
 
         break;
 
@@ -1301,11 +1663,10 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
                 return LCS_EVENT_CREDENTIAL_CANCELLED;
             }
-            
+
             (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
 
-            App_SetCredentialEntryPresentation();
-            
+            App_SetCESPresentation();
 
         break;
 
@@ -1325,7 +1686,76 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             App_CancelTimeout();
 
+            if(!runtime_credential_valid)
+            {
+                if(CSS_GetCredential(App_RuntimeCredential) != CSS_OPERATION_OK)
+                {
+                    goto controlled_reset;
+                }
+
+                runtime_credential_valid = true;
+            }
+
             return App_ProcessAuthentication();
+
+        case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION:
+        {
+            App_CancelTimeout();
+            App_ClearRuntimeCandidate();
+
+            if(CES_GetCandidate(&App_RuntimeCandidate) != CES_OPERATION_OK)
+            {
+                goto controlled_reset;
+            }
+
+            CRS_ValidationResult_t validation_result =
+                CRS_ValidateConfirmation(App_RuntimeCandidate.Digits);
+
+            App_ClearRuntimeCandidate();
+
+            if(validation_result == CRS_VALIDATION_MATCH)
+            {
+                return LCS_EVENT_STAGING_VALIDATION_SUCCESS;
+            }
+
+            if(validation_result == CRS_VALIDATION_MISMATCH)
+            {
+                return LCS_EVENT_STAGING_VALIDATION_FAILURE;
+            }
+
+            goto controlled_reset;
+        }
+
+        case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STORAGE:
+        {
+            uint8_t temporary_credential[CRS_CREDENTIAL_LENGTH] = {0U};
+            LCS_Event_t storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE;
+
+            App_CancelTimeout();
+
+            if(CRS_GetValidatedCredential(temporary_credential) == CRS_OPERATION_OK &&
+               CSS_SaveCredential(temporary_credential) == CSS_OPERATION_OK)
+            {
+                for(size_t index = 0U; index < sizeof(App_RuntimeCredential); index++)
+                {
+                    App_RuntimeCredential[index] = temporary_credential[index];
+                }
+
+                runtime_credential_valid = true;
+                storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS;
+            }
+
+            (void)CRS_ClearStaging();
+
+            volatile uint8_t* temporary_bytes = (volatile uint8_t*)temporary_credential;
+
+            for(size_t index = 0U; index < sizeof(temporary_credential); index++)
+            {
+                temporary_bytes[index] = 0U;
+            }
+
+            return storage_event;
+        }
 
         case LCS_ACTION_GRANT_ACCESS_UNLOCK:
 
@@ -1409,23 +1839,54 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         break;
 
-        case LCS_ACTION_REQUEST_CONTROLLED_RESET:
+        case LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION:
 
             App_CancelTimeout();
 
             (void)CES_EndSession();
+            (void)CRS_ClearStaging();
+            App_ClearRuntimeCandidate();
             (void)App_ForceLock();
-            (void)SGS_Stop();
-            (void)LCD_BacklightOff(&App_Lcd);
 
-            App_RequestControlledReset();
+            App_SetLockedPresentation();
 
         break;
 
+        case LCS_ACTION_REQUEST_CONTROLLED_RESET:
+
+            goto controlled_reset;
+
         case LCS_ACTION_NONE:
         default:
-            break;
+
+        break;
     }
+
+    return LCS_EVENT_NONE;
+
+controlled_reset:
+
+    /* CRS integration faults share the same fail-safe cleanup as an LCS-requested reset. */
+    runtime_credential_valid = false;
+
+    App_CancelTimeout();
+
+    (void)CES_EndSession();
+    (void)CRS_ClearStaging();
+    App_ClearRuntimeCandidate();
+
+    volatile uint8_t* runtime_credential_bytes = (volatile uint8_t*)App_RuntimeCredential;
+
+    for(size_t index = 0U; index < sizeof(App_RuntimeCredential); index++)
+    {
+        runtime_credential_bytes[index] = 0U;
+    }
+
+    (void)App_ForceLock();
+    (void)SGS_Stop();
+    (void)LCD_BacklightOff(&App_Lcd);
+
+    App_RequestControlledReset();
 
     return LCS_EVENT_NONE;
 }
@@ -1433,14 +1894,17 @@ static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 /**
  * @brief   Serially dispatches one event and every bounded synchronous follow-up through Lock Control.
  *
- * @details Calls LCS_Process(), executes its returned action, and repeats only when action execution produces an authentication or
- *          fail-safe follow-up event. A small fixed bound prevents an accidental future action cycle from monopolizing the
- *          caller. Exceeding that bound is treated as an unrecoverable application-policy fault: credentials
- *          and timing are cleared, the actuator is forced safe and a controlled reset is requested.
+ * @details Calls LCS_Process(), executes its returned action, and repeats while authentication, registration validation, storage or
+ *          fail-safe execution produces a synchronous follow-up event. A small fixed bound prevents an accidental action cycle
+ *          from monopolizing the caller. Exceeding that bound cancels timing, ends CES, forces the actuator safe and requests a
+ *          controlled reset.
  *
  * @param   Event - First semantic event to dispatch; sentinels and out-of-range values are ignored.
  *
- * @note    All event processing and synchronous follow-up actions complete in the context that called App_Dispatch().
+ * @note    All event processing and synchronous follow-up actions complete in the serialized context that initiated dispatch,
+ *          whether App_ReadInput() or App_Dispatch().
+ * @warning The dispatch-depth fallback requests reset directly and therefore does not execute the full credential erasure owned
+ *          by LCS_ACTION_REQUEST_CONTROLLED_RESET before the hardware reset takes effect.
  */
 static void App_DispatchLcsEvent(LCS_Event_t Event)
 {
@@ -1477,9 +1941,9 @@ static void App_DispatchLcsEvent(LCS_Event_t Event)
 /**
  * @brief   Applies one Credential Entry Service event to presentation, timing or Lock Control.
  *
- * @details Accepted digits update the masked length and restart entry inactivity timing. Incomplete confirmation and clear
- *          operations update feedback without crossing into LCS. Ready and cancelled outcomes are translated into their semantic
- *          Lock Control events.
+ * @details Accepted digits update the masked length and restart entry inactivity timing. Clear updates the masked presentation
+ *          locally; incomplete, ready and cancelled outcomes are translated into their semantic Lock Control events so LCS can
+ *          select the state-specific refresh, validation, authentication or cleanup action.
  *
  * @param[in] Event - Credential Entry Service outcome produced by CES_ProcessInput().
  */
@@ -1499,6 +1963,8 @@ static void App_HandleCredentialEvent(CES_Event_t Event)
                 break;
             }
 
+            (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
+
             (void)DRS_SetScreen(DRS_SCREEN_PASSWORD_ENTRY);
 
             if(entered_digits <= DRS_ENTRY_DIGIT_CAPACITY)
@@ -1507,7 +1973,6 @@ static void App_HandleCredentialEvent(CES_Event_t Event)
             }
 
             (void)DRS_Update();
-            (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
         }
         break;
 
@@ -1548,8 +2013,8 @@ static void App_HandleCredentialEvent(CES_Event_t Event)
  * @brief   Routes one acquired keyboard action through wake semantics or credential entry.
  *
  * @details First offers every debounced click to LCS as a credential-entry request. When that event opens a new session, the wake
- *          key is consumed and never becomes a credential digit. Otherwise the key is translated and offered to CES, which accepts
- *          it only while a session is active.
+ *          key is consumed. During an already active session, key 'C' becomes a credential-register request and is likewise
+ *          consumed; every other supported key is translated and offered to CES.
  *
  * @param   Event - Complete keyboard value acquired during the current dispatch cycle; must not be NULL.
  */
@@ -1579,10 +2044,18 @@ static void App_HandleKeyboardEvent(const MK_Output_t* Event)
     if(unexpected_follow_up != LCS_EVENT_NONE)
     {
         App_DispatchLcsEvent(unexpected_follow_up);
+
         return;
     }
 
-    CES_Input_t input = App_TranslateKeyToDigit(Event);
+    if(Event->Key == 'C')
+    {
+        App_DispatchLcsEvent(LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED);
+
+        return;
+    }
+
+    CES_Input_t input = App_TranslateKeyToInputKind(Event);
 
     if(input.Kind != CES_INPUT_KIND_NONE)
     {
@@ -1658,10 +2131,12 @@ static void App_RequestControlledReset(void)
  * @brief   Initializes the complete electronic-lock application object graph.
  *
  * @details Initializes the actuator safe path first, followed by the LCD/render path, keyboard, buzzer/sound path and both
- *          indication instances. Only after every dependency succeeds does it activate normal Lock Control processing with
- *          LCS_EVENT_INIT_OK and establish the locked-idle presentation.
+ *          indication instances. After every dependency succeeds, CSS availability selects either the first-registration route
+ *          through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through LCS_EVENT_INIT_OK and locked-idle presentation.
  *
- * @note    This operation shall run after CubeMX peripheral initialization and before the first App_Dispatch() call.
+ * @note    CSS_HasCredential() provides only availability. The installed credential is copied into App_RuntimeCredential lazily
+ *          when the first authentication action executes.
+ * @note    This operation shall run after CubeMX peripheral initialization and before the first App_ReadInput() or App_Dispatch().
  * @note    A failure forces the actuator low when possible and reports LCS_EVENT_INIT_FAIL while the FSM remains in boot. The
  *          resulting controlled-reset action does not return on the STM32 target; APP_INIT_FAILED is retained as a defensive
  *          fallback contract. Already initialized static objects are not deinitialized before the reset request.
@@ -1689,9 +2164,17 @@ App_InitStatus_t App_Init(void)
         return APP_INIT_FAILED;
     }
 
-    (void)LCS_Process(LCS_EVENT_INIT_OK);
+    if(!CSS_HasCredential())
+    {
+        App_DispatchLcsEvent(LCS_EVENT_CREDENTIAL_NOT_REGISTERED);
+    }
 
-    App_SetLockedPresentation();
+    else
+    {
+        (void)LCS_Process(LCS_EVENT_INIT_OK);
+
+        App_SetLockedPresentation();
+    }
 
     return APP_INIT_SUCCESSFULLY;
 }

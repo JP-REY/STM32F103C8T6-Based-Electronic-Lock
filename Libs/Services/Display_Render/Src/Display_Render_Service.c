@@ -7,8 +7,8 @@
  *          and successfully rendered views.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 16, 2026
+ * @version 1.1.0
+ * @date    Aug 22, 2026
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
@@ -131,26 +131,38 @@ static const DRS_ScreenContent_t DRS_ScreenContentMap[DRS_SCREEN_COUNT] =
     
     [DRS_SCREEN_PASSWORD_ENTRY] =
     {
-        .first_line  = "Insert Password:",
+        .first_line  = "PIN:",
         .second_line = ""
     },
 
-    [DRS_SCREEN_ENTRY_TIMEOUT] =
+    [DRS_SCREEN_CREDENTIAL_REGISTER_AUTH] =
     {
-        .first_line  = "Entry Timeout",
+        .first_line  = "Access PIN:",
         .second_line = ""
     },
 
-    [DRS_SCREEN_ENTRY_INCOMPLETE] =
+    [DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY] =
     {
-        .first_line  = "Entry Incomplete",
+        .first_line  = "Update PIN:",
+        .second_line = ""
+    },
+
+    [DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY] =
+    {
+        .first_line  = "Confirm PIN:",
+        .second_line = ""
+    },
+
+    [DRS_SCREEN_CREDENTIAL_REGISTER_SAVED] =
+    {
+        .first_line  = "PIN updated!",
         .second_line = ""
     },
 
     [DRS_SCREEN_ACCESS_GRANTED] =
     {
-        .first_line  = "Access Granted",
-        .second_line = "Welcome!"
+        .first_line  = "Access Granted!",
+        .second_line = ""
     },
 
     [DRS_SCREEN_ACCESS_DENIED] =
@@ -416,8 +428,8 @@ static DRS_OpStatus_t DRS_RenderFullScreen(void)
 /**
  * @brief   Initializes the Display Render Service singleton.
  *
- * @details Stores the borrowed LCD reference, resets the requested view to an
- *          empty password-entry screen, invalidates the rendered screen and
+ * @details Stores the borrowed LCD reference, resets the requested view to the
+ *          blank locked-idle screen, invalidates the rendered screen and
  *          marks the service uninitialized. It then programs the lock bitmap,
  *          enables the lifecycle flag and calls DRS_Update() to render the
  *          default view immediately.

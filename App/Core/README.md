@@ -61,6 +61,7 @@ policy and shall be treated as the correct application values:
 | Authorized unlock | 3,000 ms |
 | Access-denied feedback | 1,500 ms |
 | Lockout | 10,000 ms |
+| Credential-register success feedback | 1,500 ms |
 
 ---
 
@@ -81,8 +82,12 @@ The Application Core is responsible for:
 - implementing the wake-key policy;
 - routing Credential Entry Service outcomes into presentation updates or Lock
   Control Service events;
-- copying, authenticating and explicitly erasing candidate credentials;
-- executing every semantic action returned by the Lock Control Service;
+- copying, authenticating, staging, validating and explicitly erasing transient
+  credential candidates;
+- consulting Credential Storage during startup, loading the installed
+  credential on demand and persisting a validated replacement;
+- executing the complete current `LCS_Action_t` contract, including the
+  credential-register workflow;
 - owning the application-level timeout lifecycle;
 - polling elapsed time and converting timeout expiration into semantic LCS
   events;
@@ -97,8 +102,9 @@ The Application Core does not:
 
 - own the authoritative product state machine;
 - own the consecutive authentication-failure counter;
-- define the valid credential value;
-- store a persistent credential;
+- define the installed credential value or Flash record format;
+- implement the persistent-storage transaction or Flash layout owned by CSS and
+  its Platform dependency;
 - implement matrix scanning or debounce algorithms;
 - render HD44780 commands directly;
 - implement LED or buzzer pattern sequencing;
@@ -126,6 +132,8 @@ flowchart TB
     subgraph DOMAIN["Domain services"]
         LCS["Lock Control Service"]
         CES["Credential Entry Service"]
+        CRS["Credential Register Service"]
+        CSS["Credential Storage Service"]
         AS["Authentication Service"]
         TVS["Timeout Validation Service"]
     end
@@ -173,9 +181,10 @@ from an ISR, multiple tasks or multiple cores.
 
 ### 4.2 Non-blocking product timing
 
-Credential-entry, unlock, denial and lockout intervals are represented by a
-start timestamp, an immutable duration and a semantic elapsed event. The
-Application Core never waits for one of these intervals to finish.
+Credential-entry, unlock, denial, lockout and credential-register success
+intervals are represented by a start timestamp, an immutable duration and a
+semantic elapsed event. The Application Core never waits for one of these
+intervals to finish.
 
 Display operations may contain bounded device-protocol delays required by the
 LCD implementation. Those low-level delays are distinct from product timing.
@@ -208,10 +217,17 @@ lifetime covers the complete firmware execution.
 
 ### 4.6 Explicit credential erasure
 
-The Credential Entry Service owns its internal candidate and erases it when the
-session is refreshed or ended. The Application Core owns a temporary
-authentication copy and erases the complete object through volatile byte writes
-after every copy, cleanup or authentication path.
+The Credential Entry Service owns its current input candidate and erases it
+when the session is refreshed or ended. The Application Core reuses one
+temporary candidate for authentication, CRS staging and CRS confirmation, and
+erases the complete object through volatile byte writes on every transfer and
+cleanup path. The temporary stack buffer used for CSS persistence is erased
+after the save attempt, while CRS staging is cleared on every terminal path.
+
+`App_RuntimeCredential` is different: it is the retained RAM reference used by
+Authentication after a successful CSS load or save. It intentionally remains
+available between authentication requests and is explicitly erased by the
+controlled-reset executor.
 
 ---
 
@@ -243,9 +259,23 @@ Successful behavior:
 4. Initialize the PWM, Buzzer Driver and Sound Generator Service.
 5. Initialize the lock-status LED path.
 6. Initialize the low-battery LED path.
-7. Dispatch `LCS_EVENT_INIT_OK` directly to LCS.
-8. Restore the locked-idle presentation.
-9. Return `APP_INIT_SUCCESSFULLY`.
+7. Query `CSS_HasCredential()` after every critical initializer succeeds.
+8. If no valid record is reported, dispatch
+   `LCS_EVENT_CREDENTIAL_NOT_REGISTERED`; the returned action begins the first
+   credential-register entry and its inactivity timeout.
+9. Otherwise, process `LCS_EVENT_INIT_OK` and restore the locked-idle
+   presentation.
+10. Return `APP_INIT_SUCCESSFULLY`.
+
+Startup checks availability only. The installed credential is copied from CSS
+into `App_RuntimeCredential` lazily when the first authentication action is
+executed. A successful credential replacement updates both CSS and this runtime
+reference, so later authentication does not need another Flash read.
+
+`CSS_HasCredential()` exposes a Boolean availability contract. App Core
+therefore cannot distinguish an erased/not-yet-provisioned record from a record
+that CSS rejects because its storage read or validation failed; both select the
+first-registration route.
 
 Failure behavior:
 
@@ -253,8 +283,9 @@ Failure behavior:
 2. Request the actuator safe state when the actuator object is usable.
 3. Dispatch `LCS_EVENT_INIT_FAIL` while LCS remains in boot.
 4. Execute `LCS_ACTION_REQUEST_CONTROLLED_RESET`.
-5. Cancel timing, erase CES state, force the actuator safe, stop sound, turn the
-   LCD backlight off, disable interrupts and request `NVIC_SystemReset()`.
+5. Cancel timing; erase CES, CRS staging and App Core credential buffers; force
+   the actuator safe; stop sound; turn the LCD backlight off; disable interrupts
+   and request `NVIC_SystemReset()`.
 
 The reset endpoint is not expected to return on the target. The
 `APP_INIT_FAILED` result is retained as a defensive API contract.
@@ -408,16 +439,20 @@ The current revision keeps product and board composition constants private in
 
 ### 7.4 Credential configuration
 
-The credential length is fixed by the Credential Entry and Authentication
-service contracts. Compile-time assertions require:
+The credential length is fixed across entry, authentication, registration,
+storage and presentation contracts. Compile-time assertions require:
 
 ```text
 CES_CREDENTIAL_LENGTH == AS_CREDENTIAL_LENGTH
+CES_CREDENTIAL_LENGTH == CRS_CREDENTIAL_LENGTH
+CES_CREDENTIAL_LENGTH == CSS_CREDENTIAL_LENGTH
 CES_CREDENTIAL_LENGTH == DRS_ENTRY_DIGIT_CAPACITY
 ```
 
-The configured credential value is private to the Authentication Service and
-must not be copied into this README, logs, traces or UI output.
+The installed value is owned persistently by CSS and retained temporarily by
+App Core as `App_RuntimeCredential`. Authentication receives that runtime
+reference; it does not own or compile a product credential. Raw values must not
+be copied into this README, logs, traces or UI output.
 
 ---
 
@@ -439,9 +474,11 @@ must not be copied into this README, logs, traces or UI output.
 | Low-battery GPIO and LED | App Core | Low-battery SIS instance | Battery indication path |
 | Two SIS runtime handles | App Core | App dispatch path | Independent LED pattern state |
 | Actuator GPIO handle | App Core | App action path | Temporary actuator boundary |
-| Runtime candidate copy | App Core | Authentication call only | Short-lived credential copy |
+| Runtime candidate copy | App Core | AS or CRS call | Short-lived authentication, staging or confirmation copy |
+| Runtime installed credential | App Core | Authentication call | Lazy-loaded or newly saved reference retained in RAM |
 | Active timeout runtime | App Core | App timeout helpers | One mutually exclusive interval |
-| CES, AS, DRS, SGS and LCS state | Owning service | App Core through public API | Service-specific state |
+| CES, CRS, DRS, SGS and LCS state | Owning service | App Core through public API | Service-specific runtime state |
+| Persistent credential record | CSS/Flash Platform | App Core through CSS API | Installed credential and record validation metadata |
 
 The Application Core never transfers ownership of its objects. Initialization
 functions inject borrowed pointers whose lifetime is guaranteed by static
@@ -508,9 +545,17 @@ their pattern state is independent.
 
 ### 9.6 LCS activation
 
-LCS begins in its private `BOOT` state through static initialization. App Core
-dispatches `LCS_EVENT_INIT_OK` only after every critical initializer succeeds.
-The transition activates LCS and commits the secure `LOCKED` state.
+LCS begins in its private `BOOT` state through static initialization. After
+every critical initializer succeeds, App Core queries `CSS_HasCredential()`:
+
+- an available valid record selects `LCS_EVENT_INIT_OK`, which activates LCS in
+  the secure `LOCKED` state and restores the idle presentation;
+- an unavailable record selects `LCS_EVENT_CREDENTIAL_NOT_REGISTERED`, which
+  activates LCS directly in credential-register first entry.
+
+App Core deliberately does not call `CSS_GetCredential()` during startup. The
+installed credential is loaded lazily immediately before the first
+authentication, and a load failure enters the controlled-reset path.
 
 ---
 
@@ -532,12 +577,13 @@ ignored.
 
 ### 10.2 Semantic translation
 
-| Key | CES input kind | Digit field |
+| Key | Active-session meaning | CES input kind / LCS event |
 | --- | --- | ---: |
-| `0` through `9` | `CES_INPUT_KIND_DIGIT` | Normalized value 0 through 9 |
-| `#` | `CES_INPUT_KIND_CONFIRM` | Invalid sentinel; ignored by CES |
-| `*` | `CES_INPUT_KIND_CLEAR_CANCEL` | Invalid sentinel; ignored by CES |
-| `A`, `B`, `C`, `D` or unknown | `CES_INPUT_KIND_NONE` | Invalid sentinel |
+| `0` through `9` | Candidate digit | `CES_INPUT_KIND_DIGIT`, normalized value 0 through 9 |
+| `#` | Confirm candidate | `CES_INPUT_KIND_CONFIRM` |
+| `*` | Clear or cancel | `CES_INPUT_KIND_CLEAR_CANCEL` |
+| `C` | Request credential replacement | `LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED`; key is consumed |
+| `A`, `B`, `D` or unknown | Unsupported | `CES_INPUT_KIND_NONE` |
 
 ### 10.3 Wake-key policy
 
@@ -557,6 +603,13 @@ Consequences:
 - while LCS is in any state that rejects the entry request, the returned action
   is normally `LCS_ACTION_NONE`, and App Core then offers supported keys to CES;
 - during lockout, CES is inactive and therefore no credential mutation occurs.
+
+While LCS is in `CREDENTIAL_SESSION_ACTIVE`, `C` dispatches
+`LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED` before normal CES translation. The
+key is consumed, and `REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` erases any
+digits already entered for unlock, restarts the 5,000 ms interval and presents
+the installed-credential authorization prompt. In other states the event is
+ignored by LCS; `C` still never becomes a CES digit.
 
 ### 10.4 Acquisition and EXTI boundary
 
@@ -579,10 +632,10 @@ from those interrupts.
 | --- | --- | --- | --- |
 | `CES_EVENT_NONE` | Ignore | None | None |
 | `CES_EVENT_INPUT_ACCEPTED` | Read current length, render masked progress and play keypress | Restart 5 s entry timeout | None |
-| `CES_EVENT_INCOMPLETE` | Dispatch incomplete semantic event | Refresh action restarts 5 s timeout | `LCS_EVENT_CANDIDATE_INCOMPLETE` |
+| `CES_EVENT_INCOMPLETE` | Dispatch incomplete semantic event | State-specific refresh action restarts 5 s timeout | `LCS_EVENT_CANDIDATE_INCOMPLETE` |
 | `CES_EVENT_CLEARED` | Render empty candidate and play keypress | Current implementation does not restart timeout | None |
-| `CES_EVENT_READY` | Begin authentication flow | Authentication action cancels entry timeout | `LCS_EVENT_CANDIDATE_READY` |
-| `CES_EVENT_CANCELLED` | End entry and restore locked idle | End action cancels timeout | `LCS_EVENT_CREDENTIAL_CANCELLED` |
+| `CES_EVENT_READY` | Dispatch readiness; LCS selects authentication, staging or validation | Selected action completes or replaces entry timing | `LCS_EVENT_CANDIDATE_READY` |
+| `CES_EVENT_CANCELLED` | End the active normal or registration entry phase | State-specific end action cancels timeout | `LCS_EVENT_CREDENTIAL_CANCELLED` |
 
 ### 11.1 Accepted digits
 
@@ -603,16 +656,22 @@ Confirmation with fewer than six digits produces
 `CES_EVENT_INCOMPLETE`. App Core dispatches
 `LCS_EVENT_CANDIDATE_INCOMPLETE`.
 
-LCS performs a self-transition in `CREDENTIAL_SESSION_ACTIVE` and returns
-`LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION`. App Core then:
+LCS performs a self-transition in the active entry state and returns its
+state-specific refresh action:
+
+- `LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION` for normal/authorization entry;
+- `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` for first entry;
+- `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` for confirmation entry.
+
+The corresponding App Core executor then:
 
 1. calls `CES_RefreshSession()` to erase the candidate while preserving the
    active session;
 2. restarts the 5,000 ms timeout;
 3. requests the entry-incomplete ringtone;
-4. restores the empty password-entry presentation.
+4. restores the appropriate empty normal, first-entry or confirmation prompt.
 
-`App_SetCredentialEntryPresentation()` also requests the lower-priority
+The phase-specific presentation helper also requests the lower-priority
 keypress ringtone. The Sound Generator priority policy preserves the already
 active incomplete-feedback ringtone.
 
@@ -623,12 +682,41 @@ The `*` key has context-sensitive behavior owned by CES:
 - when the candidate is non-empty, CES erases it and reports
   `CES_EVENT_CLEARED`; the session remains active;
 - when the candidate is empty, CES ends the session and reports
-  `CES_EVENT_CANCELLED`; LCS returns to `LOCKED`.
+  `CES_EVENT_CANCELLED`; LCS returns to `LOCKED` through the normal-entry,
+  first-entry, or confirmation-entry cleanup action selected by its current
+  state.
 
 The current App Core does not restart the entry timeout for
 `CES_EVENT_CLEARED`. This is an implemented behavior and must be changed in code
 and documentation together if product policy later requires clear activity to
 restart the interval.
+
+### 11.4 Credential-register lifecycle
+
+There are two ways to enter registration:
+
+- first boot, when `CSS_HasCredential()` reports no available record, begins
+  directly with the first new-credential entry;
+- while a normal credential session is active, `C` first changes the pending
+  purpose to registration and requires successful authentication of the
+  installed credential.
+
+The first new candidate is copied from CES into CRS staging and erased from the
+App Core transfer object. A fresh CES session then collects confirmation. App
+Core copies that candidate, asks CRS to compare it with the staged value and
+dispatches a match or mismatch event. A mismatch refreshes confirmation while
+CRS retains the first candidate; the third mismatch aborts according to LCS
+policy.
+
+After a match, App Core obtains the validated credential from CRS into a local
+buffer, saves it through CSS, updates `App_RuntimeCredential` only after a
+successful save, clears CRS staging and erases the local buffer. Successful
+storage displays the saved screen for 1,500 ms before
+`LCS_EVENT_CREDENTIAL_REGISTER_DONE` returns the product to locked idle.
+
+The phase-opening helpers select the fixed registration prompts. Once the user
+enters or clears a digit, `App_HandleCredentialEvent()` selects the generic
+`DRS_SCREEN_PASSWORD_ENTRY` mask view; raw digits are never rendered.
 
 ---
 
@@ -638,6 +726,11 @@ LCS owns these private runtime states:
 
 - `BOOT`;
 - `LOCKED`;
+- `CREDENTIAL_REGISTER_FIRST_ENTRY`;
+- `CREDENTIAL_REGISTER_CONFIRM_ENTRY`;
+- `CREDENTIAL_REGISTER_VALIDATING`;
+- `CREDENTIAL_REGISTER_PERSISTING`;
+- `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK`;
 - `CREDENTIAL_SESSION_ACTIVE`;
 - `AUTHENTICATING`;
 - `ACCESS_GRANTED_UNLOCKED`;
@@ -645,14 +738,21 @@ LCS owns these private runtime states:
 - `LOCKOUT`;
 - `FAULT`.
 
-For a state machine of this size, one representation is not sufficient:
+It also owns private `pending_request`, authentication-failure-count and
+registration-mismatch-count values. Normal entry sets the purpose to unlock;
+an accepted registration request changes it to credential registration. The
+pending value is preserved through entry and authentication, then selects the
+deterministic destination of `AUTH_SUCCESS`. The two counters implement
+independent lockout and confirmation-retry policies.
+
+For this state machine, one representation is not sufficient:
 
 - the diagram provides a compact operational map;
 - the transition table is the exact implementation reference.
 
-The diagram intentionally uses only transition IDs on its edges. Events,
-guards, internal effects and actions are recorded in the table immediately
-afterward.
+The operational map is split into the normal authorization path and the
+registration subflow. Both use only transition IDs on edges; events, guards,
+internal effects and actions remain in the exact table immediately afterward.
 
 ### 12.1 Operational transition map
 
@@ -662,48 +762,79 @@ flowchart TB
 
     BOOT -->|T01| LOCKED["LOCKED<br/>idle"]
     BOOT -->|T02| FAULT["FAULT"]
+    BOOT -->|T03| FIRST["REGISTER<br/>FIRST ENTRY"]
 
-    LOCKED -->|T03| ENTRY["CREDENTIAL_SESSION<br/>ACTIVE<br/>T06 ↺"]
-    ENTRY -->|T07| AUTH["AUTHENTICATING"]
+    LOCKED -->|T04| ENTRY["CREDENTIAL_SESSION<br/>ACTIVE<br/>T06 / T08 ↺"]
+    ENTRY -->|T09| AUTH["AUTHENTICATING"]
 
-    AUTH -->|T08| UNLOCKED["ACCESS_GRANTED<br/>UNLOCKED"]
-    AUTH -->|T10| DENIED["ACCESS_DENIED<br/>LOCKED"]
-    DENIED -->|T12| LOCKOUT["LOCKOUT"]
+    AUTH -->|T10| FIRST
+    AUTH -->|T11| UNLOCKED["ACCESS_GRANTED<br/>UNLOCKED"]
+    AUTH -->|T13| DENIED["ACCESS_DENIED<br/>LOCKED"]
+    DENIED -->|T15| LOCKOUT["LOCKOUT"]
 
-    ENTRY -->|"T04 / T05"| LOCKED_RETURN["LOCKED<br/>return destination"]
-    UNLOCKED -->|T09| LOCKED_RETURN
-    DENIED -->|T11| LOCKED_RETURN
-    LOCKOUT -->|T13| LOCKED_RETURN
+    ENTRY -->|"T05 / T07"| RETURN["LOCKED<br/>return rail"]
+    UNLOCKED -->|T12| RETURN
+    DENIED -->|T14| RETURN
+    LOCKOUT -->|T16| RETURN
 ```
 
-`LOCKED` is drawn twice only to create a clean convergence rail. Both boxes
-represent the same `LCS_STATE_LOCKED` runtime state; the lower box is not an
-additional state. `T04` and `T05` share that rail because cancellation and
-entry timeout have the same target but different actions. The `T06 ↺` marker
-inside `CREDENTIAL_SESSION_ACTIVE` represents its self-transition without
-drawing a large loop around the state.
+```mermaid
+flowchart LR
+    FIRST["FIRST ENTRY<br/>T19 ↺"] -->|T17| CONFIRM["CONFIRM ENTRY<br/>T23 ↺"]
+    CONFIRM -->|T21| VALIDATE["VALIDATING"]
+    VALIDATE -->|T25| PERSIST["PERSISTING"]
+    PERSIST -->|T28| FEEDBACK["SUCCESS<br/>FEEDBACK"]
+    FEEDBACK -->|T30| LOCKED["LOCKED"]
+
+    VALIDATE -->|T26| CONFIRM
+    FIRST -->|"T18 / T20"| LOCKED
+    CONFIRM -->|"T22 / T24"| LOCKED
+    VALIDATE -->|T27| LOCKED
+    PERSIST -->|T29| FAULT["FAULT"]
+```
+
+`RETURN` is a layout-only duplicate of `LOCKED`, not another LCS state. The
+long visual cycle back to the upper `LOCKED` box is intentionally omitted.
+`T06`, `T08`, `T19` and `T23` are self-transitions represented inside their
+nodes to avoid loop edges. The second view isolates retries and terminal
+registration outcomes so they do not cross the normal access path.
 
 ### 12.2 Complete transition table
 
-To keep the table readable, identifiers omit their column-specific prefixes:
-`LCS_STATE_`, `LCS_EVENT_`, `LCS_GUARD_`,
-`LCS_INTERNAL_EFFECT_` and `LCS_ACTION_`.
+To keep the table readable, identifiers omit their column-specific prefixes.
 
-| Transition | Source state | Event | Guard | Target state | Internal effect | Action returned |
-| --- | --- | --- | --- | --- | --- | --- |
-| `T01` | `BOOT` | `INIT_OK` | `ALWAYS` | `LOCKED` | `SET_SERVICE_ACTIVE` | `NONE` |
-| `T02` | `BOOT` | `INIT_FAIL` | `ALWAYS` | `FAULT` | `NONE` | `REQUEST_CONTROLLED_RESET` |
-| `T03` | `LOCKED` | `CREDENTIAL_ENTRY_REQUESTED` | `ALWAYS` | `CREDENTIAL_SESSION_ACTIVE` | `NONE` | `BEGIN_CREDENTIAL_ENTRY_SESSION` |
-| `T04` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_CANCELLED` | `ALWAYS` | `LOCKED` | `NONE` | `END_CREDENTIAL_ENTRY_SESSION` |
-| `T05` | `CREDENTIAL_SESSION_ACTIVE` | `ENTRY_TIMEOUT` | `ALWAYS` | `LOCKED` | `NONE` | `RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` |
-| `T06` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_INCOMPLETE` | `ALWAYS` | `CREDENTIAL_SESSION_ACTIVE` | `NONE` | `REFRESH_CREDENTIAL_ENTRY_SESSION` |
-| `T07` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_READY` | `ALWAYS` | `AUTHENTICATING` | `NONE` | `REQUEST_AUTHENTICATION` |
-| `T08` | `AUTHENTICATING` | `AUTH_SUCCESS` | `ALWAYS` | `ACCESS_GRANTED_UNLOCKED` | `RESET_ATTEMPT_COUNT` | `GRANT_ACCESS_UNLOCK` |
-| `T09` | `ACCESS_GRANTED_UNLOCKED` | `UNLOCK_TIMEOUT` | `ALWAYS` | `LOCKED` | `NONE` | `RETURN_TO_LOCKED` |
-| `T10` | `AUTHENTICATING` | `AUTH_FAILURE` | `ALWAYS` | `ACCESS_DENIED_LOCKED` | `INCREMENT_ATTEMPT_COUNT` | `DENY_ACCESS` |
-| `T11` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | `UNDER_ATTEMPT_LIMIT` | `LOCKED` | `NONE` | `RETURN_TO_LOCKED` |
-| `T12` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | `ATTEMPT_COUNT_LIMIT` | `LOCKOUT` | `NONE` | `ENTER_LOCKOUT` |
-| `T13` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | `ALWAYS` | `LOCKED` | `RESET_ATTEMPT_COUNT` | `RETURN_TO_LOCKED` |
+| Transition | Source | Event | Guard | Pending discriminator | Target | Internal effect | Action |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `T01` | `BOOT` | `INIT_OK` | `ALWAYS` | `NONE` | `LOCKED` | `SET_SERVICE_ACTIVE` | `NONE` |
+| `T02` | `BOOT` | `INIT_FAIL` | `ALWAYS` | `NONE` | `FAULT` | `NONE` | `REQUEST_CONTROLLED_RESET` |
+| `T03` | `BOOT` | `CREDENTIAL_NOT_REGISTERED` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `SET_SERVICE_ACTIVE` | `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T04` | `LOCKED` | `CREDENTIAL_ENTRY_REQUESTED` | `ALWAYS` | `NONE` | `CREDENTIAL_SESSION_ACTIVE` | `SET_PENDING_UNLOCK` | `BEGIN_CREDENTIAL_ENTRY_SESSION` |
+| `T05` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_CANCELLED` | `ALWAYS` | `NONE` | `LOCKED` | `CLEAR_PENDING` | `END_CREDENTIAL_ENTRY_SESSION` |
+| `T06` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_REGISTER_REQUESTED` | `ALWAYS` | `NONE` | `CREDENTIAL_SESSION_ACTIVE` | `SET_PENDING_REGISTER_SESSION` | `REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` |
+| `T07` | `CREDENTIAL_SESSION_ACTIVE` | `ENTRY_TIMEOUT` | `ALWAYS` | `NONE` | `LOCKED` | `CLEAR_PENDING` | `RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` |
+| `T08` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_INCOMPLETE` | `ALWAYS` | `NONE` | `CREDENTIAL_SESSION_ACTIVE` | `NONE` | `REFRESH_CREDENTIAL_ENTRY_SESSION` |
+| `T09` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_READY` | `ALWAYS` | `NONE` | `AUTHENTICATING` | `NONE` | `REQUEST_AUTHENTICATION` |
+| `T10` | `AUTHENTICATING` | `AUTH_SUCCESS` | `ALWAYS` | `CREDENTIAL_REGISTER` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CLEAR_PENDING_AND_RESET_ATTEMPT_COUNT` | `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T11` | `AUTHENTICATING` | `AUTH_SUCCESS` | `ALWAYS` | `UNLOCK` | `ACCESS_GRANTED_UNLOCKED` | `CLEAR_PENDING_AND_RESET_ATTEMPT_COUNT` | `GRANT_ACCESS_UNLOCK` |
+| `T12` | `ACCESS_GRANTED_UNLOCKED` | `UNLOCK_TIMEOUT` | `ALWAYS` | `NONE` | `LOCKED` | `CLEAR_PENDING` | `RETURN_TO_LOCKED` |
+| `T13` | `AUTHENTICATING` | `AUTH_FAILURE` | `ALWAYS` | `NONE` | `ACCESS_DENIED_LOCKED` | `CLEAR_PENDING_AND_INCREMENT_ATTEMPT_COUNT` | `DENY_ACCESS` |
+| `T14` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | `UNDER_ATTEMPT_LIMIT` | `NONE` | `LOCKED` | `CLEAR_PENDING` | `RETURN_TO_LOCKED` |
+| `T15` | `ACCESS_DENIED_LOCKED` | `DENIED_ACCESS_TIMEOUT` | `ATTEMPT_COUNT_LIMIT` | `NONE` | `LOCKOUT` | `CLEAR_PENDING` | `ENTER_LOCKOUT` |
+| `T16` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_ATTEMPT_COUNT` | `RETURN_TO_LOCKED` |
+| `T17` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `RESET_REGISTER_MISMATCH_COUNT` | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
+| `T18` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T19` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `NONE` | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T20` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T21` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_VALIDATING` | `NONE` | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
+| `T22` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T23` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `NONE` | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T24` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T25` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_PERSISTING` | `RESET_REGISTER_MISMATCH_COUNT` | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
+| `T26` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | `REGISTER_RETRY_AVAILABLE` | `NONE` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `INCREMENT_REGISTER_MISMATCH_COUNT` | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T27` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | `REGISTER_ATTEMPT_LIMIT` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T28` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | `ALWAYS` | `NONE` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `RESET_REGISTER_MISMATCH_COUNT` | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
+| `T29` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | `ALWAYS` | `NONE` | `FAULT` | `RESET_REGISTER_MISMATCH_COUNT` | `REQUEST_CONTROLLED_RESET` |
+| `T30` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | `ALWAYS` | `NONE` | `LOCKED` | `RESET_REGISTER_MISMATCH_COUNT` | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
 
 ### 12.3 Transition semantics
 
@@ -711,13 +842,20 @@ To keep the table readable, identifiers omit their column-specific prefixes:
   source/event record whose guard evaluates true.
 - The two access-denied timeout records are intentionally adjacent and use
   mutually exclusive guards.
-- `LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT` runs on authentication
-  failure before the denial interval begins. The denial-timeout guard therefore
-  evaluates the already updated count.
+- The two authentication-success records share state, event and guard, but
+  their pending discriminators are mutually exclusive.
+- The two staging-validation-failure records use complementary guards: the
+  first two mismatches retry confirmation and the third aborts registration.
+- `AUTH_SUCCESS` with no pending request produces no transition.
+- Authentication failure clears the pending purpose and increments the failure
+  count before denial feedback begins.
 - The failure counter saturates at three. Consequently,
   `LCS_GUARD_ATTEMPT_COUNT_LIMIT` is equivalent to `failures >= 3`, and the
   third consecutive denial routes to lockout.
-- Authentication success and lockout expiry reset the failure counter.
+- Authentication success clears the pending request and resets the failure
+  counter; lockout expiry resets the failure counter.
+- Cancellation and entry timeout explicitly clear the pending request.
+- Registration terminal paths reset the independent mismatch counter.
 - Entry timeout and user cancellation reach the same locked state through
   different actions because timeout feedback is distinct from ordinary session
   cancellation.
@@ -735,15 +873,22 @@ To keep the table readable, identifiers omit their column-specific prefixes:
 
 | LCS event | App Core source | When dispatched |
 | --- | --- | --- |
-| `LCS_EVENT_INIT_OK` | `App_Init()` | Every critical initializer succeeded |
+| `LCS_EVENT_INIT_OK` | `App_Init()` | Every critical initializer succeeded and CSS reports an available credential |
 | `LCS_EVENT_INIT_FAIL` | `App_Init()` | Initializer chain failed |
+| `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` | `App_Init()` | `CSS_HasCredential()` reports no available valid record |
+| `LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED` | Keyboard handler | `C` is clicked during an active credential session |
+| `LCS_EVENT_CREDENTIAL_REGISTER_DONE` | Timeout poller or saved-timeout setup fallback | 1.5 s registration-success feedback completed or could not start |
 | `LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED` | Keyboard handler | Every accepted click before CES translation |
 | `LCS_EVENT_CREDENTIAL_CANCELLED` | CES handler or fail-safe follow-up | Empty `*`, entry setup failure, refresh failure or input fault |
 | `LCS_EVENT_CANDIDATE_READY` | CES handler | Complete six-digit candidate confirmed |
 | `LCS_EVENT_CANDIDATE_INCOMPLETE` | CES handler | Candidate confirmed below required length |
-| `LCS_EVENT_AUTH_SUCCESS` | Authentication helper | Configured credential matched |
-| `LCS_EVENT_AUTH_FAILURE` | Authentication helper | Copy, cleanup or comparison failed |
-| `LCS_EVENT_ENTRY_TIMEOUT` | Timeout poller | 5 s credential-entry interval elapsed |
+| `LCS_EVENT_AUTH_SUCCESS` | Authentication helper | Candidate matched `App_RuntimeCredential` |
+| `LCS_EVENT_AUTH_FAILURE` | Authentication helper | Candidate copy, CES cleanup or comparison failed |
+| `LCS_EVENT_STAGING_VALIDATION_SUCCESS` | CRS validation action | Confirmation matches the staged first entry |
+| `LCS_EVENT_STAGING_VALIDATION_FAILURE` | CRS validation action | Confirmation differs from the staged first entry |
+| `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS` | CRS/CSS storage action | Validated credential was persisted and installed in the runtime reference |
+| `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE` | CRS/CSS storage action | Validated credential could not be obtained or persisted |
+| `LCS_EVENT_ENTRY_TIMEOUT` | Timeout poller or accepted-digit restart fallback | 5 s credential-entry interval elapsed or its restart failed |
 | `LCS_EVENT_UNLOCK_TIMEOUT` | Timeout poller or unlock setup fallback | 3 s interval elapsed or unlock could not start safely |
 | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` | Timeout poller or denial setup fallback | 1.5 s interval elapsed or denial timing could not start |
 | `LCS_EVENT_LOCKOUT_TIMEOUT` | Timeout poller or lockout setup fallback | 10 s interval elapsed or lockout timing could not start |
@@ -758,16 +903,32 @@ Sentinel and out-of-range LCS events are ignored by
 | LCS action | Credential operations | Timeout operations | Actuator | Presentation | Possible follow-up |
 | --- | --- | --- | --- | --- | --- |
 | `NONE` | None | None | None | None | None |
+| `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Clear CRS/App transfer data and begin CES for the first new entry | Start 5 s entry timeout | Preserve locked | `CREDENTIAL_REGISTER_FIRST_ENTRY` prompt | `CREDENTIAL_CANCELLED` on setup failure |
+| `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Erase/restart first entry | Restart 5 s entry timeout | Preserve locked | First-entry prompt and incomplete feedback | `CREDENTIAL_CANCELLED` on failure |
+| `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | End CES; clear CRS and App transfer data | Cancel active timeout | Force locked | Locked-idle view | None |
+| `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` | Copy first candidate into CRS, erase transfer copy and refresh CES | Restart 5 s entry timeout | Preserve locked | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` prompt | Controlled reset on staging fault; `CREDENTIAL_CANCELLED` on CES/timer failure |
+| `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` | Erase/restart confirmation while CRS retains the first candidate | Restart 5 s entry timeout | Preserve locked | Confirmation prompt and mismatch/incomplete feedback | `CREDENTIAL_CANCELLED` on failure |
+| `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` | End CES; clear CRS and App transfer data | Cancel active timeout | Force locked | Error sound, then locked-idle view | None |
+| `BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` | Reserved; no current transition returns this action | Cancel active timeout | Preserve locked | None | None |
+| `END_CREDENTIAL_REGISTER_SAVING_SESSION` | End CES; clear CRS and App transfer data | Start 1.5 s saved-feedback timeout | Force locked | `CREDENTIAL_REGISTER_SAVED`, locked LED and success sound | `CREDENTIAL_REGISTER_DONE` if timing cannot start |
+| `REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` | Erase/restart CES for installed-credential authorization | Restart 5 s entry timeout | Preserve locked | `CREDENTIAL_REGISTER_AUTH` prompt | `CREDENTIAL_CANCELLED` on setup failure |
 | `BEGIN_CREDENTIAL_ENTRY_SESSION` | Begin CES | Start 5 s entry timeout | Preserve locked | Wake LCD, empty entry view, locked indication, keypress | `CREDENTIAL_CANCELLED` on setup failure |
 | `REFRESH_CREDENTIAL_ENTRY_SESSION` | Erase candidate, keep CES active | Restart 5 s entry timeout | Preserve locked | Empty entry view and incomplete sound | `CREDENTIAL_CANCELLED` on refresh/timer failure |
 | `END_CREDENTIAL_ENTRY_SESSION` | End and erase CES | Cancel active timeout | Force locked | Locked-idle view, backlight off, locked indication | None |
-| `REQUEST_AUTHENTICATION` | Copy candidate, end CES, authenticate, erase copy | Cancel entry timeout | Preserve locked | No direct presentation | `AUTH_SUCCESS` or `AUTH_FAILURE` |
+| `REQUEST_AUTHENTICATION` | Lazy-load installed credential if needed; copy candidate; end CES; authenticate; erase candidate | Cancel entry timeout | Preserve locked | No direct presentation | `AUTH_SUCCESS`, `AUTH_FAILURE`, or controlled reset on CSS load failure |
+| `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` | Copy confirmation, validate through CRS and erase transfer copy | Cancel entry timeout | Preserve locked | No direct presentation | `STAGING_VALIDATION_SUCCESS`, `STAGING_VALIDATION_FAILURE`, or controlled reset for invalid CRS state |
+| `REQUEST_CREDENTIAL_REGISTER_STORAGE` | Get CRS validated value into a local buffer; save through CSS; update runtime reference only on success; clear and erase transients | Cancel active timeout | Preserve locked | No direct presentation | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` or `CREDENTIAL_REGISTER_STORAGE_FAILURE` |
 | `GRANT_ACCESS_UNLOCK` | CES already ended | Start 3 s unlock timeout before GPIO high | Request unlock | Granted screen, LED indication and ringtone | `UNLOCK_TIMEOUT` if timing or GPIO setup fails |
 | `DENY_ACCESS` | Candidate already erased | Start 1.5 s denial timeout | Force locked | Denied screen, LED indication and error ringtone | `DENIED_ACCESS_TIMEOUT` if timing setup fails |
 | `ENTER_LOCKOUT` | CES inactive | Start 10 s lockout timeout | Force locked | Lockout screen, LED indication and ringtone | `LOCKOUT_TIMEOUT` if timing setup fails |
 | `RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` | End and erase CES | Cancel timeout runtime | Force locked | Timeout ringtone, idle render, backlight off, locked indication | None |
+| `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` | End CES; clear CRS and App transfer data | Cancel registration-feedback timing | Force locked | Locked-idle presentation | None |
 | `RETURN_TO_LOCKED` | End CES defensively | Cancel active timeout | Force locked | Idle render, backlight off, locked indication | None |
-| `REQUEST_CONTROLLED_RESET` | End and erase CES | Cancel active timeout | Force locked | Stop sound and turn backlight off | Does not return on target |
+| `REQUEST_CONTROLLED_RESET` | End CES; clear CRS, App transfer data and runtime installed credential | Cancel active timeout | Force locked | Stop sound and turn backlight off | Does not return on target |
+
+The current `App_ExecuteAction()` switch explicitly covers all 23 public action
+values. `BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` remains a reserved action:
+it cancels any timeout, but no current LCS transition returns it.
 
 ### 14.1 Safe unlock ordering
 
@@ -813,6 +974,7 @@ static const App_TimeoutDefinition_t App_TimeoutDefinitions[APP_TIMEOUT_COUNT];
 | `APP_TIMEOUT_UNLOCK` | 3,000 ms | `LCS_EVENT_UNLOCK_TIMEOUT` | Grant action before actuator high | Return-to-locked, reset, replacement |
 | `APP_TIMEOUT_ACCESS_DENIED` | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` | Deny action | Return-to-locked, enter lockout replacement, reset |
 | `APP_TIMEOUT_LOCKOUT` | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` | Enter-lockout action | Lockout expiry, reset, replacement |
+| `APP_TIMEOUT_CRS_SAVED` | 1,500 ms | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` | Successful credential persistence feedback | Registration return-to-locked, reset, replacement |
 
 These values are the current and correct product timeout policy. Older values
 in historical documents do not override this table.
@@ -825,9 +987,9 @@ in historical documents do not override this table.
 - the monotonic start timestamp;
 - an authoritative active flag.
 
-Only one timeout can be active because the timed LCS operating states are
-mutually exclusive. Starting a timeout intentionally replaces any previous
-runtime.
+Only one timeout can be active because credential entry, unlock, denial,
+lockout and registration-success feedback are mutually exclusive LCS operating
+states. Starting a timeout intentionally replaces any previous runtime.
 
 Adding overlapping product intervals requires a redesign of this runtime model;
 it is not sufficient to append another table record.
@@ -929,9 +1091,9 @@ Important consequences:
 It does not stop the active sound pattern. This permits action-specific sounds,
 such as entry-timeout feedback, to continue after the display returns to idle.
 
-### 17.2 Credential entry
+### 17.2 Normal credential entry
 
-`App_SetCredentialEntryPresentation()`:
+`App_SetCESPresentation()`:
 
 - requests the keypress ringtone;
 - turns the LCD backlight on;
@@ -940,7 +1102,24 @@ such as entry-timeout feedback, to continue after the display returns to idle.
 - renders immediately;
 - selects the locked LED baseline.
 
-### 17.3 Semantic presentation matrix
+### 17.3 Credential-register presentation
+
+Four phase-specific helpers turn the backlight on, select their fixed DRS
+screen and render immediately:
+
+| Helper | Screen | Additional feedback |
+| --- | --- | --- |
+| `App_SetCRSAuthPresentation()` | `CREDENTIAL_REGISTER_AUTH` | Clear mask count and keypress acknowledgement |
+| `App_SetCRSFirstEntryPresentation()` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Clear mask count and keypress acknowledgement |
+| `App_SetCRSConfirmEntryPresentation()` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Clear mask count and keypress acknowledgement |
+| `App_SetCRSSavedPresentation()` | `CREDENTIAL_REGISTER_SAVED` | Access-granted sound |
+
+The first three screens are phase-opening prompts. Accepted and cleared input
+subsequently uses the generic `PASSWORD_ENTRY` masked-progress screen. The
+saved screen remains visible under `APP_TIMEOUT_CRS_SAVED` for 1,500 ms before
+the return-to-locked action disables the backlight.
+
+### 17.4 Semantic presentation matrix
 
 | Product situation | LCD screen | Backlight | Lock LED indication | Ringtone |
 | --- | --- | --- | --- | --- |
@@ -948,17 +1127,21 @@ such as entry-timeout feedback, to continue after the display returns to idle.
 | Entry opened | `PASSWORD_ENTRY`, zero masks | On | `LOCKED` | `KEYPRESS` |
 | Digit accepted | `PASSWORD_ENTRY`, updated masks | On | Unchanged | `KEYPRESS` |
 | Candidate cleared | `PASSWORD_ENTRY`, zero masks | On | Unchanged | `KEYPRESS` |
-| Candidate incomplete | `PASSWORD_ENTRY`, zero masks | On | `LOCKED` | `ENTRY_INCOMPLETE` |
+| Normal candidate incomplete | `PASSWORD_ENTRY`, zero masks | On | `LOCKED` | `ENTRY_INCOMPLETE` |
+| Registration first entry incomplete | `CREDENTIAL_REGISTER_FIRST_ENTRY` | On | Preserved locked state | `ENTRY_INCOMPLETE` |
+| Registration confirmation incomplete/mismatch | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | On | Preserved locked state | `ENTRY_INCOMPLETE` |
+| Registration authorization opened | `CREDENTIAL_REGISTER_AUTH` | On | Preserved locked state | `KEYPRESS` |
+| Registration first entry opened | `CREDENTIAL_REGISTER_FIRST_ENTRY` | On | Preserved locked state | `KEYPRESS` |
+| Registration confirmation opened | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | On | Preserved locked state | `KEYPRESS` |
+| Credential saved | `CREDENTIAL_REGISTER_SAVED` | On for 1,500 ms | `LOCKED` | `ACCESS_GRANTED` |
 | Access granted | `ACCESS_GRANTED` | On | `ACCESS_GRANTED` | `ACCESS_GRANTED` |
 | Access denied | `ACCESS_DENIED` | On | `ACCESS_DENIED` | `ERROR` |
 | Lockout | `LOCKOUT` | On | `LOCKOUT_ENTRY` | `LOCKOUT` |
 | Entry timeout | Idle content rendered, then backlight off | Off | `LOCKED` | `ENTRY_TIMEOUT` |
 | Controlled reset | No further render required | Off | Safe actuator has priority | Sound stopped |
 
-`DRS_SCREEN_ENTRY_TIMEOUT` and `DRS_SCREEN_ENTRY_INCOMPLETE` exist in the
-Display Render Service catalog but are not selected by the current App Core
-flows. Current incomplete feedback returns directly to the empty password view,
-and timeout feedback uses sound while restoring the idle display.
+Current incomplete feedback returns directly to the appropriate empty entry
+prompt, and timeout feedback uses sound while restoring the idle display.
 
 ---
 
@@ -966,13 +1149,27 @@ and timeout feedback uses sound while restoring the idle display.
 
 ### 18.1 Authentication sequence
 
+The transfer and erasure sequence is shared by unlock and replacement
+authorization. LCS, not App Core or AS, decides whether `AUTH_SUCCESS` grants
+unlock or begins credential registration from its private pending request.
+Before the first authentication after boot, App Core lazily retrieves the
+installed credential through CSS; a read failure is treated as an integrity
+fault and enters controlled reset.
+
 ```mermaid
 sequenceDiagram
     participant App as App Core
     participant CES as Credential Entry
+    participant CSS as Credential Storage
     participant AS as Authentication
     participant LCS as Lock Control
 
+    opt Runtime reference is not valid yet
+        App->>CSS: CSS_GetCredential(App_RuntimeCredential)
+        alt Load fails
+            App->>App: Controlled reset with credential erasure
+        end
+    end
     App->>App: Clear App_RuntimeCandidate
     App->>CES: CES_GetCandidate(copy)
     alt Candidate copy fails
@@ -985,7 +1182,7 @@ sequenceDiagram
             App->>App: Clear runtime copy
             App-->>LCS: AUTH_FAILURE
         else Session ended and CES storage erased
-            App->>AS: AS_Authenticate(Digits)
+            App->>AS: AS_Authenticate(candidate, runtime credential)
             AS-->>App: authenticated/rejected/invalid
             App->>App: Clear runtime copy
             App-->>LCS: AUTH_SUCCESS or AUTH_FAILURE
@@ -993,28 +1190,74 @@ sequenceDiagram
     end
 ```
 
-### 18.2 Erasure guarantees
+### 18.2 Registration and persistence sequence
+
+```mermaid
+sequenceDiagram
+    participant App as App Core
+    participant CES as Credential Entry
+    participant CRS as Credential Register
+    participant CSS as Credential Storage
+    participant LCS as Lock Control
+
+    App->>CES: CES_GetCandidate(first entry)
+    App->>CRS: CRS_StageCredential(copy)
+    App->>App: Erase App_RuntimeCandidate
+    App->>CES: CES_RefreshSession()
+    App->>CES: CES_GetCandidate(confirmation)
+    App->>CRS: CRS_ValidateConfirmation(copy)
+    App->>App: Erase App_RuntimeCandidate
+    alt Confirmation matches
+        App-->>LCS: STAGING_VALIDATION_SUCCESS
+        App->>CRS: CRS_GetValidatedCredential(local buffer)
+        App->>CSS: CSS_SaveCredential(local buffer)
+        alt Save succeeds
+            App->>App: Update App_RuntimeCredential
+            App-->>LCS: CREDENTIAL_REGISTER_STORAGE_SUCCESS
+        else Save fails
+            App-->>LCS: CREDENTIAL_REGISTER_STORAGE_FAILURE
+        end
+        App->>CRS: CRS_ClearStaging()
+        App->>App: Erase local buffer
+    else Confirmation differs
+        App-->>LCS: STAGING_VALIDATION_FAILURE
+    end
+```
+
+Storage success is reported only after CSS accepts the save. The runtime
+reference is updated only on that path, preventing failed persistence from
+silently changing the credential used by Authentication.
+
+### 18.3 Erasure guarantees
 
 The Application Core clears `App_RuntimeCandidate`:
 
 - before requesting a CES copy;
 - after copy failure;
 - after CES session-ending failure;
-- immediately after authentication, before reporting the result.
+- immediately after authentication, before reporting the result;
+- immediately after transfer to CRS staging;
+- immediately after CRS confirmation validation.
 
 `CES_EndSession()` erases the service-owned candidate. `CES_RefreshSession()`
-erases it without ending the session.
+erases it without ending the session. CRS staging is cleared after storage and
+on registration cancellation, timeout and reset paths. The CSS transfer buffer
+is erased through volatile byte writes after every storage attempt.
 
-### 18.3 Security limitations
+`App_RuntimeCredential` is retained by design until successful replacement or
+controlled reset. It is not cleared after each authentication because it is the
+active RAM reference used to avoid repeated Flash reads.
 
-The V1 credential is compiled into firmware and compared synchronously. This is
-appropriate only for an engineering prototype. The implementation does not
-provide:
+### 18.4 Security limitations
+
+The current implementation persists one credential through CSS and compares it
+synchronously. It does not provide:
 
 - encrypted credential storage;
 - resistance to firmware extraction;
 - constant-time comparison guarantees;
-- multiple users or credential rotation;
+- multiple users or credential history;
+- password hashing or key derivation;
 - audit logging;
 - tamper detection.
 
@@ -1030,7 +1273,12 @@ Some actions immediately produce another semantic fact. For example:
 CANDIDATE_READY
     -> REQUEST_AUTHENTICATION
     -> AUTH_SUCCESS or AUTH_FAILURE
-    -> GRANT_ACCESS_UNLOCK or DENY_ACCESS
+    -> GRANT_ACCESS_UNLOCK, BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION or DENY_ACCESS
+
+STAGING_VALIDATION_SUCCESS
+    -> REQUEST_CREDENTIAL_REGISTER_STORAGE
+    -> CREDENTIAL_REGISTER_STORAGE_SUCCESS or CREDENTIAL_REGISTER_STORAGE_FAILURE
+    -> END_CREDENTIAL_REGISTER_SAVING_SESSION or REQUEST_CONTROLLED_RESET
 ```
 
 `App_DispatchLcsEvent()` serializes these facts without recursively calling
@@ -1051,6 +1299,13 @@ If a valid pending event remains after four iterations, App Core assumes an
 untrustworthy action/event cycle. It cancels timing, ends CES, forces the
 actuator safe, stops sound, turns off the backlight and requests a controlled
 reset.
+
+This dispatch-depth fallback does not use the complete
+`LCS_ACTION_REQUEST_CONTROLLED_RESET` executor. In the current implementation it
+does not explicitly clear CRS staging, `App_RuntimeCandidate` or
+`App_RuntimeCredential` before requesting reset. The hardware reset removes
+volatile RAM, but using the common cleanup executor would make the software
+erasure policy uniform before reset takes effect.
 
 The helper may run from the `App_ReadInput()` path for credential and
 authentication events or from the `App_Dispatch()` path for timeout events.
@@ -1086,7 +1341,23 @@ Candidate-copy or CES cleanup failure is conservatively mapped to
 `LCS_EVENT_AUTH_FAILURE`. The attempt counter and denial policy therefore
 remain centralized in LCS.
 
-### 20.4 Timeout setup failure
+Failure to lazy-load the installed credential from CSS cannot be classified as
+an incorrect user candidate. It enters the controlled-reset path, which erases
+the runtime reference before reset.
+
+### 20.4 Credential-register integration failure
+
+Failure to copy or stage the first new candidate, or an invalid CRS validation
+state, enters controlled reset. A confirmation mismatch is not an integration
+fault: it produces `LCS_EVENT_STAGING_VALIDATION_FAILURE` and follows LCS retry
+policy.
+
+Failure to obtain a validated CRS value or save it through CSS produces
+`LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE`. LCS transitions to `FAULT`
+and requests controlled reset. The runtime installed credential is updated only
+after a successful CSS save.
+
+### 20.5 Timeout setup failure
 
 Timeout setup failures are translated into the same event that a normally
 elapsed interval would produce:
@@ -1097,26 +1368,33 @@ elapsed interval would produce:
 | Unlock | `UNLOCK_TIMEOUT` | Do not unlock or force lock, then return locked |
 | Denial feedback | `DENIED_ACCESS_TIMEOUT` | Advance denial policy immediately |
 | Lockout | `LOCKOUT_TIMEOUT` | End lockout path and reset failure count |
+| Credential-register saved feedback | `CREDENTIAL_REGISTER_DONE` | Return to locked idle immediately |
 
-### 20.5 Presentation failure
+Accepted-digit timeout-restart failure is handled separately by dispatching
+`LCS_EVENT_ENTRY_TIMEOUT`, which returns the active entry phase to locked idle.
+
+### 20.6 Presentation failure
 
 The current action executor discards most DRS, SIS and SGS operation statuses.
 Such failures produce degraded feedback but do not block the separate
 actuator-safe request. A future fault-policy integration should make these
 failures observable without coupling UI availability to actuator safety.
 
-### 20.6 Controlled reset
+### 20.7 Controlled reset
 
 The controlled reset path:
 
 1. cancels the active application timeout;
 2. ends and erases CES;
-3. forces the actuator low;
-4. stops sound;
-5. disables the LCD backlight;
-6. disables interrupts;
-7. requests `NVIC_SystemReset()`;
-8. waits indefinitely only if the reset request has not yet taken effect.
+3. clears CRS staging;
+4. erases `App_RuntimeCandidate`;
+5. invalidates and erases `App_RuntimeCredential`;
+6. forces the actuator low;
+7. stops sound;
+8. disables the LCD backlight;
+9. disables interrupts;
+10. requests `NVIC_SystemReset()`;
+11. waits indefinitely only if the reset request has not yet taken effect.
 
 ---
 
@@ -1139,21 +1417,44 @@ The controlled reset path:
 13. The current clear path does not restart the entry timeout.
 14. Authentication success resets the consecutive-failure counter.
 15. Authentication failure increments the counter with saturation.
-16. Three consecutive failures cause lockout after the third denial-feedback
+16. Normal credential entry establishes unlock as the pending authentication
+    purpose.
+17. During an active normal entry session, `C` requests credential replacement,
+    is consumed and never enters CES.
+18. A registration request replaces the pending unlock purpose without leaving
+    the active entry state and requires candidate refresh.
+19. Authentication success selects exactly one destination from the pending
+    purpose and clears it.
+20. Authentication failure, entry cancellation and entry timeout clear the
+    pending purpose.
+21. Three consecutive failures cause lockout after the third denial-feedback
     interval completes.
-17. Access-denied feedback lasts 1,500 ms.
-18. Lockout lasts 10,000 ms.
-19. Lockout expiry resets the failure counter.
-20. Authorized unlock lasts 3,000 ms.
-21. Timeout expiration is emitted only once.
-22. Only one application timeout is active at a time.
-23. Human-scale product timing never uses a blocking delay.
-24. Candidate data is erased on refresh, cancellation, authentication cleanup,
-    timeout return and controlled reset paths.
-25. LCD, LED or sound failure must not prevent a safe actuator command.
-26. LCS is the only owner of authoritative product state and failed-attempt
+22. Access-denied feedback lasts 1,500 ms.
+23. Lockout lasts 10,000 ms.
+24. Lockout expiry resets the failure counter.
+25. Authorized unlock lasts 3,000 ms.
+26. Missing credential availability at startup activates first registration
+    without installed-credential authentication.
+27. The first new credential is staged in CRS before CES is refreshed for
+    confirmation.
+28. A confirmation mismatch retains the staged first credential and refreshes
+    only the confirmation candidate while retry policy permits.
+29. CSS persistence is requested only after CRS reports a matching validated
+    credential.
+30. `App_RuntimeCredential` changes only after a successful CSS load or save.
+31. Credential-register success feedback lasts 1,500 ms and ends through one
+    `CREDENTIAL_REGISTER_DONE` timeout event.
+32. Timeout expiration is emitted only once.
+33. Only one application timeout is active at a time.
+34. Human-scale product timing never uses a blocking delay.
+35. Transient candidate data is erased on transfer, refresh, cancellation,
+    authentication cleanup, storage completion, timeout return and controlled
+    reset paths.
+36. LCD, LED or sound failure must not prevent a safe actuator command.
+37. LCS is the only owner of authoritative product state, pending
+    authentication purpose and failed-attempt
     policy.
-27. App Core APIs are serialized and non-reentrant.
+38. App Core APIs are serialized and non-reentrant.
 
 ---
 
@@ -1168,17 +1469,21 @@ The controlled reset path:
 | `App_InitLowBatteryStatusIndication()` | Build low-battery GPIO, LED and SIS path |
 | `App_InitLockActuator()` | Bind PB8 and force the safe state |
 | `App_ReadKeyboard()` | Perform one `MK_Read()` using the private handle |
-| `App_TranslateKeyToDigit()` | Convert a key code to a normalized CES input |
+| `App_TranslateKeyToInputKind()` | Convert a supported key code to semantic CES input |
 | `App_ProcessCredentialInput()` | Call CES with a semantic input |
-| `App_ClearRuntimeCandidate()` | Explicitly erase the application credential copy |
-| `App_ProcessAuthentication()` | Transfer, erase, authenticate, erase and map result to LCS |
+| `App_ClearRuntimeCandidate()` | Explicitly erase the shared App Core transfer candidate |
+| `App_ProcessAuthentication()` | Transfer and erase a CES candidate, authenticate against the runtime installed credential and map the result to LCS |
 | `App_StartTimeout()` | Validate and start/replace one application timeout |
 | `App_CancelTimeout()` | Restore the inactive timeout sentinel |
 | `App_PollTimeout()` | Convert one elapsed interval into one LCS event |
 | `App_ForceLock()` | Drive PB8 low through Platform GPIO |
 | `App_RequestUnlock()` | Drive PB8 high through Platform GPIO |
 | `App_SetLockedPresentation()` | Render idle, clear mask count, turn backlight off and select locked LED |
-| `App_SetCredentialEntryPresentation()` | Wake and render empty entry UI with keypress feedback |
+| `App_SetCESPresentation()` | Wake and render the empty normal-entry UI with keypress feedback |
+| `App_SetCRSAuthPresentation()` | Render installed-credential authorization for replacement |
+| `App_SetCRSFirstEntryPresentation()` | Render the first new-credential prompt |
+| `App_SetCRSConfirmEntryPresentation()` | Render the new-credential confirmation prompt |
+| `App_SetCRSSavedPresentation()` | Render successful credential-persistence feedback |
 | `App_ExecuteAction()` | Realize one LCS action and optionally return a follow-up event |
 | `App_DispatchLcsEvent()` | Process a bounded synchronous LCS event/action chain |
 | `App_HandleCredentialEvent()` | Map CES outcomes into timing, UI or LCS behavior |
@@ -1220,14 +1525,24 @@ The controlled reset path:
 - There is only one active application timeout runtime.
 - There is no global operational critical-fault event with precedence over all
   LCS states.
+- `CSS_HasCredential()` exposes only Boolean availability, so App Core maps both
+  an erased/not-provisioned record and any CSS record-read/validation failure to
+  first registration.
+- Dispatch-depth exhaustion requests reset through a local fallback that does
+  not explicitly erase CRS staging or App Core credential buffers before reset;
+  the normal controlled-reset action does erase them.
+- The credential-saved action requests `SGS_RINGTONE_ACCESS_GRANTED` inside
+  `App_SetCRSSavedPresentation()` and repeats the same equal-priority request
+  immediately afterward, restarting the sound pattern redundantly.
 - Most presentation-service errors are currently ignored by policy.
 - The low-battery path is initialized and updated, but App Core does not yet
   measure battery voltage or select a low-battery indication.
 - Power Management is not integrated.
-- `DRS_SCREEN_ENTRY_TIMEOUT` and `DRS_SCREEN_ENTRY_INCOMPLETE` are not selected
-  by current App Core behavior.
 - The implementation is cooperative and contains no FreeRTOS integration.
-- The fixed credential is an engineering-prototype limitation.
+- CSS persists a single credential without encryption, hashing or key
+  derivation.
+- Registration phase prompts are replaced by the generic masked-password screen
+  after the first accepted or cleared input.
 - No mechanical position sensor confirms actuator movement.
 
 ---
@@ -1260,13 +1575,17 @@ When extending App Core:
 - [ ] Actuator is low before UI initialization begins.
 - [ ] All critical initializer stages succeed on connected hardware.
 - [ ] A simulated critical initializer failure requests controlled reset.
-- [ ] Successful initialization activates LCS and restores locked idle.
+- [ ] A valid stored credential activates LCS and restores locked idle.
+- [ ] Missing or invalid credential availability selects first registration
+  without requiring authentication.
+- [ ] The stored credential is loaded successfully on the first authentication,
+  not during startup.
 
 ### 26.2 Input and credential entry
 
 - [ ] Every physical key can wake the locked UI without becoming input.
 - [ ] Digits 0 through 9 are mapped correctly after wake.
-- [ ] A through D are ignored during an active session.
+- [ ] `A`, `B` and `D` are ignored during an active session.
 - [ ] Masked length matches accepted candidate length.
 - [ ] A seventh digit cannot overflow the candidate.
 - [ ] Non-empty `*` clears without ending the session.
@@ -1274,6 +1593,8 @@ When extending App Core:
 - [ ] Incomplete `#` erases the candidate, preserves the session and restarts
   the timeout.
 - [ ] Complete `#` starts authentication.
+- [ ] `C` requests registration only during active normal entry, is consumed and
+  erases any candidate entered for unlock.
 
 ### 26.3 Correct timeouts
 
@@ -1283,16 +1604,33 @@ When extending App Core:
 - [ ] Unlock returns safe after 3,000 ms plus dispatch latency.
 - [ ] Denial feedback advances after 1,500 ms plus dispatch latency.
 - [ ] Lockout lasts 10,000 ms plus dispatch latency.
+- [ ] Registration first and confirmation entry use bounded inactivity timing.
+- [ ] Registration success feedback produces exactly one
+  `CREDENTIAL_REGISTER_DONE` event after 1,500 ms plus dispatch latency.
 - [ ] One expiration produces only one LCS event.
 - [ ] Timestamp rollover preserves correct expiration behavior.
 
 ### 26.4 Authentication and policy
 
-- [ ] Correct credential grants access.
+- [ ] Correct persisted credential grants access.
 - [ ] Incorrect credential is denied.
 - [ ] Candidate-copy or cleanup failure is treated as authentication failure.
 - [ ] Runtime candidate bytes are zero after authentication.
+- [ ] Runtime installed credential is loaded lazily only once and is replaced
+  only after successful CSS save.
 - [ ] Success resets the failure counter.
+- [ ] Normal entry routes successful authentication only to bounded unlock.
+- [ ] Registration request refreshes entry and routes successful
+  authentication only to credential-register first entry.
+- [ ] Matching first and confirmation entries reach persistent storage.
+- [ ] CRS staging and the local CSS transfer buffer are erased after storage.
+- [ ] The first two registration mismatches repeat confirmation.
+- [ ] The third registration mismatch aborts to locked idle.
+- [ ] Registration mismatches do not change authentication failure count.
+- [ ] Storage failure enters the controlled-reset fault path.
+- [ ] Failure, cancellation and timeout clear the pending authentication
+  purpose.
+- [ ] `AUTH_SUCCESS` without a pending purpose is rejected without mutation.
 - [ ] Three consecutive failures enter lockout after third denial feedback.
 - [ ] Lockout expiry resets the failure counter.
 
@@ -1301,7 +1639,8 @@ When extending App Core:
 - [ ] PB8 remains low on every denied, cancelled, timeout and fault path.
 - [ ] Timeout is active before PB8 is driven high.
 - [ ] Failed unlock request forces PB8 low.
-- [ ] Idle, entry, granted, denied and lockout screens are correct.
+- [ ] Idle, normal entry, all four registration, granted, denied and lockout
+  screens are correct.
 - [ ] Backlight behavior matches the presentation matrix.
 - [ ] LED patterns advance without blocking.
 - [ ] All ringtones advance and terminate correctly.
@@ -1326,6 +1665,8 @@ When extending App Core:
 - [LED Driver](../../Libs/Components/Led/README.md)
 - [Buzzer Driver](../../Libs/Components/Buzzer/README.md)
 - [Credential Entry Service](../../Libs/Services/Credential_Entry/README.md)
+- [Credential Register Service](../../Libs/Services/Credential_Register/README.md)
+- [Credential Storage Service](../../Libs/Services/Credential_Storage/README.md)
 - [Authentication Service](../../Libs/Services/Authentication/README.md)
 - [Lock Control Service](../../Libs/Services/Lock_Control/README.md)
 - [Timeout Validation Service](../../Libs/Services/Timeout_Validation/README.md)

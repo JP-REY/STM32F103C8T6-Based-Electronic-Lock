@@ -50,37 +50,47 @@
   * [9.1 Contract](#91-contract)
   * [9.2 API](#92-api)
   * [9.3 Time-Base Requirements](#93-time-base-requirements)
-* [10. Initialization and Ownership](#10-initialization-and-ownership)
-  * [10.1 CubeMX Responsibilities](#101-cubemx-responsibilities)
-  * [10.2 Application Composition](#102-application-composition)
-  * [10.3 Runtime Ownership](#103-runtime-ownership)
-* [11. Integration with Component Drivers](#11-integration-with-component-drivers)
-  * [11.1 Current Consumers](#111-current-consumers)
-  * [11.2 Adapter Boundary](#112-adapter-boundary)
-* [12. Timing and Blocking Contracts](#12-timing-and-blocking-contracts)
-* [13. Error Handling](#13-error-handling)
-* [14. Concurrency and ISR Policy](#14-concurrency-and-isr-policy)
-* [15. Composition Example](#15-composition-example)
-* [16. Naming and Documentation Conventions](#16-naming-and-documentation-conventions)
-  * [16.1 File and Symbol Names](#161-file-and-symbol-names)
-  * [16.2 Public Header Documentation](#162-public-header-documentation)
-  * [16.3 README Style](#163-readme-style)
-* [17. Design Decisions](#17-design-decisions)
-  * [17.1 Project-Owned Status Types](#171-project-owned-status-types)
-  * [17.2 Opaque Native Contexts](#172-opaque-native-contexts)
-  * [17.3 Synchronous I2C](#173-synchronous-i2c)
-  * [17.4 Explicit PWM Handles](#174-explicit-pwm-handles)
-  * [17.5 Centralized Time Access](#175-centralized-time-access)
-  * [17.6 No Platform-Owned RTOS Objects](#176-no-platform-owned-rtos-objects)
-* [18. Usage Constraints](#18-usage-constraints)
-* [19. Testing and Validation](#19-testing-and-validation)
-  * [19.1 GPIO](#191-gpio)
-  * [19.2 I2C](#192-i2c)
-  * [19.3 PWM](#193-pwm)
-  * [19.4 Time](#194-time)
-* [20. Known Limitations and Baseline Corrections](#20-known-limitations-and-baseline-corrections)
-* [21. Future Improvements](#21-future-improvements)
-* [22. License](#22-license)
+* [10. Flash Platform Interface](#10-flash-platform-interface)
+  * [10.1 Contract](#101-contract)
+  * [10.2 Public Data Model](#102-public-data-model)
+  * [10.3 STM32F411 Flash Organization](#103-stm32f411-flash-organization)
+  * [10.4 Write Lifecycle](#104-write-lifecycle)
+  * [10.5 API](#105-api)
+  * [10.6 Programming and Alignment Rules](#106-programming-and-alignment-rules)
+  * [10.7 Readout Protection](#107-readout-protection)
+* [11. Initialization and Ownership](#11-initialization-and-ownership)
+  * [11.1 CubeMX Responsibilities](#111-cubemx-responsibilities)
+  * [11.2 Application Composition](#112-application-composition)
+  * [11.3 Runtime Ownership](#113-runtime-ownership)
+* [12. Integration with Component Drivers](#12-integration-with-component-drivers)
+  * [12.1 Current Consumers](#121-current-consumers)
+  * [12.2 Adapter Boundary](#122-adapter-boundary)
+* [13. Timing and Blocking Contracts](#13-timing-and-blocking-contracts)
+* [14. Error Handling](#14-error-handling)
+* [15. Concurrency and ISR Policy](#15-concurrency-and-isr-policy)
+* [16. Composition Example](#16-composition-example)
+* [17. Naming and Documentation Conventions](#17-naming-and-documentation-conventions)
+  * [17.1 File and Symbol Names](#171-file-and-symbol-names)
+  * [17.2 Public Header Documentation](#172-public-header-documentation)
+  * [17.3 README Style](#173-readme-style)
+* [18. Design Decisions](#18-design-decisions)
+  * [18.1 Project-Owned Status Types](#181-project-owned-status-types)
+  * [18.2 Opaque Native Contexts](#182-opaque-native-contexts)
+  * [18.3 Synchronous I2C](#183-synchronous-i2c)
+  * [18.4 Explicit PWM Handles](#184-explicit-pwm-handles)
+  * [18.5 Centralized Time Access](#185-centralized-time-access)
+  * [18.6 No Platform-Owned RTOS Objects](#186-no-platform-owned-rtos-objects)
+  * [18.7 Flash Mechanics Without Storage Policy](#187-flash-mechanics-without-storage-policy)
+* [19. Usage Constraints](#19-usage-constraints)
+* [20. Testing and Validation](#20-testing-and-validation)
+  * [20.1 GPIO](#201-gpio)
+  * [20.2 I2C](#202-i2c)
+  * [20.3 PWM](#203-pwm)
+  * [20.4 Time](#204-time)
+  * [20.5 Flash](#205-flash)
+* [21. Known Limitations and Baseline Corrections](#21-known-limitations-and-baseline-corrections)
+* [22. Future Improvements](#22-future-improvements)
+* [23. License](#23-license)
 
 ---
 
@@ -99,16 +109,17 @@ It is a boundary, not a generic hardware framework.
 
 ### 1.2 Current Scope
 
-The current platform layer provides four interfaces:
+The current platform layer provides five interfaces:
 
 * GPIO digital write, toggle and level read;
 * blocking I2C master transmit and receive;
 * PWM channel creation, control and runtime configuration;
-* millisecond and microsecond time services.
+* millisecond and microsecond time services;
+* internal Flash lock, erase, program, read and readout-protection mechanics.
 
 The only implemented backend is STM32F411CEU6 with STM32CubeF4 HAL/CMSIS and
-CubeMX-generated peripheral handles. SPI, UART, ADC, flash, RTC and a second
-MCU backend are not part of the current platform contract.
+CubeMX-generated peripheral handles. SPI, UART, ADC, RTC and a second MCU
+backend are not part of the current platform contract.
 
 ---
 
@@ -153,7 +164,13 @@ The allowed dependency direction is:
 
 ```text
 Application -> Services -> Components/Adapters -> Platform -> HAL/CMSIS
+Application -> Hardware-backed Service -> Platform -> HAL/CMSIS
 ```
+
+The second path is used only when a service, such as Credential Storage, owns
+a hardware-backed policy that does not belong to a reusable component driver.
+The service owns the persistent format and recovery rules; Platform still owns
+only target-specific Flash mechanics.
 
 The following reverse dependencies are forbidden:
 
@@ -175,9 +192,11 @@ Platforms/
 ├── Inc/
 │   ├── GPIO_Platform_Interface.h
 │   ├── I2C_Platform_Interface.h
+│   ├── FLASH_Platform_Interface.h
 │   ├── PWM_Platform_Interface.h
 │   └── Time_Platform_Interface.h
 ├── Src/
+│   ├── FLASH_Platform_Interface.c
 │   ├── GPIO_Platform_Interface.c
 │   ├── I2C_Platform_Interface.c
 │   ├── PWM_Platform_Interface.c
@@ -201,7 +220,7 @@ The platform layer owns:
 * storage of the minimum native context required by a platform handle;
 * validation of parameters and handle lifecycle where the current contract
   defines it;
-* low-level GPIO, I2C, PWM and time mechanics;
+* low-level GPIO, I2C, PWM, time and internal-Flash mechanics;
 * documentation of target-specific constraints that affect callers;
 * preservation of the dependency boundary between components and vendor code.
 
@@ -234,8 +253,9 @@ root architecture.
 | I2C | [`I2C_Platform_Interface.h`](Inc/I2C_Platform_Interface.h) | blocking `HAL_I2C_Master_Transmit` and `HAL_I2C_Master_Receive` | PCF8574 driver |
 | PWM | [`PWM_Platform_Interface.h`](Inc/PWM_Platform_Interface.h) | STM32 TIM HAL plus timer-register access | buzzer driver and HD44780 PWM backlight adapter |
 | Time | [`Time_Platform_Interface.h`](Inc/Time_Platform_Interface.h) | HAL tick for milliseconds and TIM2 for microseconds | protocol initialization and time-aware component logic |
+| Flash | [`FLASH_Platform_Interface.h`](Inc/FLASH_Platform_Interface.h) | STM32 Flash/FlashEx HAL plus volatile memory-mapped read | Credential Storage Service |
 
-All four interfaces are synchronous. None creates a task, starts a scheduler,
+All five interfaces are synchronous. None creates a task, starts a scheduler,
 allocates memory or serializes concurrent access.
 
 ---
@@ -569,14 +589,187 @@ Correct microsecond operation requires TIM2 to:
 * remain reserved for the platform time base.
 
 The microsecond requirements are not fully satisfied by the current baseline;
-see [Section 20](#20-known-limitations-and-baseline-corrections) before relying
+see [Section 21](#21-known-limitations-and-baseline-corrections) before relying
 on `Platform_DelayUs` across a counter wrap.
 
 ---
 
-## 10. Initialization and Ownership
+## 10. Flash Platform Interface
 
-### 10.1 CubeMX Responsibilities
+### 10.1 Contract
+
+The Flash Platform Interface exposes the target-dependent mechanics needed by
+hardware-backed storage services while keeping STM32 HAL types and sector
+constants out of those services. It supports:
+
+* locking and unlocking the Flash programming interface;
+* erasing the one complete sector that contains a supplied address;
+* programming byte, halfword, word or double-word widths;
+* reading one eight-byte-aligned 64-bit value through memory-mapped Flash;
+* configuring supported STM32 readout-protection levels.
+
+The interface does not allocate a persistent region, define a record format,
+validate credential data, calculate integrity metadata, manage wear, choose a
+recovery policy or decide when an application should save. Those decisions
+belong to the higher-level storage owner, currently the
+[Credential Storage Service](../Libs/Services/Credential_Storage/README.md).
+
+Every function is synchronous. The module owns no public handle, mutable
+runtime object, task, queue, mutex or interrupt callback and requires no
+initialization function.
+
+### 10.2 Public Data Model
+
+| Type | Values | Meaning |
+|:---|:---|:---|
+| `FLASH_OpStatus_t` | `FLASH_OPERATION_OK`, `FLASH_OPERATION_FAIL` | project-owned completion result; HAL details remain private |
+| `FLASH_ProgramType_t` | `FLASH_PROGRAM_BYTE`, `FLASH_PROGRAM_HALFWORD`, `FLASH_PROGRAM_WORD`, `FLASH_PROGRAM_DOUBLEWORD` | requested programming width and natural alignment |
+| `FLASH_ProtectionLevel_t` | `FLASH_PROTECTION_LEVEL_0`, `FLASH_PROTECTION_LEVEL_1` | reversible readout-protection levels exposed by this interface |
+
+`PFLASH_Program` accepts a `uint64_t Data` value for every width. Only the
+least-significant 8, 16, 32 or 64 bits are programmed according to
+`ProgramType`. Callers shall use the named enumerators and shall not depend on
+their numeric values or on STM32 `FLASH_TYPEPROGRAM_x` encodings.
+
+`FLASH_OPERATION_FAIL` intentionally combines argument-validation and STM32
+operation failures. Higher layers decide whether that result means retry,
+abandoning a transaction, entering a fault path or treating a record as
+unavailable.
+
+### 10.3 STM32F411 Flash Organization
+
+The backend models the 512 KiB STM32F411CEU6 internal Flash interval from
+`0x08000000` through `0x0807FFFF`:
+
+| Sector | Start | End | Size |
+|---:|---:|---:|---:|
+| 0 | `0x08000000` | `0x08003FFF` | 16 KiB |
+| 1 | `0x08004000` | `0x08007FFF` | 16 KiB |
+| 2 | `0x08008000` | `0x0800BFFF` | 16 KiB |
+| 3 | `0x0800C000` | `0x0800FFFF` | 16 KiB |
+| 4 | `0x08010000` | `0x0801FFFF` | 64 KiB |
+| 5 | `0x08020000` | `0x0803FFFF` | 128 KiB |
+| 6 | `0x08040000` | `0x0805FFFF` | 128 KiB |
+| 7 | `0x08060000` | `0x0807FFFF` | 128 KiB |
+
+`PFLASH_EraseSectorAt(Address)` accepts any valid byte address and resolves the
+containing sector internally. The operation always erases that complete sector.
+It never erases only the requested address or a record-sized range.
+
+Both project linker scripts reserve sector 7 for credential persistence:
+
+```text
+Executable FLASH:     0x08000000 .. 0x0805FFFF  (384 KiB)
+Credential sector:    0x08060000 .. 0x0807FFFF  (128 KiB)
+```
+
+This reservation is a storage-policy decision expressed by the linker and CSS.
+The Platform implementation only knows the physical sector organization and
+can mechanically operate on any valid internal-Flash sector.
+
+### 10.4 Write Lifecycle
+
+One erase/program transaction follows this lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Locked
+    Locked --> Unlocked: PFLASH_Unlock succeeds
+    Unlocked --> Erased: PFLASH_EraseSectorAt when erase is required
+    Unlocked --> Programming: PFLASH_Program when destination is already erased
+    Erased --> Programming: PFLASH_Program
+    Programming --> Programming: additional bounded program operation
+    Programming --> Locked: PFLASH_Lock
+    Erased --> Locked: PFLASH_Lock after failure
+    Unlocked --> Locked: PFLASH_Lock after failure
+```
+
+The higher-level owner is responsible for this sequence and shall attempt
+`PFLASH_Lock()` on every path reached after a successful unlock. The Platform
+does not automatically erase before programming and does not automatically
+lock after an erase or program call.
+
+Memory-mapped reads do not require an unlock. Locking controls erase and
+program operations, not ordinary instruction or data reads.
+
+### 10.5 API
+
+```c
+FLASH_OpStatus_t PFLASH_Lock(void);
+FLASH_OpStatus_t PFLASH_Unlock(void);
+
+FLASH_OpStatus_t PFLASH_SetProtection(
+    FLASH_ProtectionLevel_t ProtectionLevel);
+
+FLASH_OpStatus_t PFLASH_EraseSectorAt(uint32_t Address);
+
+FLASH_OpStatus_t PFLASH_Program(
+    FLASH_ProgramType_t ProgramType,
+    uint32_t Address,
+    uint64_t Data);
+
+FLASH_OpStatus_t PFLASH_ReadDoubleWord(
+    uint32_t Address,
+    uint64_t *Data);
+```
+
+| Function | Preconditions | Side effects |
+|:---|:---|:---|
+| `PFLASH_Lock` | none | prevents later erase/program until unlock |
+| `PFLASH_Unlock` | serialized caller ownership | enables erase/program operations |
+| `PFLASH_SetProtection` | valid exposed level and approved destructive/reset policy | programs option bytes; successful reload resets the MCU |
+| `PFLASH_EraseSectorAt` | valid internal-Flash address and unlocked interface | erases every byte in the containing sector |
+| `PFLASH_Program` | valid type/range/alignment, unlocked interface and erased destination bits | programs the selected width and waits for completion |
+| `PFLASH_ReadDoubleWord` | valid destination and eight-byte-aligned internal-Flash address | copies one 64-bit memory-mapped value; no unlock required |
+
+`PFLASH_ReadDoubleWord` leaves the destination unchanged when validation fails.
+It performs a volatile memory-mapped read and does not invoke STM32 HAL.
+
+### 10.6 Programming and Alignment Rules
+
+| Program type | Width | Required destination alignment | Supply constraint used by CSS |
+|:---|---:|---:|:---|
+| `FLASH_PROGRAM_BYTE` | 8 bits | 1 byte | supported but not used by CSS |
+| `FLASH_PROGRAM_HALFWORD` | 16 bits | 2 bytes | supported but not used by CSS |
+| `FLASH_PROGRAM_WORD` | 32 bits | 4 bytes | used by CSS with normal 3.3 V operation |
+| `FLASH_PROGRAM_DOUBLEWORD` | 64 bits | 8 bytes | requires the external Vpp conditions specified by STM32F4 documentation |
+
+Internal Flash programming can clear bits from one to zero but cannot restore a
+stored zero to one. The containing sector must be erased before programming a
+new value that requires any zero-to-one transition.
+
+CSS stores an eight-byte logical record but deliberately programs it with two
+32-bit word operations. That policy avoids depending on external Vpp. The
+marker and CRC reside in the second word, allowing the storage layer to reject
+a transaction interrupted after only the first word.
+
+The backend rejects a program request when the selected width is unsupported,
+the complete write would leave internal Flash, or Address is not a multiple of
+the selected byte width. The read operation separately requires eight-byte
+alignment.
+
+### 10.7 Readout Protection
+
+`PFLASH_SetProtection` exposes Level 0 and Level 1 only. Level 2 is omitted
+because it is irreversible.
+
+The operation programs the RDP option byte and launches option-byte reload. A
+successful reload resets the target, so execution is not expected to return.
+If the function does return normally, its current contract reports
+`FLASH_OPERATION_FAIL`.
+
+> [!WARNING]
+> Changing STM32 RDP from Level 1 back to Level 0 causes a complete internal
+> Flash mass erase. Firmware and the credential record are both destroyed.
+
+Readout protection is a product security and provisioning decision. CSS does
+not enable or change it automatically when a credential is saved.
+
+---
+
+## 11. Initialization and Ownership
+
+### 11.1 CubeMX Responsibilities
 
 [`Electronic-Lock.ioc`](../Electronic-Lock.ioc) and generated `Core/` code own:
 
@@ -590,7 +783,11 @@ on `Platform_DelayUs` across a counter wrap.
 Platform code shall not silently duplicate or override static CubeMX
 configuration unless a public runtime operation explicitly requires it.
 
-### 10.2 Application Composition
+Internal Flash has no generated peripheral handle. The active linker script
+owns the executable/persistent address partition, while the Flash Platform
+backend owns target sector mapping and STM32 HAL operation translation.
+
+### 11.2 Application Composition
 
 The application composition root owns construction and dependency injection.
 It may include both generated peripheral declarations and platform headers,
@@ -602,9 +799,13 @@ then bind:
 * `htim4` and its configured channel to the LCD backlight PWM handle;
 * project-owned handles and adapter operations to component instances.
 
+Credential persistence requires no injected Flash handle. The application uses
+the Credential Storage Service, which owns the reserved address and invokes the
+stateless Flash Platform API internally.
+
 No component driver shall discover global HAL handles by itself.
 
-### 10.3 Runtime Ownership
+### 11.3 Runtime Ownership
 
 | Resource | V1 runtime owner | Rule |
 |:---|:---|:---|
@@ -614,6 +815,7 @@ No component driver shall discover global HAL handles by itself.
 | TIM3 buzzer PWM | Application Task | no direct access from other tasks or ISR |
 | TIM4 backlight PWM | Application Task | no direct access from other tasks or ISR |
 | TIM2 and HAL time reads | read-only multi-context access where safe | no module may reconfigure the time base |
+| internal Flash sector 7 | Credential Storage Service through Application orchestration | no concurrent erase/program/protection operation; CSS exclusively owns persistent contents |
 
 Ownership is the primary concurrency mechanism. If a future design introduces
 multiple writers to one peripheral, its synchronization and failure behavior
@@ -621,9 +823,9 @@ shall be designed above the platform layer before the ownership rule changes.
 
 ---
 
-## 11. Integration with Component Drivers
+## 12. Integration with Component Drivers
 
-### 11.1 Current Consumers
+### 12.1 Current Consumers
 
 | Component or adapter | Platform dependency | Integration purpose |
 |:---|:---|:---|
@@ -635,11 +837,12 @@ shall be designed above the platform layer before the ownership rule changes.
 | HD44780 PCF8574 Bus Adapter | PCF8574 component | converts LCD bus operations to expander writes |
 | [Buzzer driver](../Libs/Components/Buzzer/README.md) | PWM | tone frequency, duty and output state |
 | HD44780 PWM Backlight Adapter | PWM | converts normalized backlight level to PWM duty |
+| [Credential Storage Service](../Libs/Services/Credential_Storage/README.md) | Flash | persistent credential record read, erase, program and lock lifecycle |
 
 The table describes the intended dependency path. Component-specific details
 belong in each component README and public header.
 
-### 11.2 Adapter Boundary
+### 12.2 Adapter Boundary
 
 An adapter is used when a component contract is narrower or semantically
 different from the raw platform capability. For example:
@@ -660,7 +863,7 @@ tasks, queues or user-visible policy.
 
 ---
 
-## 12. Timing and Blocking Contracts
+## 13. Timing and Blocking Contracts
 
 | Operation | Blocking | Normal runtime rule |
 |:---|:---:|:---|
@@ -670,6 +873,10 @@ tasks, queues or user-visible policy.
 | millisecond timestamp read | no | permitted for elapsed-time checks |
 | microsecond timestamp read | no | permitted only after the TIM2 baseline is corrected and validated |
 | millisecond/microsecond delay | yes, busy wait | bounded component protocol/init timing only |
+| Flash lock/unlock | no intentional wait | only inside a serialized storage transaction |
+| Flash read | no intentional wait | volatile memory-mapped read; no unlock required |
+| Flash erase/program | yes | Application-owned credential update path only; never ISR or polling-loop work |
+| Flash protection change | resets on success | provisioning/security flow only; never normal application runtime |
 
 The platform layer does not make blocking calls non-blocking merely by hiding
 HAL. Callers shall preserve the execution-model contract defined by the root
@@ -690,7 +897,7 @@ not yet meet that requirement for microsecond timing.
 
 ---
 
-## 13. Error Handling
+## 14. Error Handling
 
 Platform functions follow three error-reporting forms:
 
@@ -700,6 +907,7 @@ Platform functions follow three error-reporting forms:
 | I2C | explicit `OK`, `ERROR`, `BUSY`, `TIMEOUT` | preserve meaningful transport failure for component/application policy |
 | PWM | `PWM_OPERATION_FAIL`; default getter values | trust lifecycle and setter results; do not infer validity from a getter alone |
 | Time | no status return | startup validation and configuration correctness are mandatory |
+| Flash | `FLASH_OPERATION_FAIL` | storage owner preserves lock discipline and maps failure into storage/application policy |
 
 Rules:
 
@@ -716,16 +924,18 @@ from starting.
 
 ---
 
-## 14. Concurrency and ISR Policy
+## 15. Concurrency and ISR Policy
 
 Platform interfaces provide no internal locking and are not generally
-reentrant. Safe use relies on the ownership table in Section 10.
+reentrant. Safe use relies on the ownership table in Section 11.
 
 The following rules apply:
 
 * one task owns each mutable peripheral and its platform handle;
 * a platform handle shall not be mutated concurrently;
-* I2C and PWM calls shall not run from ISRs in V1;
+* I2C, PWM and Flash mutation calls shall not run from ISRs in V1;
+* Flash erase, program, protection and lock-state operations shall be serialized
+  by one application-owned storage flow;
 * platform callbacks shall not call application logic;
 * an ISR, if later introduced for wake-up, shall capture minimal information
   and defer all device work to a task;
@@ -740,7 +950,7 @@ the shared resource.
 
 ---
 
-## 15. Composition Example
+## 16. Composition Example
 
 The following example belongs at the STM32 application composition boundary.
 It demonstrates native-handle injection without exposing those types through a
@@ -810,11 +1020,16 @@ I2C_OpStatus_t status = PI2C_Write(
 In normal product code, the PCF8574 driver owns this transport call; the
 application shall not bypass the component driver to write the expander.
 
+The equivalent rule applies to internal Flash. Application code shall use the
+Credential Storage Service rather than hard-code the persistent address or call
+erase/program mechanics directly. Direct Flash calls remain appropriate only
+inside the storage owner or a dedicated target-level verification harness.
+
 ---
 
-## 16. Naming and Documentation Conventions
+## 17. Naming and Documentation Conventions
 
-### 16.1 File and Symbol Names
+### 17.1 File and Symbol Names
 
 New platform modules shall follow the established pattern unless a repository-
 wide refactor changes it consistently:
@@ -834,7 +1049,7 @@ peripheral or project. Existing public names are compatibility contracts;
 renaming them requires updating every caller and the relevant documentation in
 the same change.
 
-### 16.2 Public Header Documentation
+### 17.2 Public Header Documentation
 
 Public headers shall use technical English and Doxygen-compatible comments.
 For every public function, document:
@@ -852,7 +1067,7 @@ Documentation shall describe implemented behavior, not hypothetical DMA,
 interrupt or multi-target variants. Private helpers may be documented when
 their arithmetic or register behavior is non-obvious.
 
-### 16.3 README Style
+### 17.3 README Style
 
 Platform documentation follows the repository standard:
 
@@ -871,49 +1086,60 @@ Clarity and verifiability take precedence over abstraction vocabulary.
 
 ---
 
-## 17. Design Decisions
+## 18. Design Decisions
 
-### 17.1 Project-Owned Status Types
+### 18.1 Project-Owned Status Types
 
 Vendor return codes stop at the platform boundary. This keeps components from
 depending on STM32 HAL and gives each interface only the result states its
 callers need.
 
-### 17.2 Opaque Native Contexts
+### 18.2 Opaque Native Contexts
 
 Generated handle types are injected as `void *` at the composition boundary
 and interpreted only by the target implementation. This is sufficient for the
 current single-target project without introducing function tables or a runtime
 backend registry.
 
-### 17.3 Synchronous I2C
+### 18.3 Synchronous I2C
 
 The LCD path is owned by one Application Task, transfers are short and a finite
 timeout is mandatory. A synchronous API is therefore simpler and adequate for
 V1. DMA or asynchronous completion would add lifecycle and concurrency costs
 without a demonstrated current need.
 
-### 17.4 Explicit PWM Handles
+### 18.4 Explicit PWM Handles
 
 PWM retains channel configuration and cached runtime state, so it uses a
 project-owned handle and a creation/initialization lifecycle. Separate TIM3 and
 TIM4 allocation prevents buzzer frequency changes from altering backlight PWM.
 
-### 17.5 Centralized Time Access
+### 18.5 Centralized Time Access
 
 Time access is project-owned so reusable components do not depend on HAL tick
 or a specific timer symbol. Blocking delay functions remain narrowly scoped to
 protocol mechanics; they are not an application scheduling mechanism.
 
-### 17.6 No Platform-Owned RTOS Objects
+### 18.6 No Platform-Owned RTOS Objects
 
 V1 achieves concurrency safety through explicit peripheral ownership. Keeping
 tasks, queues and mutexes out of the platform layer preserves deterministic
 module boundaries and avoids hidden blocking.
 
+### 18.7 Flash Mechanics Without Storage Policy
+
+The Flash Platform owns only STM32 range validation, sector resolution,
+alignment, HAL programming-width translation, option-byte mechanics and the
+volatile memory-mapped read. CSS owns the credential address, serialized record,
+integrity checks, erase decision, write ordering and post-write verification.
+
+This boundary prevents a hardware interface from learning credential semantics
+and prevents the storage service from including STM32 HAL headers or sector
+identifiers.
+
 ---
 
-## 18. Usage Constraints
+## 19. Usage Constraints
 
 1. Initialize CubeMX-generated peripherals before constructing platform
    handles.
@@ -930,28 +1156,38 @@ module boundaries and avoids hidden blocking.
 12. Do not include STM32 HAL headers in component public interfaces.
 13. Do not add an abstraction until a real component or second backend needs
     the corresponding capability.
+14. Operate on internal Flash only through a serialized owner and never from an
+    ISR or periodic polling loop.
+15. Call `PFLASH_Lock()` on every path reached after a successful unlock.
+16. Erase only a linker-reserved sector whose complete contents belong to the
+    requesting storage policy.
+17. Use naturally aligned addresses and an erased destination for programming.
+18. Do not use double-word programming under a 3.3 V-only supply; use word or
+    narrower operations unless the required external Vpp is deliberately present.
+19. Treat readout-protection changes as provisioning operations with reset and
+    mass-erase consequences, not ordinary runtime configuration.
 
 ---
 
-## 19. Testing and Validation
+## 20. Testing and Validation
 
 Platform verification shall combine contract tests with target measurements.
 
-### 19.1 GPIO
+### 20.1 GPIO
 
 * reject null setup and uninitialized write handles;
 * verify index-to-mask mapping for pins `0` through `15`;
 * verify set, reset and toggle electrical output;
 * verify input reads report LOW/HIGH and invalid use is handled safely.
 
-### 19.2 I2C
+### 20.2 I2C
 
 * verify a public 7-bit address is shifted exactly once;
 * verify all HAL statuses map to the correct platform status;
 * verify timeout units and the `20 ms` product bound at call sites;
 * exercise PCF8574 success, NACK/error, busy and timeout paths on target.
 
-### 19.3 PWM
+### 20.3 PWM
 
 * verify create/init lifecycle and invalid-handle rejection;
 * verify enable/disable idempotence;
@@ -961,7 +1197,7 @@ Platform verification shall combine contract tests with target measurements.
 * verify polarity and shared-timer effects;
 * verify safe output state after disable and failed initialization.
 
-### 19.4 Time
+### 20.4 Time
 
 * verify millisecond elapsed-time behavior across HAL tick wrap;
 * verify TIM2 counter frequency with a logic analyzer or reference timer;
@@ -969,13 +1205,29 @@ Platform verification shall combine contract tests with target measurements.
 * verify initialization order and continuous time-base operation;
 * verify blocking delays are absent from product-level state/effect code.
 
+### 20.5 Flash
+
+* reject zero-length/private range-helper cases, out-of-range addresses and
+  misaligned read/program requests through focused host or target seams;
+* verify every public programming type maps to the correct HAL constant and
+  byte width;
+* verify address-to-sector mapping at every sector boundary;
+* verify erase removes the complete selected sector and no adjacent sector;
+* verify program operations fail while locked and succeed after unlock on target;
+* verify byte, halfword and word programming at supported supply conditions;
+* do not exercise double-word programming without the required external Vpp;
+* verify 64-bit readback and invalid-destination behavior;
+* verify CSS restores the lock after success and every post-unlock failure path;
+* validate Level 0/Level 1 provisioning only with a recoverable target image and
+  an explicit expectation of reset or mass erase.
+
 Host fakes are appropriate only where they test a project-owned contract
 without reproducing STM32 HAL internals. Register timing, alternate functions,
 clock-tree behavior and electrical output require target tests.
 
 ---
 
-## 20. Known Limitations and Baseline Corrections
+## 21. Known Limitations and Baseline Corrections
 
 The following items describe the repository baseline and shall be resolved or
 consciously accepted before the affected capability is treated as production-
@@ -1040,13 +1292,26 @@ ready:
 16. **Build-configuration parity:** Debug currently includes project `App`,
     `Libs` and `Platforms` sources, while Release configuration requires
     reconciliation before it can serve as an equivalent product build.
+17. **Flash failure detail:** `FLASH_OPERATION_FAIL` does not preserve the HAL
+    status, Flash error flags or failing erase sector. The current CSS contract
+    needs only success/failure, but target diagnostics may require a separate
+    non-sensitive fault channel later.
+18. **Protection completion contract:** a successful option-byte launch resets
+    the target, so `PFLASH_SetProtection` cannot return a normal success result.
+    Provisioning code must validate the resulting protection level after reboot.
+19. **Target-specific memory map:** internal-Flash start/end addresses and sector
+    boundaries are fixed to the 512 KiB STM32F411CEU6 organization. A second MCU
+    backend requires a different private implementation.
+20. **Erase granularity:** the smallest exposed erase operation is one physical
+    sector. Higher layers must reserve and own the complete sector even when the
+    persistent record occupies only a few bytes.
 
 These are concrete engineering constraints, not reasons to add a broad
 framework. Corrections should remain local and testable.
 
 ---
 
-## 21. Future Improvements
+## 22. Future Improvements
 
 Improvements shall be driven by validated product or test needs. The current
 priority order is:
@@ -1060,9 +1325,13 @@ priority order is:
 6. normalize time getter declarations to strict `(void)` prototypes;
 7. make PWM getters return explicit validity where compatibility permits;
 8. reconcile Debug and Release source inclusion;
-9. add focused host fakes only for component tests that need deterministic
-   GPIO, I2C, PWM or time behavior;
-10. separate target-specific source directories only when a second backend is
+9. add target Flash tests for sector boundaries, alignment, lock discipline and
+   readback under the actual supply conditions;
+10. add focused host fakes only for modules that need deterministic GPIO, I2C,
+    PWM, time or Flash contract behavior;
+11. introduce non-sensitive Flash failure diagnostics only when field or
+    provisioning requirements justify the larger contract;
+12. separate target-specific source directories only when a second backend is
    actually introduced.
 
 SPI, UART, ADC, asynchronous I2C and DMA support shall be added only when an
@@ -1071,6 +1340,6 @@ documented public semantics or introduce an explicit versioned contract change.
 
 ---
 
-## 22. License
+## 23. License
 
 This module is distributed under the repository [MIT License](../LICENSE).
