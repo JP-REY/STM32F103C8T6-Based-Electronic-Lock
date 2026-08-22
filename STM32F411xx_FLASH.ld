@@ -56,8 +56,13 @@ ENTRY(Reset_Handler)
 MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 512K
+FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 384K
+CREDENTIAL_FLASH (r) : ORIGIN = 0x08060000, LENGTH = 128K
 }
+
+/* Sector 7 is exclusively reserved for the Credential Storage Service. */
+__credential_storage_start__ = ORIGIN(CREDENTIAL_FLASH);
+__credential_storage_end__ = ORIGIN(CREDENTIAL_FLASH) + LENGTH(CREDENTIAL_FLASH);
 
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
