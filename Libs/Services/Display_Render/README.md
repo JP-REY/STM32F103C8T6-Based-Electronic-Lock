@@ -60,6 +60,8 @@ The application does not send arbitrary strings to the LCD. It requests a semant
 
 During credential entry, every accepted position is represented by a custom closed-padlock character. The service learns only the credential length; digit values never cross its public boundary.
 
+The fixed screen catalog covers locked idle, normal PIN entry, credential-replacement authorization, first and confirmation entry, successful persistence, access outcomes and lockout feedback.
+
 The acronym `DRS` means **Display Render Service** and prefixes every public symbol provided by the module.
 
 ---
@@ -188,7 +190,7 @@ The Display Render Service is responsible for:
 - Owning the single requested logical display view.
 - Tracking successfully committed render state.
 - Programming the custom lock character into LCD CGRAM position zero.
-- Rendering the empty password-entry screen during initialization.
+- Rendering the blank locked-idle screen during initialization.
 - Mapping semantic screen identifiers to fixed two-line text.
 - Validating semantic screen identifiers.
 - Validating the requested entered-digit count.
@@ -209,7 +211,7 @@ The service is explicitly not responsible for:
 - Counting failed authentication attempts.
 - Applying retry, timeout or lockout policy.
 - Choosing how long a feedback screen remains visible.
-- Automatically returning to the password-entry screen.
+- Automatically transitioning to locked idle, password entry or another screen.
 - Selecting a screen from application events.
 - Controlling the lock actuator.
 - Producing LED or sound effects.
@@ -242,11 +244,15 @@ typedef enum
 ```c
 typedef enum
 {
+    DRS_SCREEN_IDLE,
     DRS_SCREEN_PASSWORD_ENTRY,
-    DRS_SCREEN_ENTRY_TIMEOUT,
-    DRS_SCREEN_ENTRY_INCOMPLETE,
+    DRS_SCREEN_CREDENTIAL_REGISTER_AUTH,
+    DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY,
+    DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
+    DRS_SCREEN_CREDENTIAL_REGISTER_SAVED,
     DRS_SCREEN_ACCESS_GRANTED,
     DRS_SCREEN_ACCESS_DENIED,
+    DRS_SCREEN_LOCKOUT,
     DRS_SCREEN_COUNT
 
 }DRS_Screen_t;
@@ -340,7 +346,7 @@ typedef struct
 
 These declarations are implementation details. They are shown here to explain behavior, not to establish an application-facing allocation contract.
 
-Before `DRS_Init()`, static initialization leaves `lcd` null and `initialized` false. Successful initialization binds the LCD, establishes the empty password-entry request and renders that request immediately.
+Before `DRS_Init()`, static initialization leaves `lcd` null and `initialized` false. Successful initialization binds the LCD, establishes the blank locked-idle request and renders that request immediately.
 
 ---
 
@@ -350,15 +356,19 @@ The screen-content map is fixed at compile time:
 
 | Screen | First line | Second line | Dynamic content |
 | --- | --- | --- | --- |
-| `DRS_SCREEN_PASSWORD_ENTRY` | `Insert Password:` | Empty before masking | Zero through six lock characters from column zero |
-| `DRS_SCREEN_ENTRY_TIMEOUT` | `Entry Timeout` | Empty | None |
-| `DRS_SCREEN_ENTRY_INCOMPLETE` | `Entry Incomplete` | Empty | None |
-| `DRS_SCREEN_ACCESS_GRANTED` | `Access Granted` | `Welcome!` | None |
+| `DRS_SCREEN_IDLE` | Empty | Empty | None |
+| `DRS_SCREEN_PASSWORD_ENTRY` | `PIN:` | Empty before masking | Zero through six lock characters from column zero |
+| `DRS_SCREEN_CREDENTIAL_REGISTER_AUTH` | `Access PIN:` | Empty | None |
+| `DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY` | `Update PIN:` | Empty | None |
+| `DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `Confirm PIN:` | Empty | None |
+| `DRS_SCREEN_CREDENTIAL_REGISTER_SAVED` | `PIN updated!` | Empty | None |
+| `DRS_SCREEN_ACCESS_GRANTED` | `Access Granted!` | Empty | None |
 | `DRS_SCREEN_ACCESS_DENIED` | `Access Denied!` | Empty | None |
+| `DRS_SCREEN_LOCKOUT` | `Lockout!` | Empty | None |
 
 A full-screen transition clears the display before printing both mapped lines. The clear prevents shorter or intentionally empty content from leaving characters from the preceding screen.
 
-Only the password-entry screen renders `entered_digits`. The four feedback screens ignore digit-count differences while they remain selected.
+Only `DRS_SCREEN_PASSWORD_ENTRY` renders `entered_digits`. Every other screen is static and ignores digit-count differences while it remains selected.
 
 ---
 
@@ -407,7 +417,7 @@ The expected lifecycle is:
 2. The composition root calls `DRS_Init(&Lcd)` once the LCD is ready.
 3. `DRS_Init()` resets all singleton view state.
 4. The service programs the custom lock character.
-5. The service renders the empty password-entry screen immediately.
+5. The service renders the blank locked-idle screen immediately.
 6. The application submits screen and digit-count requests through public functions.
 7. The application calls `DRS_Update()` to apply pending visible changes.
 
@@ -415,7 +425,7 @@ There is no public deinitialization function. Calling `DRS_Init()` again rebinds
 
 If initialization fails, the implementation clears its retained LCD pointer. A later `DRS_Update()` therefore fails until a subsequent `DRS_Init()` succeeds.
 
-`DRS_SetScreen()` validates only the screen identifier and does not check the initialization flag. A valid call made before initialization can update the zero-initialized private request, but the next `DRS_Init()` resets that request to `DRS_SCREEN_PASSWORD_ENTRY`. Normal integration therefore initializes the service before submitting any screen request.
+`DRS_SetScreen()` validates only the screen identifier and does not check the initialization flag. A valid call made before initialization can update the zero-initialized private request, but the next `DRS_Init()` resets that request to `DRS_SCREEN_IDLE`. Normal integration therefore initializes the service before submitting any screen request.
 
 `DRS_SetEnteredDigits()` explicitly requires successful initialization.
 
@@ -512,7 +522,7 @@ Initializes or reinitializes the singleton.
 Behavior:
 
 - Retains the caller-owned LCD pointer.
-- Requests `DRS_SCREEN_PASSWORD_ENTRY` with zero entered digits.
+- Requests `DRS_SCREEN_IDLE` with zero entered digits.
 - Marks the rendered screen with `DRS_SCREEN_COUNT` so a full render is required.
 - Resets the rendered digit count to zero.
 - Programs the closed-padlock character in CGRAM position zero.
@@ -541,7 +551,7 @@ Stores a semantic screen in the requested view without accessing the LCD.
 
 Returns:
 
-- `DRS_OPERATION_OK` for values from `DRS_SCREEN_PASSWORD_ENTRY` through `DRS_SCREEN_ACCESS_DENIED`.
+- `DRS_OPERATION_OK` for values from `DRS_SCREEN_IDLE` through `DRS_SCREEN_LOCKOUT`.
 - `DRS_OPERATION_FAIL` for `DRS_SCREEN_COUNT`, negative enumeration values or values above the screen boundary.
 
 The function does not validate the initialization flag. The expected lifecycle still requires `DRS_Init()` first because initialization resets the request and supplies the LCD used by `DRS_Update()`.
@@ -634,15 +644,21 @@ static bool Display_ShowScreen(DRS_Screen_t Screen)
 Typical application calls:
 
 ```c
+/* Normal credential entry starts from the blank locked-idle screen. */
+(void)DRS_SetEnteredDigits(0U);
+(void)Display_ShowScreen(DRS_SCREEN_PASSWORD_ENTRY);
+
 /* One credential digit was accepted by the entry policy. */
 (void)Display_ShowEntryLength(1U);
 
-/* Confirmation occurred before the complete credential was entered. */
-(void)Display_ShowScreen(DRS_SCREEN_ENTRY_INCOMPLETE);
+/* Credential replacement requires the installed PIN first. */
+(void)Display_ShowScreen(DRS_SCREEN_CREDENTIAL_REGISTER_AUTH);
 
-/* The application later starts a fresh password-entry presentation. */
-(void)DRS_SetEnteredDigits(0U);
-(void)Display_ShowScreen(DRS_SCREEN_PASSWORD_ENTRY);
+/* A replacement PIN was persisted and verified successfully. */
+(void)Display_ShowScreen(DRS_SCREEN_CREDENTIAL_REGISTER_SAVED);
+
+/* The application later restores the blank locked-idle presentation. */
+(void)Display_ShowScreen(DRS_SCREEN_IDLE);
 ```
 
 Production application code should handle every returned status according to the system fault policy.
@@ -664,13 +680,13 @@ sequenceDiagram
     DRS->>LCD: LCD_CreateChar(0, lock bitmap)
     DRS->>DRS: initialized = true
     DRS->>LCD: LCD_Clear()
-    DRS->>LCD: LCD_PrintLine(0, "Insert Password:")
+    DRS->>LCD: LCD_PrintLine(0, "")
     DRS->>LCD: LCD_PrintLine(1, "")
     DRS->>DRS: Commit rendered screen
     DRS-->>ROOT: DRS_OPERATION_OK
 ```
 
-After successful initialization, the physical LCD already shows the empty password-entry screen. An immediate extra `DRS_Update()` performs no LCD transaction.
+After successful initialization, the physical LCD already shows the blank locked-idle screen. An immediate extra `DRS_Update()` performs no LCD transaction.
 
 ### Password Entry
 
@@ -679,6 +695,10 @@ sequenceDiagram
     participant APP as Application
     participant DRS as DRS Singleton
     participant LCD as LCD Driver
+
+    APP->>DRS: DRS_SetScreen(PASSWORD_ENTRY)
+    APP->>DRS: DRS_Update()
+    DRS->>LCD: Render "PIN:" with zero locks
 
     APP->>DRS: DRS_SetEnteredDigits(1)
     DRS-->>APP: Request stored
@@ -694,6 +714,30 @@ sequenceDiagram
     DRS->>DRS: Commit rendered digit count = 2
 ```
 
+### Credential Registration Screens
+
+Credential registration uses four semantic screens selected explicitly by the application as the product advances:
+
+```mermaid
+sequenceDiagram
+    participant APP as Application
+    participant DRS as DRS Singleton
+    participant LCD as LCD Driver
+
+    APP->>DRS: Select CREDENTIAL_REGISTER_AUTH then update
+    DRS->>LCD: Render "Access PIN:"
+    APP->>DRS: Select CREDENTIAL_REGISTER_FIRST_ENTRY then update
+    DRS->>LCD: Render "Update PIN:"
+    APP->>DRS: Select CREDENTIAL_REGISTER_CONFIRM_ENTRY then update
+    DRS->>LCD: Render "Confirm PIN:"
+    APP->>DRS: Select CREDENTIAL_REGISTER_SAVED then update
+    DRS->>LCD: Render "PIN updated!"
+    APP->>DRS: Select IDLE then update after feedback timeout
+    DRS->>LCD: Render blank locked-idle screen
+```
+
+These four registration screens contain fixed text. While one remains selected, changing `entered_digits` does not render lock characters or generate LCD traffic by itself. The application must explicitly select `DRS_SCREEN_PASSWORD_ENTRY` when masked progress is required and owns the success-feedback timeout before returning to `DRS_SCREEN_IDLE`.
+
 ### Screen Transition
 
 ```c
@@ -703,7 +747,7 @@ if(DRS_SetScreen(DRS_SCREEN_ACCESS_GRANTED) == DRS_OPERATION_OK)
 }
 ```
 
-The service does not automatically return to password entry. The application owns the feedback duration and explicitly requests `DRS_SCREEN_PASSWORD_ENTRY` when its product state changes.
+The service does not automatically leave a feedback screen. The application owns the feedback duration and explicitly requests the next semantic screen, such as `DRS_SCREEN_IDLE` or `DRS_SCREEN_PASSWORD_ENTRY`, when product state changes.
 
 ---
 
@@ -773,7 +817,7 @@ Recommended validation covers:
 - A null LCD pointer is rejected by `DRS_Init()` through the LCD driver failure path.
 - An uninitialized LCD is rejected.
 - Successful initialization programs CGRAM position zero.
-- Successful initialization renders `Insert Password:` with an empty second line.
+- Successful initialization renders the blank locked-idle screen.
 - An immediate repeated `DRS_Update()` produces no LCD transaction.
 - Every renderable screen identifier is accepted.
 - `DRS_SCREEN_COUNT` and out-of-range screen values are rejected.
@@ -785,8 +829,9 @@ Recommended validation covers:
 - Increasing from one to three writes only two additional locks.
 - Decreasing from three to one clears only two positions.
 - A screen change clears stale content before printing the new view.
-- `Entry Timeout`, `Entry Incomplete` and `Access Denied!` render empty second lines.
-- `Access Granted` renders `Welcome!` on the second line.
+- Locked idle renders two empty lines.
+- The four credential-register screens render `Access PIN:`, `Update PIN:`, `Confirm PIN:` and `PIN updated!`.
+- `Access Granted!`, `Access Denied!` and `Lockout!` render empty second lines.
 - Digit-count changes on a static screen do not trigger LCD traffic by themselves.
 - Returning to password entry renders the latest requested count.
 - A lower-level failure returns `DRS_OPERATION_FAIL`.
@@ -809,7 +854,7 @@ Current V1 limitations include:
 - CGRAM position zero is reserved.
 - Entry capacity is fixed at six digits.
 - Screen text is fixed in English at compile time.
-- Only the five declared semantic screens are implemented.
+- Only the nine declared semantic screens are implemented.
 - Remaining-attempt counts are not rendered.
 - Lockout countdown and degraded/fault screens are not implemented.
 - Backlight state and brightness are not managed.

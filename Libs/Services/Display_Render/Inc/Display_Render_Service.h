@@ -29,8 +29,8 @@
  *          execution context at a time.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 16, 2026
+ * @version 1.1.0
+ * @date    Aug 22, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_SERVICES_DISPLAY_RENDER_INC_DISPLAY_RENDER_SERVICE_H_
@@ -86,21 +86,25 @@ typedef enum
  */
 typedef enum
 {
-    DRS_SCREEN_IDLE,             /*< Locked idle screen displayed while no credential-entry session is active. */
+    DRS_SCREEN_IDLE,                                /*< Locked idle screen displayed while no credential-entry session is active. */
 
-    DRS_SCREEN_PASSWORD_ENTRY,   /*< Password prompt with dynamic lock-character progress.                     */
+    DRS_SCREEN_PASSWORD_ENTRY,                      /*< Password prompt with dynamic lock-character progress.                     */
 
-    DRS_SCREEN_ENTRY_TIMEOUT,    /*< Feedback indicating that credential entry timed out.                      */
+    DRS_SCREEN_CREDENTIAL_REGISTER_AUTH,            /*< Prompt requesting the installed PIN before credential replacement.        */
 
-    DRS_SCREEN_ENTRY_INCOMPLETE, /*< Feedback indicating that the credential is incomplete.                    */
+    DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY,     /*< Prompt requesting the first entry of a proposed replacement PIN.          */
 
-    DRS_SCREEN_ACCESS_GRANTED,   /*< Feedback indicating successful authentication.                            */
+    DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY,   /*< Prompt requesting confirmation of the proposed replacement PIN.           */
 
-    DRS_SCREEN_ACCESS_DENIED,    /*< Feedback indicating rejected authentication.                              */
+    DRS_SCREEN_CREDENTIAL_REGISTER_SAVED,           /*< Feedback confirming that the replacement PIN was persisted successfully.  */
 
-    DRS_SCREEN_LOCKOUT,           /*< Feedback indicating lockout.                                              */
+    DRS_SCREEN_ACCESS_GRANTED,                      /*< Feedback indicating successful authentication.                            */
 
-    DRS_SCREEN_COUNT             /*< Number of screens and invalid rendered-screen marker.                     */
+    DRS_SCREEN_ACCESS_DENIED,                       /*< Feedback indicating rejected authentication.                              */
+
+    DRS_SCREEN_LOCKOUT,                             /*< Feedback indicating lockout.                                              */
+
+    DRS_SCREEN_COUNT                                /*< Number of screens and invalid rendered-screen marker.                     */
 
 }DRS_Screen_t;
 
