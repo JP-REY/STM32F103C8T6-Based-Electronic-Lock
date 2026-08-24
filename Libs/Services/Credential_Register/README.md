@@ -286,7 +286,7 @@ CRS has no direct service-to-service call dependency. At the application level i
 * [Credential Entry Service](../Credential_Entry/README.md) for candidate collection.
 * [Lock Control Service](../Lock_Control/README.md) for product phase and retry policy.
 * [Credential Storage Service](../Credential_Storage/README.md) for persistent saving.
-* [App Core](../../../App/Core/README.md) for result translation, buffer ownership and action execution.
+* [Application Layer](../../../App/README.md) for result translation, buffer ownership and action execution.
 
 ---
 
