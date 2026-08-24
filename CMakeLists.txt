@@ -46,6 +46,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Application
     App/Core/Src/App_Core.c
+    App/Config/Src/App_Config.c
+    App/Core/Src/App_Executor.c
 
     # Platform
     Platforms/Src/GPIO_Platform_Interface.c
@@ -80,6 +82,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Application
     App/Core/Inc
+    App/Config/Inc
 
     # Platform
     Platforms/Inc

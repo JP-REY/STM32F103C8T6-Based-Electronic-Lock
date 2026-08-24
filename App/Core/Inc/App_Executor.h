@@ -1,24 +1,20 @@
 /**********************************************************************************************************************************
- * @file    App_Core.h
- * @brief   Public synchronous interface of the electronic-lock application core.
+ * @file    App_Executor.h
+ * @brief   Internal semantic-action executor interface for the App layer.
  *
- * @details Defines the public lifecycle and execution entry points of the electronic-lock application. The module acts as the
- *          orchestration boundary between CubeMX-generated resources, platform interfaces, component drivers and domain/UI
- *          services, including credential entry, replacement, persistence and authentication coordination.
+ * @details Declares the boundary used by App Core to execute LCS_Action_t values returned by the Lock Control Service. The executor
+ *          coordinates credential services, presentation services, application timeouts and the physical actuator through the
+ *          runtime-object registry owned by App Config.
  *
- *          Concrete handles and dependency bindings are owned by App Config and remain private to the App layer. Callers therefore
- *          interact with application operations without depending on STM32, Platform, adapter, component or service types.
- *
- * @note    App_Init() shall be called after CubeMX peripheral initialization and before the first App_ReadInput() or
- *          App_Dispatch() call.
+ *          This is an App-internal interface. Firmware entry points outside the App layer shall include App_Core.h instead.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    Aug 22, 2026
+ * @version 1.0.0
+ * @date    2026-08-23
  **********************************************************************************************************************************/
 
-#ifndef APP_CORE_INC_APP_CORE_H_
-#define APP_CORE_INC_APP_CORE_H_
+#ifndef APP_EXECUTOR_H
+#define APP_EXECUTOR_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,37 +23,27 @@ extern "C" {
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
+#include "App_Config.h"
+
+/**********************************************************************************************************************************
+ Defines
+ **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Macros
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Types
  **********************************************************************************************************************************/
-/**
- * @brief   Application initialization result.
- *
- * @details Reports whether the complete application dependency graph was initialized and is ready for use. A failed result means
- *          at least one required Platform object, component, adapter or service could not be initialized.
- */
-typedef enum
-{
-    APP_INIT_SUCCESSFULLY, /*< Every application dependency was initialized successfully.         */
-    APP_INIT_FAILED        /*< At least one required application dependency failed to initialize. */
-
-}App_InitStatus_t;
-
 /**********************************************************************************************************************************
  Data
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
-App_InitStatus_t App_Init      (void);
-void             App_ReadInput (void);
-void             App_Dispatch  (void);
+LCS_Event_t App_ExecuteAction(LCS_Action_t Action);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* APP_CORE_INC_APP_CORE_H_ */
+#endif /* APP_EXECUTOR_H */

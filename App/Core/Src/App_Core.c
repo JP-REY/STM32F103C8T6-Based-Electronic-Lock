@@ -1,10 +1,10 @@
 /**********************************************************************************************************************************
  * @file    App_Core.c
- * @brief   Electronic-lock application composition root.
+ * @brief   Electronic-lock application initialization and event-orchestration core.
  *
- * @details Implements the electronic-lock composition root. This module owns the static-duration Platform handles, adapter
- *          contexts, component instances and instance-based service runtimes required by the product. It also binds these objects
- *          to the CubeMX-generated peripheral handles during App_Init().
+ * @details Initializes the electronic-lock object graph supplied by App Config, binds it to CubeMX-generated peripheral resources
+ *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. App Config owns the
+ *          static runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
  *
  *          Initialization is fail-fast: each private initializer validates every stage and immediately reports failure to
  *          App_Init(). Stateless services and services that own an internal singleton runtime do not require an additional
@@ -14,8 +14,8 @@
  *          advances presentation services. Both paths may synchronously execute semantic Lock Control actions without exposing
  *          concrete hardware dependencies through App_Core.h.
  *
- * @note    All objects in this translation unit have static storage duration because drivers, adapters and services retain
- *          borrowed pointers to their dependencies after initialization.
+ * @note    The timeout runtime and registry pointer in this translation unit have static storage duration. Concrete component and
+ *          service instances live in App_Config.c and are borrowed through App_Instance.
  *
  * @author  Joao Pedro Rey
  * @version 1.1.0
@@ -25,308 +25,19 @@
  Includes
  **********************************************************************************************************************************/
 #include "App_Core.h"
-#include "stdbool.h"
-#include "stdint.h"
-#include "stddef.h"
-
-/**
- * @brief Domain-service dependencies.
- */
-#include "Timeout_Validation_Service.h"
-#include "Credential_Entry_Service.h"
-#include "Credential_Register_Service.h"
-#include "Credential_Storage_Service.h"
-#include "Authentication_Service.h"
-#include "Lock_Control_Service.h"
-
-/**
- * @brief User-interface service dependencies.
- */
-#include "Status_Indication_Service.h"
-#include "Sound_Generator_Service.h"
-#include "Display_Render_Service.h"
-
-/**
- * @brief Component-driver and concrete-adapter dependencies.
- */
-#include "LCD_Driver.h"
-#include "LCD_PCF8574_BusAdapter.h"
-#include "LCD_PWM_BacklightAdapter.h"
-#include "PCF8574_Driver.h"
-#include "MatrixKeyboard_Driver.h"
-#include "MatrixKeyboard_GPIO_ScanAdapter.h"
-#include "Buzzer_Driver.h"
-#include "Led_Driver.h"
-
-/**
- * @brief Platform interfaces used directly by the composition root.
- */
-#include "GPIO_Platform_Interface.h"
-#include "PWM_Platform_Interface.h"
-#include "Time_Platform_Interface.h"
-
-/**
- * @brief CubeMX-generated hardware bindings consumed during initialization.
- */
-#include "main.h"
-#include "i2c.h"
-#include "tim.h"
+#include "App_Core_Internal.h"
+#include "App_Config.h"
+#include "App_Executor.h"
 
 /**********************************************************************************************************************************
  Private Macros
  **********************************************************************************************************************************/
-/** @brief Number of visible columns provided by the product character LCD. */
-#define APP_LCD_COLUMN_COUNT                    (16U)
-
-/** @brief I2C device address assigned to the PCF8574 LCD I/O expander. */
-#define APP_LCD_IO_EXPANDER_ADDRESS             (0x20U)
-
-/** @brief CubeMX I2C peripheral handle used by the LCD I/O expander. */
-#define APP_LCD_IO_EXPANDER_I2C_CONTEXT         (&hi2c1)
-
-/** @brief CubeMX timer handle used to generate the LCD-backlight PWM signal. */
-#define APP_LCD_BACKLIGHT_PWM_CONTEXT           (&htim4)
-
-/** @brief Platform PWM channel associated with the LCD-backlight output. */
-#define APP_LCD_BACKLIGHT_PWM_CHANNEL           (PWM_CHANNEL_4)
-
-/** @brief LCD-backlight PWM frequency, in hertz. */
-#define APP_LCD_BACKLIGHT_PWM_FREQUENCY         (1500U)
-
-/** @brief Initial LCD-backlight brightness, expressed as a percentage. */
-#define APP_LCD_BACKLIGHT_BRIGHTNESS            (50U)
-
-/** @brief Number of rows in the physical matrix keyboard. */
-#define APP_KEYBOARD_ROW_COUNT                  (4U)
-
-/** @brief Number of columns in the physical matrix keyboard. */
-#define APP_KEYBOARD_COLUMN_COUNT               (4U)
-
-/** @brief Number of physical keys derived from the keyboard dimensions. */
-#define APP_KEYBOARD_KEY_COUNT                  (APP_KEYBOARD_ROW_COUNT * APP_KEYBOARD_COLUMN_COUNT)
-
-/** @brief Required stable interval before a keyboard transition is accepted, in milliseconds. */
-#define APP_KEYBOARD_DEBOUNCE_MS                (40U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard row zero. */
-#define APP_KEYBOARD_ROW_0_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row zero. */
-#define APP_KEYBOARD_ROW_0_PIN_NUMBER           (3U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard row one. */
-#define APP_KEYBOARD_ROW_1_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row one. */
-#define APP_KEYBOARD_ROW_1_PIN_NUMBER           (2U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard row two. */
-#define APP_KEYBOARD_ROW_2_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row two. */
-#define APP_KEYBOARD_ROW_2_PIN_NUMBER           (1U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard row three. */
-#define APP_KEYBOARD_ROW_3_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row three. */
-#define APP_KEYBOARD_ROW_3_PIN_NUMBER           (0U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard column zero. */
-#define APP_KEYBOARD_COL_0_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column zero. */
-#define APP_KEYBOARD_COL_0_PIN_NUMBER           (7U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard column one. */
-#define APP_KEYBOARD_COL_1_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column one. */
-#define APP_KEYBOARD_COL_1_PIN_NUMBER           (6U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard column two. */
-#define APP_KEYBOARD_COL_2_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column two. */
-#define APP_KEYBOARD_COL_2_PIN_NUMBER           (5U)
-
-/** @brief STM32 GPIO port connected to matrix-keyboard column three. */
-#define APP_KEYBOARD_COL_3_GPIO_PORT            (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column three. */
-#define APP_KEYBOARD_COL_3_PIN_NUMBER           (4U)
-
-/** @brief CubeMX timer handle used to generate the passive-buzzer PWM signal. */
-#define APP_BUZZER_PWM_CONTEXT                  (&htim3)
-
-/** @brief Platform PWM channel selected for the passive-buzzer output. */
-#define APP_BUZZER_PWM_CHANNEL                  (PWM_CHANNEL_1)
-
-/** @brief STM32 GPIO port connected to the lock-status LED. */
-#define APP_LOCK_STATUS_LED_GPIO_PORT           (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to the lock-status LED. */
-#define APP_LOCK_STATUS_LED_PIN_NUMBER          (15U)
-
-/** @brief Electrical level that turns the lock-status LED on. */
-#define APP_LOCK_STATUS_LED_ACTIVE_LEVEL        (LED_ACTIVE_LOW)
-
-/** @brief STM32 GPIO port connected to the low-battery status LED. */
-#define APP_LOW_BATTERY_STATUS_LED_GPIO_PORT    (GPIOA)
-
-/** @brief Zero-based STM32 GPIO pin number connected to the low-battery status LED. */
-#define APP_LOW_BATTERY_STATUS_LED_PIN_NUMBER   (12U)
-
-/** @brief Electrical level that turns the low-battery status LED on. */
-#define APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL (LED_ACTIVE_LOW)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '0'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_0            (0U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '1'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_1            (1U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '2'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_2            (2U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '3'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_3            (3U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '4'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_4            (4U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '5'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_5            (5U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '6'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_6            (6U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '7'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_7            (7U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '8'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_8            (8U)
-
-/** @brief Credential Entry Service numeric value associated with keyboard key '9'. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_9            (9U)
-
-/** @brief Sentinel stored when a CES command carries no numeric digit. */
-#define APP_CREDENTIAL_ENTRY_DIGIT_INVALID      (0xFFU)
-
-/** @brief Maximum credential-entry inactivity interval, in milliseconds. */
-#define APP_CREDENTIAL_ENTRY_TIMEOUT_MS         (5000U)
-
-/** @brief Maximum authorized unlock interval, in milliseconds. */
-#define APP_UNLOCK_TIMEOUT_MS                   (3000U)
-
-/** @brief Duration of access-denied feedback before the FSM advances, in milliseconds. */
-#define APP_ACCESS_DENIED_TIMEOUT_MS            (1500U)
-
-/** @brief Duration for which credential entry remains blocked after the attempt limit, in milliseconds. */
-#define APP_LOCKOUT_TIMEOUT_MS                  (10000U)
-
-/** @brief Duration of credential-register save feedback before the FSM advances, in milliseconds. */
-#define APP_CRS_SAVED_TIMEOUT_MS                (1500U)
-
-/** @brief Maximum number of synchronous LCS follow-up events processed in one dispatch chain. */
-#define APP_MAX_LCS_DISPATCH_DEPTH              (4U)
-
-/** @brief STM32 GPIO port connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_GPIO_PORT             (GPIOB)
-
-/** @brief Zero-based STM32 GPIO pin number connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_PIN_NUMBER            (8U)
-
 /**********************************************************************************************************************************
  Private Types
  **********************************************************************************************************************************/
-/**
- * @brief   Application-owned timeout identifiers.
- *
- * @details Identifies each mutually exclusive bounded interval associated with one timed Lock Control FSM state. The identifier
- *          indexes App_TimeoutDefinitions and is retained by App_ActiveTimeout while the corresponding interval is active.
- *
- * @note    APP_TIMEOUT_NONE is a runtime sentinel and shall never index App_TimeoutDefinitions.
- */
-typedef enum
-{
-    APP_TIMEOUT_CREDENTIAL_ENTRY = 0U,    /*< Credential-entry inactivity interval.        */
-
-    APP_TIMEOUT_UNLOCK,                   /*< Authorized physical-unlock interval.         */
-
-    APP_TIMEOUT_ACCESS_DENIED,            /*< Access-denied feedback interval.             */
-
-    APP_TIMEOUT_LOCKOUT,                  /*< Temporary credential-entry lockout interval. */
-
-    APP_TIMEOUT_CRS_SAVED,                /*< Credential-register saved feedback interval. */
-
-    APP_TIMEOUT_COUNT,                    /*< Number of concrete timeout definitions.      */
-
-    APP_TIMEOUT_NONE = APP_TIMEOUT_COUNT  /*< Sentinel indicating no active timeout.       */
-
-}App_TimeoutId_t;
-
-/**
- * @brief   Immutable policy associated with one application timeout.
- *
- * @details Associates a nonzero timeout duration with the semantic Lock Control event that shall be dispatched exactly once when
- *          that interval elapses. Definition objects are compile-time configuration and contain no mutable lifecycle state.
- */
-typedef struct
-{
-    TVS_DurationMs_t DurationMs;   /*< Configured interval duration in milliseconds; must be nonzero. */
-    LCS_Event_t      ElapsedEvent; /*< Semantic event produced once when the interval expires.       */
-
-}App_TimeoutDefinition_t;
-
-/**
- * @brief   Mutable lifecycle state of the currently active application timeout.
- *
- * @details Retains the selected definition identifier and its monotonic start timestamp. The application requires only one
- *          runtime because the timed Lock Control FSM states are mutually exclusive.
- *
- * @note    Active is authoritative. Id is APP_TIMEOUT_NONE and StartedAtMs is zero while no interval is active.
- */
-typedef struct
-{
-    App_TimeoutId_t   Id;          /*< Concrete definition currently selected, or APP_TIMEOUT_NONE.   */
-    TVS_TimestampMs_t StartedAtMs; /*< Monotonic Platform timestamp captured when the interval began. */
-    bool              Active;      /*< True only while the selected interval is pending.              */
-
-}App_TimeoutRuntime_t;
-
 /**********************************************************************************************************************************
  Private Constants
  **********************************************************************************************************************************/
-/**
- * @brief   Matrix-keyboard logical key map in physical row-major order.
- *
- * @details Associates every physical key position with the device-level code returned by the Matrix Keyboard Driver. Its static
- *          storage duration satisfies the lifetime required by App_KeyboardConfig and App_Keyboard.
- */
-static const MK_KeyCode_t App_KeyboardKeyMap[APP_KEYBOARD_KEY_COUNT] =
-{
-    '1', '2', '3', 'A',
-    '4', '5', '6', 'B',
-    '7', '8', '9', 'C',
-    '*', '0', '#', 'D'
-};
-
-/**
- * @brief   Immutable Matrix Keyboard Driver configuration.
- *
- * @details Defines the 4x4 matrix dimensions, key map, active-low electrical interpretation and debounce policy. The driver
- *          borrows this object after MK_Init(), so it remains owned by the composition root for the complete firmware lifetime.
- */
-static const MK_Config_t App_KeyboardConfig =
-{
-    ._rows_number      = APP_KEYBOARD_ROW_COUNT,
-    ._cols_number      = APP_KEYBOARD_COLUMN_COUNT,
-    ._key_map          = App_KeyboardKeyMap,
-    ._row_active_level = MK_KEY_ACTIVE_LOW,
-    ._debounce_time_ms = APP_KEYBOARD_DEBOUNCE_MS
-};
-
 /**
  * @brief   Data-driven timeout policy used by the application dispatcher.
  *
@@ -368,220 +79,9 @@ static const App_TimeoutDefinition_t App_TimeoutDefinitions[APP_TIMEOUT_COUNT] =
     }
 };
 
-/**
- * @brief   Verifies that credential size contracts remain compatible across the participating services.
- *
- * @details Authentication, registration staging, persistent storage and Display Render all operate on the credential collected
- *          by CES. Compile-time failures prevent silent truncation if any participating service changes its length independently.
- */
-_Static_assert(CES_CREDENTIAL_LENGTH == AS_CREDENTIAL_LENGTH,
-               "Credential Entry and Authentication lengths must match");
-
-_Static_assert(CES_CREDENTIAL_LENGTH == CRS_CREDENTIAL_LENGTH,
-               "Credential Entry and Credential Register lengths must match");
-
-
-_Static_assert(CES_CREDENTIAL_LENGTH == CSS_CREDENTIAL_LENGTH,
-               "Credential Entry and Credential Storage lengths must match");
-
-_Static_assert(CES_CREDENTIAL_LENGTH == DRS_ENTRY_DIGIT_CAPACITY,
-               "Credential Entry and Display Render capacities must match");
-
 /**********************************************************************************************************************************
  Private Data
  **********************************************************************************************************************************/
-/**********************************************************************************************************************************
- Matrix Keyboard Driver Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Platform GPIO descriptors associated with the matrix-keyboard rows.
- *
- * @details Each descriptor will be bound by PGPIO_Init() to its corresponding CubeMX MKB_ROWx pin. The array is subsequently
- *          borrowed by App_KeyboardGpioScanAdapter and therefore has static storage duration.
- */
-static GPIO_Handle_t App_KeyboardRowGpios[APP_KEYBOARD_ROW_COUNT] = {0};
-
-/**
- * @brief   Platform GPIO descriptors associated with the matrix-keyboard columns.
- *
- * @details Each descriptor will be bound by PGPIO_Init() to its corresponding CubeMX MKB_COLx pin. The array is subsequently
- *          borrowed by App_KeyboardGpioScanAdapter and therefore has static storage duration.
- */
-static GPIO_Handle_t App_KeyboardColumnGpios[APP_KEYBOARD_COLUMN_COUNT] = {0};
-
-/**
- * @brief   Concrete GPIO scan-adapter context used by the Matrix Keyboard Driver.
- *
- * @details Retains the application-owned row and column arrays and the active level driven while selecting a matrix column.
- *          MK_GPIO_ScanAdapterInit() binds this context to the scan interface embedded in App_Keyboard.
- */
-static MK_GPIO_ScanAdapter_t App_KeyboardGpioScanAdapter =
-{
-    .Columns     = App_KeyboardColumnGpios,
-    .ColumnCount = APP_KEYBOARD_COLUMN_COUNT,
-    .Rows        = App_KeyboardRowGpios,
-    .RowCount    = APP_KEYBOARD_ROW_COUNT,
-    .ActiveLevel = GPIO_LEVEL_LOW
-};
-
-/**
- * @brief   Per-key runtime storage borrowed and managed by the Matrix Keyboard Driver.
- *
- * @details Provides one independent state and debounce context for every physical key. Application code must not inspect or
- *          modify these elements after they are supplied to MK_Init().
- */
-static MK_Key_t App_KeyboardKeys[APP_KEYBOARD_KEY_COUNT] = {0};
-
-/**
- * @brief   Matrix Keyboard Driver instance owned by the application.
- *
- * @details Retains the scan interface, immutable configuration and per-key runtime references. 
- *          App_ReadInput() performs one non-blocking acquisition from this instance per call.
- */
-static MK_Handle_t App_Keyboard = {0};
-
-/**********************************************************************************************************************************
- LCD Driver and Display Render Service Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Platform PWM descriptor for the LCD backlight.
- *
- * @details Will be created from the CubeMX TIM4 channel 4 binding and borrowed by the LCD PWM Backlight Adapter for the complete
- *          LCD lifetime.
- */
-static PWM_Handle_t App_LcdBacklightPwm = {0};
-
-/**
- * @brief   PCF8574 Driver instance used as the LCD parallel-bus backend.
- *
- * @details Will retain the CubeMX I2C1 context, device address and output-port shadow. The LCD PCF8574 Bus Adapter borrows this
- *          object after initialization.
- */
-static PCF8574_Handle_t App_LcdIoExpander = {0};
-
-/**
- * @brief   Product 16x2 character-LCD instance.
- *
- * @details Owns the bus and backlight interfaces populated by the concrete adapters. After LCD_Init(), the Display Render Service
- *          singleton will borrow this handle through DRS_Init().
- */
-static LCD_Handle_t App_Lcd =
-{
-    ._rows           = LCD_2LINE,
-    ._cols           = APP_LCD_COLUMN_COUNT,
-    ._interface_mode = LCD_4BIT_MODE,
-    ._font_dot_size  = LCD_5X8_FONT,
-    ._initialized    = false
-};
-
-/**********************************************************************************************************************************
- Buzzer Driver and Sound Generator Service Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Platform PWM descriptor for the passive buzzer.
- *
- * @details Will be created from the CubeMX TIM3 context and APP_BUZZER_PWM_CHANNEL selection. Frequency and duty-cycle operations
- *          requested by the buzzer component are routed through this application-owned descriptor.
- */
-static PWM_Handle_t App_BuzzerPwm = {0};
-
-/**
- * @brief   Buzzer Driver instance used by the Sound Generator Service.
- *
- * @details Borrows App_BuzzerPwm after Buzzer_Init(). The Sound Generator Service singleton subsequently retains this driver
- *          reference through SGS_Init().
- */
-static Buzzer_Handle_t App_Buzzer = {0};
-
-/**********************************************************************************************************************************
- Low-Battery Status Indication Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Platform GPIO descriptor associated with the low-battery status LED.
- *
- * @details Retains the Platform representation of the configured low-battery LED pin and is borrowed by
- *          App_LowBatteryStatusLed after initialization.
- */
-static GPIO_Handle_t App_LowBatteryStatusLedGpio = {0};
-
-/**
- * @brief   LED Driver instance associated with low-battery indication.
- *
- * @details Borrows App_LowBatteryStatusLedGpio and provides non-blocking electrical LED operations to
- *          App_LowBatteryStatusIndication.
- */
-static LED_Handle_t App_LowBatteryStatusLed = {0};
-
-/**
- * @brief   Status Indication Service runtime associated with the low-battery LED.
- *
- * @details Retains the independent semantic-pattern, phase and timing state required to drive App_LowBatteryStatusLed.
- */
-static SIS_Handle_t App_LowBatteryStatusIndication = {0};
-
-/**********************************************************************************************************************************
- Lock Status Indication Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Platform GPIO descriptor associated with the lock-status LED.
- *
- * @details Retains the Platform representation of the configured lock-status LED pin and is borrowed by App_LockStatusLed after
- *          initialization.
- */
-static GPIO_Handle_t App_LockStatusLedGpio = {0};
-
-/**
- * @brief   LED Driver instance associated with lock-state indication.
- *
- * @details Borrows App_LockStatusLedGpio and provides non-blocking electrical LED operations to App_LockStatusIndication.
- */
-static LED_Handle_t App_LockStatusLed = {0};
-
-/**
- * @brief   Status Indication Service runtime associated with the lock-status LED.
- *
- * @details Retains the independent semantic-pattern, phase and timing state required to drive App_LockStatusLed.
- */
-static SIS_Handle_t App_LockStatusIndication = {0};
-
-/**********************************************************************************************************************************
- Lock Actuator Platform Object
- **********************************************************************************************************************************/
-/**
- * @brief   Platform GPIO descriptor controlling the physical lock actuator.
- *
- * @details Is bound to the CubeMX LOCKER_PIN output and temporarily realizes the actuator boundary until a dedicated Lock Actuator
- *          Driver is introduced. GPIO reset is the safe locked state; GPIO set requests physical unlock.
- *
- * @note    Only serialized application action paths access this descriptor after initialization.
- */
-static GPIO_Handle_t App_LockActuatorGpio = {0};
-
-/**********************************************************************************************************************************
- Credential and Timeout Runtime Objects
- **********************************************************************************************************************************/
-/**
- * @brief   Caller-owned transient copy of a complete credential candidate.
- *
- * @details Receives bounded copies from CES_GetCandidate() for authentication, first-entry staging and confirmation validation.
- *          Each synchronous consumer finishes before App_ClearRuntimeCandidate() explicitly erases the complete object.
- *
- * @warning Candidate bytes must never be logged, displayed or retained after their synchronous consumer completes.
- */
-static CES_Candidate_t App_RuntimeCandidate = {0};
-
-/**
- * @brief   Application-owned reference to the currently installed credential.
- *
- * @details Is loaded lazily from Credential Storage before the first authentication and is replaced only after
- *          CSS_SaveCredential() reports verified persistence of a newly registered credential. Authentication borrows the array
- *          synchronously and never owns it.
- *
- * @warning This longer-lived secret is explicitly erased before a controlled reset. It must never be logged, displayed or exposed
- *          through the public App Core interface.
- */
-static uint8_t App_RuntimeCredential[AS_CREDENTIAL_LENGTH] = {0};
-
 /**
  * @brief   Single active application-timeout runtime.
  *
@@ -596,6 +96,16 @@ static App_TimeoutRuntime_t App_ActiveTimeout =
     .StartedAtMs = 0U,
     .Active      = false
 };
+
+/**
+ * @brief   Bound view of the runtime-object registry owned by App Config.
+ *
+ * @details App_Init() assigns the immutable registry address before invoking any dependency initializer. App Core and App Executor
+ *          use the pointer to operate on the same statically allocated handles and credential buffers.
+ *
+ * @note    Remains NULL until App_Init() begins. Public runtime entry points require successful initialization before use.
+ */
+const App_RuntimeInstances_t* App_Instance = NULL;
 
 /**********************************************************************************************************************************
  Private Function Prototypes
@@ -631,65 +141,17 @@ static MK_OpStatus_t App_ReadKeyboard(MK_Output_t* Output);
 static CES_Input_t App_TranslateKeyToInputKind(const MK_Output_t* KeyboardOutput);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
- Credential Entry and Authentication
+ Credential Entry
  ---------------------------------------------------------------------------------------------------------------------------------*/
 /** @brief Processes one semantic input through the Credential Entry Service. */
 static CES_Event_t App_ProcessCredentialInput(const CES_Input_t* Input);
-
-/** @brief Copies and erases the CES candidate, authenticates it and returns the corresponding LCS event. */
-static LCS_Event_t App_ProcessAuthentication(void);
-
-/** @brief Explicitly erases the application-owned transient credential candidate. */
-static void App_ClearRuntimeCandidate(void);
-
-/*---------------------------------------------------------------------------------------------------------------------------------
- Application Timeout Management
- ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Starts or replaces the single active application timeout with the selected definition. */
-static bool App_StartTimeout(App_TimeoutId_t Timeout);
-
-/** @brief Cancels the active application timeout and restores its inactive sentinel state. */
-static void App_CancelTimeout(void);
 
 /** @brief Polls the active timeout and returns its semantic LCS event exactly once after expiration. */
 static LCS_Event_t App_PollTimeout(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
- Lock Actuator Control
+ Lock Control Event Orchestration
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Forces the lock-actuator GPIO into its safe locked state. */
-static bool App_ForceLock(void);
-
-/** @brief Requests actuator unlock after a finite unlock timeout has been established. */
-static bool App_RequestUnlock(void);
-
-/*---------------------------------------------------------------------------------------------------------------------------------
- Presentation Coordination
- ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Restores the locked-idle display, backlight and lock-status indication policy. */
-static void App_SetLockedPresentation(void);
-
-/** @brief Presents a newly opened normal Credential Entry Service session. */
-static void App_SetCESPresentation(void);
-
-/** @brief Presents installed-credential authorization for a credential-replacement request. */
-static void App_SetCRSAuthPresentation(void);
-
-/** @brief Presents the first-entry phase of credential registration. */
-static void App_SetCRSFirstEntryPresentation(void);
-
-/** @brief Presents the confirmation-entry phase while CRS retains the staged credential. */
-static void App_SetCRSConfirmEntryPresentation(void);
-
-/** @brief Presents successful credential persistence during the bounded saved-feedback interval. */
-static void App_SetCRSSavedPresentation(void);
-
-/*---------------------------------------------------------------------------------------------------------------------------------
- Lock Control Action and Event Orchestration
- ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Executes one semantic LCS action and returns any synchronous follow-up event it produces. */
-static LCS_Event_t App_ExecuteAction(LCS_Action_t Action);
-
 /** @brief Dispatches one LCS event and its bounded synchronous action/event follow-up chain. */
 static void App_DispatchLcsEvent(LCS_Event_t Event);
 
@@ -711,12 +173,6 @@ static void App_HandleInputFault(void);
 /** @brief Polls application timing and advances display, indication and sound services once. */
 static void App_UpdateServices(void);
 
-/*---------------------------------------------------------------------------------------------------------------------------------
- Fail-Safe Reset Endpoint
- ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Disables interrupts and requests the target system reset after fail-safe cleanup is complete. */
-static void App_RequestControlledReset(void);
-
 /**********************************************************************************************************************************
  Private Functions
  **********************************************************************************************************************************/
@@ -734,63 +190,63 @@ static void App_RequestControlledReset(void);
  */
 static bool App_InitLcd(void)
 {
-    if(PCF8574_Init(&App_LcdIoExpander,
-                     APP_LCD_IO_EXPANDER_ADDRESS,
-                     APP_LCD_IO_EXPANDER_I2C_CONTEXT)
-                     != PCF8574_OPERATION_OK)
+    if(PCF8574_Init(App_Instance->Lcd_IoExpander,
+                    APP_LCD_IO_EXPANDER_ADDRESS,
+                    APP_LCD_IO_EXPANDER_I2C_CONTEXT)
+                    != PCF8574_OPERATION_OK)
     {
         return false;
     }
 
-    if(LCD_PCF8574_BusAdapterInit(&App_Lcd._bus,
-                                  &App_LcdIoExpander)
-                                  != LCD_BUS_OPERATION_OK)
+    if(LCD_PCF8574_BusAdapterInit(&(App_Instance->Lcd->_bus),
+                                    App_Instance->Lcd_IoExpander)
+                                    != LCD_BUS_OPERATION_OK)
     {
         return false;
     }
 
-    if(PPWM_Create(&App_LcdBacklightPwm,
-                    APP_LCD_BACKLIGHT_PWM_CONTEXT,
-                    APP_LCD_BACKLIGHT_PWM_CHANNEL)
-                    != PWM_OPERATION_OK)
+    if(PPWM_Create(App_Instance->Lcd_BacklightPwm,
+                   APP_LCD_BACKLIGHT_PWM_CONTEXT,
+                   APP_LCD_BACKLIGHT_PWM_CHANNEL)
+                   != PWM_OPERATION_OK)
     {
         return false;
     }
 
-    if(PPWM_Init(&App_LcdBacklightPwm)
-                  != PWM_OPERATION_OK)
+    if(PPWM_Init(App_Instance->Lcd_BacklightPwm)
+                 != PWM_OPERATION_OK)
     {
         return false;
     }
 
-    if(PPWM_SetFrequency(&App_LcdBacklightPwm,
-                          APP_LCD_BACKLIGHT_PWM_FREQUENCY)
-                          != PWM_OPERATION_OK)
+    if(PPWM_SetFrequency(App_Instance->Lcd_BacklightPwm,
+                         APP_LCD_BACKLIGHT_PWM_FREQUENCY)
+                         != PWM_OPERATION_OK)
     {
         return false;
     }
 
-    if(LCD_PWM_BacklightAdapterInit(&App_Lcd._backlight,
-                                    &App_LcdBacklightPwm)
-                                     != LCD_BACKLIGHT_OP_OK)
+    if(LCD_PWM_BacklightAdapterInit(&(App_Instance->Lcd->_backlight),
+                                      App_Instance->Lcd_BacklightPwm)
+                                      != LCD_BACKLIGHT_OP_OK)
     {
         return false;
     }
 
-    if(LCD_Init(&App_Lcd)
-                 != LCD_OPERATION_OK)
+    if(LCD_Init(App_Instance->Lcd)
+                != LCD_OPERATION_OK)
     {
         return false;
     }
 
-    if(LCD_SetBrightness(&App_Lcd,
-                          APP_LCD_BACKLIGHT_BRIGHTNESS)
-                          != LCD_OPERATION_OK)
+    if(LCD_SetBrightness(App_Instance->Lcd,
+                         APP_LCD_BACKLIGHT_BRIGHTNESS)
+                         != LCD_OPERATION_OK)
     {
         return false;
     }
 
-    if(DRS_Init(&App_Lcd) != DRS_OPERATION_OK)
+    if(DRS_Init(App_Instance->Lcd) != DRS_OPERATION_OK)
     {
         return false;
     }
@@ -813,81 +269,81 @@ static bool App_InitLcd(void)
  */
 static bool App_InitKeyboard(void)
 {
-    if(PGPIO_Init(&App_KeyboardRowGpios[0],
-                   APP_KEYBOARD_ROW_0_GPIO_PORT,
-                   APP_KEYBOARD_ROW_0_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Rows[0]),
+                    APP_KEYBOARD_ROW_0_GPIO_PORT,
+                    APP_KEYBOARD_ROW_0_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardRowGpios[1],
-                   APP_KEYBOARD_ROW_1_GPIO_PORT,
-                   APP_KEYBOARD_ROW_1_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Rows[1]),
+                    APP_KEYBOARD_ROW_1_GPIO_PORT,
+                    APP_KEYBOARD_ROW_1_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardRowGpios[2],
-                   APP_KEYBOARD_ROW_2_GPIO_PORT,
-                   APP_KEYBOARD_ROW_2_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Rows[2]),
+                    APP_KEYBOARD_ROW_2_GPIO_PORT,
+                    APP_KEYBOARD_ROW_2_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardRowGpios[3],
-                   APP_KEYBOARD_ROW_3_GPIO_PORT,
-                   APP_KEYBOARD_ROW_3_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Rows[3]),
+                    APP_KEYBOARD_ROW_3_GPIO_PORT,
+                    APP_KEYBOARD_ROW_3_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardColumnGpios[0],
-                   APP_KEYBOARD_COL_0_GPIO_PORT,
-                   APP_KEYBOARD_COL_0_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Cols[0]),
+                    APP_KEYBOARD_COL_0_GPIO_PORT,
+                    APP_KEYBOARD_COL_0_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardColumnGpios[1],
-                   APP_KEYBOARD_COL_1_GPIO_PORT,
-                   APP_KEYBOARD_COL_1_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Cols[1]),
+                    APP_KEYBOARD_COL_1_GPIO_PORT,
+                    APP_KEYBOARD_COL_1_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardColumnGpios[2],
-                   APP_KEYBOARD_COL_2_GPIO_PORT,
-                   APP_KEYBOARD_COL_2_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Cols[2]),
+                    APP_KEYBOARD_COL_2_GPIO_PORT,
+                    APP_KEYBOARD_COL_2_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(PGPIO_Init(&App_KeyboardColumnGpios[3],
-                   APP_KEYBOARD_COL_3_GPIO_PORT,
-                   APP_KEYBOARD_COL_3_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(&(App_Instance->Keyboard_Cols[3]),
+                    APP_KEYBOARD_COL_3_GPIO_PORT,
+                    APP_KEYBOARD_COL_3_PIN_NUMBER)
+                    != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(MK_Init(&App_Keyboard,
-               &App_KeyboardConfig,
-                App_KeyboardKeys)
-                != MK_OPERATION_OK)
+    if(MK_Init(App_Instance->Keyboard,
+               App_Instance->Keyboard_Config,
+               App_Instance->Keyboard_Keys)
+               != MK_OPERATION_OK)
     {
         return false;
     }
 
-    if(MK_GPIO_ScanAdapterInit(&App_Keyboard._scan_interface,
-                               &App_KeyboardGpioScanAdapter)
-                                != MK_SCAN_OP_OK)
+    if(MK_GPIO_ScanAdapterInit((&App_Instance->Keyboard->_scan_interface),
+                                 App_Instance->Keyboard_Gpio_ScanAdapter)
+                                 != MK_SCAN_OP_OK)
     {
         return false;
     }
@@ -909,23 +365,23 @@ static bool App_InitKeyboard(void)
  */
 static bool App_InitBuzzer(void)
 {
-    if(PPWM_Create(&App_BuzzerPwm,
-                    APP_BUZZER_PWM_CONTEXT,
-                    APP_BUZZER_PWM_CHANNEL)
-                    != PWM_OPERATION_OK)
+    if(PPWM_Create(App_Instance->Buzzer_Pwm,
+                   APP_BUZZER_PWM_CONTEXT,
+                   APP_BUZZER_PWM_CHANNEL)
+                   != PWM_OPERATION_OK)
     {
         return false;
     }
 
-    if(Buzzer_Init(&App_Buzzer,
-                   &App_BuzzerPwm)
-                    != BUZZER_OPERATION_OK)
+    if(Buzzer_Init(App_Instance->Buzzer,
+                   App_Instance->Buzzer_Pwm)
+                   != BUZZER_OPERATION_OK)
     {
         return false;
     }
 
-    if(SGS_Init(&App_Buzzer)
-                 != SGS_OPERATION_OK)
+    if(SGS_Init(App_Instance->Buzzer)
+                != SGS_OPERATION_OK)
     {
         return false;
     }
@@ -939,7 +395,7 @@ static bool App_InitBuzzer(void)
  * @details Creates the lock-status Platform GPIO descriptor, injects it and the configured active level into the LED Driver, and
  *          injects that LED instance into its dedicated Status Indication Service runtime.
  *
- * @note    The service instance owns only indication state; the GPIO and LED handles remain owned by the composition root.
+ * @note    The service instance owns only indication state; App Config owns the GPIO, LED and SIS storage.
  * @note    Initialization is fail-fast and does not roll back stages that completed before a later failure.
  *
  * @return  true  - When the GPIO, LED Driver and Status Indication Service are initialized successfully.
@@ -947,25 +403,25 @@ static bool App_InitBuzzer(void)
  */
 static bool App_InitLockStatusIndication(void)
 {
-    if(PGPIO_Init(&App_LockStatusLedGpio,
-                   APP_LOCK_STATUS_LED_GPIO_PORT,
-                   APP_LOCK_STATUS_LED_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(App_Instance->Lock_Status_Led_Gpio,
+                  APP_LOCK_STATUS_LED_GPIO_PORT,
+                  APP_LOCK_STATUS_LED_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(LED_Init(&App_LockStatusLed,
-                &App_LockStatusLedGpio,
-                 APP_LOCK_STATUS_LED_ACTIVE_LEVEL)
-                 != LED_OPERATION_OK)
+    if(LED_Init(App_Instance->Lock_Status_Led,
+                App_Instance->Lock_Status_Led_Gpio,
+                APP_LOCK_STATUS_LED_ACTIVE_LEVEL)
+                != LED_OPERATION_OK)
     {
         return false;
     }
 
-    if(SIS_Init(&App_LockStatusIndication,
-                &App_LockStatusLed)
-                 != SIS_OPERATION_OK)
+    if(SIS_Init(App_Instance->Lock_Status_Indication,
+                App_Instance->Lock_Status_Led)
+                != SIS_OPERATION_OK)
     {
         return false;
     }
@@ -979,7 +435,7 @@ static bool App_InitLockStatusIndication(void)
  * @details Creates the low-battery Platform GPIO descriptor, injects it and the configured active level into the LED Driver, and
  *          injects that LED instance into its dedicated Status Indication Service runtime.
  *
- * @note    The service instance owns only indication state; the GPIO and LED handles remain owned by the composition root.
+ * @note    The service instance owns only indication state; App Config owns the GPIO, LED and SIS storage.
  * @note    Initialization is fail-fast and does not roll back stages that completed before a later failure.
  *
  * @return  true  - When the GPIO, LED Driver and Status Indication Service are initialized successfully.
@@ -987,25 +443,25 @@ static bool App_InitLockStatusIndication(void)
  */
 static bool App_InitLowBatteryStatusIndication(void)
 {
-    if(PGPIO_Init(&App_LowBatteryStatusLedGpio,
-                   APP_LOW_BATTERY_STATUS_LED_GPIO_PORT,
-                   APP_LOW_BATTERY_STATUS_LED_PIN_NUMBER)
-                   != GPIO_OPERATION_OK)
+    if(PGPIO_Init(App_Instance->LowBattery_Status_Led_Gpio,
+                  APP_LOW_BATTERY_STATUS_LED_GPIO_PORT,
+                  APP_LOW_BATTERY_STATUS_LED_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    if(LED_Init(&App_LowBatteryStatusLed,
-                &App_LowBatteryStatusLedGpio,
-                 APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL)
-                 != LED_OPERATION_OK)
+    if(LED_Init(App_Instance->LowBattery_Status_Led,
+                App_Instance->LowBattery_Status_Led_Gpio,
+                APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL)
+                != LED_OPERATION_OK)
     {
         return false;
     }
 
-    if(SIS_Init(&App_LowBatteryStatusIndication,
-                &App_LowBatteryStatusLed)
-                 != SIS_OPERATION_OK)
+    if(SIS_Init(App_Instance->LowBattery_Status_Indication,
+                App_Instance->LowBattery_Status_Led)
+                != SIS_OPERATION_OK)
     {
         return false;
     }
@@ -1014,34 +470,37 @@ static bool App_InitLowBatteryStatusIndication(void)
 }
 
 /**
- * @brief   Initializes the temporary GPIO-based lock-actuator boundary in its safe state.
+ * @brief   Initializes the temporary GPIO-based lock-actuator descriptor.
  *
- * @details Binds App_LockActuatorGpio to the CubeMX-configured LOCKER_PIN and immediately drives the output low. The low level is
- *          the product's current safe locked state and matches the startup level configured by CubeMX.
+ * @details Binds the configured lock-actuator GPIO descriptor to the CubeMX-configured LOCK_ACTUATOR pin. CubeMX-generated GPIO
+ *          initialization has already driven that output low, which is the product's current safe locked request. The explicit
+ *          Platform safe-state write in this initializer is currently disabled.
  *
  * @note    A dedicated Lock Actuator Driver shall eventually replace this direct Platform binding while preserving the same
  *          force-safe behavior and bounded-unlock contract.
  *
- * @return  true  - When the GPIO descriptor is initialized and the actuator is forced locked.
- * @return  false - When GPIO initialization or the safe-state write fails.
+ * @return  true  - When the GPIO descriptor is initialized successfully.
+ * @return  false - When GPIO descriptor initialization fails.
  */
 static bool App_InitLockActuator(void)
 {
-    if(PGPIO_Init(&App_LockActuatorGpio,
-                   APP_LOCK_ACTUATOR_GPIO_PORT,
-                   APP_LOCK_ACTUATOR_PIN_NUMBER) != GPIO_OPERATION_OK)
+    if(PGPIO_Init(App_Instance->Lock_Actuator_Gpio,
+                  APP_LOCK_ACTUATOR_GPIO_PORT,
+                  APP_LOCK_ACTUATOR_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
     {
         return false;
     }
 
-    return App_ForceLock();
+    // return App_ForceLock();
+    return true;
 }
 
 /**
  * @brief   Performs one complete Matrix Keyboard Driver acquisition cycle.
  *
- * @details Delegates matrix scanning, debounce processing and pending-action retrieval to MK_Read() while retaining ownership of
- *          the keyboard instance inside the App Core composition root.
+ * @details Delegates matrix scanning, debounce processing and pending-action retrieval to MK_Read(). The keyboard instance remains
+ *          owned by App Config and is borrowed through the runtime registry.
  *
  * @param   Output - Caller-owned value object that receives the current key code and key action; must not be NULL.
  *
@@ -1055,7 +514,7 @@ static MK_OpStatus_t App_ReadKeyboard(MK_Output_t* Output)
         return MK_OPERATION_FAIL;
     }
 
-    return MK_Read(&App_Keyboard, Output);
+    return MK_Read(App_Instance->Keyboard, Output);
 }
 
 /**
@@ -1180,66 +639,6 @@ static CES_Event_t App_ProcessCredentialInput(const CES_Input_t* Input)
 }
 
 /**
- * @brief   Explicitly erases the application-owned candidate credential copy.
- *
- * @details Writes zero through a volatile byte pointer over the complete CES_Candidate_t object. Volatile access prevents the
- *          compiler from removing the erasure merely because the object is not read afterward.
- *
- * @warning This helper erases only App_RuntimeCandidate. CES_EndSession() remains responsible for erasing CES internal storage.
- */
-static void App_ClearRuntimeCandidate(void)
-{
-    volatile uint8_t* candidate_bytes = (volatile uint8_t*)&App_RuntimeCandidate;
-
-    for(size_t index = 0U; index < sizeof(App_RuntimeCandidate); index++)
-    {
-        candidate_bytes[index] = 0U;
-    }
-}
-
-/**
- * @brief   Completes candidate transfer, authentication and credential erasure.
- *
- * @details Copies the complete candidate from CES, immediately ends the session to erase service-owned candidate storage,
- *          authenticates it against App_RuntimeCredential, and then explicitly erases the application candidate copy. The AS
- *          result is mapped into the semantic Lock Control event expected by the authoritative FSM.
- *
- * @note    App_ExecuteAction() ensures App_RuntimeCredential is valid before calling this helper. Candidate-copy or session-ending
- *          failures conservatively produce LCS_EVENT_AUTH_FAILURE; the installed runtime credential remains available for later
- *          authentication attempts.
- *
- * @return  LCS_EVENT_AUTH_SUCCESS - When AS authenticates the complete candidate.
- * @return  LCS_EVENT_AUTH_FAILURE - When candidate transfer, session cleanup or authentication does not succeed.
- */
-static LCS_Event_t App_ProcessAuthentication(void)
-{
-    App_ClearRuntimeCandidate();
-
-    if(CES_GetCandidate(&App_RuntimeCandidate) != CES_OPERATION_OK)
-    {
-        (void)CES_EndSession();
-        App_ClearRuntimeCandidate();
-
-        return LCS_EVENT_AUTH_FAILURE;
-    }
-
-    if(CES_EndSession() != CES_OPERATION_OK)
-    {
-        App_ClearRuntimeCandidate();
-
-        return LCS_EVENT_AUTH_FAILURE;
-    }
-
-    AS_Result_t authentication_result = AS_Authenticate(App_RuntimeCandidate.Digits, App_RuntimeCredential);
-
-    App_ClearRuntimeCandidate();
-
-    return (authentication_result == AS_RESULT_AUTHENTICATED) ?
-                                     LCS_EVENT_AUTH_SUCCESS   :
-                                     LCS_EVENT_AUTH_FAILURE   ;
-}
-
-/**
  * @brief   Starts or restarts one application-owned timeout.
  *
  * @details Validates the identifier and its immutable definition, captures the current monotonic Platform timestamp and replaces
@@ -1251,7 +650,7 @@ static LCS_Event_t App_ProcessAuthentication(void)
  * @return  true  - When a valid nonzero timeout definition is activated.
  * @return  false - When the identifier, duration or elapsed-event definition is invalid.
  */
-static bool App_StartTimeout(App_TimeoutId_t Timeout)
+bool App_StartTimeout(App_TimeoutId_t Timeout)
 {
     if(Timeout >= APP_TIMEOUT_COUNT)
     {
@@ -1280,7 +679,7 @@ static bool App_StartTimeout(App_TimeoutId_t Timeout)
  * @details Restores the complete timeout runtime to its inactive sentinel representation. Cancellation produces no LCS event and
  *          does not access the time source.
  */
-static void App_CancelTimeout(void)
+void App_CancelTimeout(void)
 {
     App_ActiveTimeout.Id          = APP_TIMEOUT_NONE;
     App_ActiveTimeout.StartedAtMs = 0U;
@@ -1324,587 +723,19 @@ static LCS_Event_t App_PollTimeout(void)
 }
 
 /**
- * @brief   Forces the lock-actuator output to its safe locked state.
- *
- * @details Drives the application-owned actuator GPIO low through the Platform interface. The operation is intentionally available
- *          independently from presentation services so display, LED or sound failures cannot prevent the safe output request.
- *
- * @return  true when the safe GPIO write succeeds; otherwise false.
- */
-static bool App_ForceLock(void)
-{
-    return (PGPIO_Reset(&App_LockActuatorGpio) == GPIO_OPERATION_OK);
-}
-
-/**
- * @brief   Requests physical unlock through the temporary actuator GPIO boundary.
- *
- * @details Drives the actuator GPIO high only after the action dispatcher has established a finite unlock timeout. A future Lock
- *          Actuator Driver will replace this direct operation and enforce its own redundant maximum-energization deadline.
- *
- * @return  true when the unlock GPIO write succeeds; otherwise false.
- */
-static bool App_RequestUnlock(void)
-{
-    return (PGPIO_Set(&App_LockActuatorGpio) == GPIO_OPERATION_OK);
-}
-
-/**
- * @brief   Restores the normal locked-idle presentation policy.
- *
- * @details Requests the blank locked-idle view, clears retained mask progress, synchronizes the LCD while its backlight is still
- *          available, turns the backlight off and selects the locked LED indication.
- *
- * @note    Presentation failures are treated as degraded UI behavior and cannot prevent the separate actuator safe-state request.
- * @note    This helper does not stop sound, allowing action-specific feedback to finish after the display returns to idle.
- */
-static void App_SetLockedPresentation(void)
-{
-    (void)DRS_SetScreen(DRS_SCREEN_IDLE);
-    (void)DRS_SetEnteredDigits(0U);
-    (void)DRS_Update();
-    (void)LCD_BacklightOff(&App_Lcd);
-    (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-}
-
-/**
- * @brief   Presents a newly opened credential-entry session.
- *
- * @details Enables the LCD backlight, requests the empty masked-password screen, selects the normal locked LED baseline and emits a
- *          short keypress acknowledgement for the wake key. The initiating key is not passed to CES.
- */
-static void App_SetCESPresentation(void)
-{
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
-    (void)LCD_BacklightOn(&App_Lcd);
-    (void)DRS_SetScreen(DRS_SCREEN_PASSWORD_ENTRY);
-    (void)DRS_SetEnteredDigits(0U);
-    (void)DRS_Update();
-    (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-}
-
-/**
- * @brief   Presents installed-credential authorization for a replacement request.
- *
- * @details Acknowledges the registration command, enables the backlight, requests the fixed Access PIN prompt and clears retained
- *          mask progress before the authorization candidate is collected.
- */
-static void App_SetCRSAuthPresentation(void)
-{
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
-    (void)LCD_BacklightOn(&App_Lcd);
-    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_AUTH);
-    (void)DRS_SetEnteredDigits(0U);
-    (void)DRS_Update();
-}
-
-/**
- * @brief   Presents a newly opened credential-register first-entry session.
- *
- * @details Acknowledges the phase transition, enables the backlight, requests the fixed Update PIN prompt and clears retained mask
- *          progress before the proposed credential is collected.
- */
-static void App_SetCRSFirstEntryPresentation(void)
-{
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
-    (void)LCD_BacklightOn(&App_Lcd);
-    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY);
-    (void)DRS_SetEnteredDigits(0U);
-    (void)DRS_Update();
-}
-
-/**
- * @brief   Presents a newly opened credential-register confirmation-entry session.
- *
- * @details Acknowledges the phase transition, enables the backlight, requests the fixed Confirm PIN prompt and clears retained mask
- *          progress while CRS preserves the staged first entry.
- */
-static void App_SetCRSConfirmEntryPresentation(void)
-{
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, current_time_ms);
-    (void)LCD_BacklightOn(&App_Lcd);
-    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY);
-    (void)DRS_SetEnteredDigits(0U);
-    (void)DRS_Update();
-}
-
-/**
- * @brief   Presents successful credential-persistence feedback.
- *
- * @details Enables the backlight, requests the fixed PIN-updated screen and starts the access-granted sound pattern. The action
- *          executor separately owns the bounded APP_TIMEOUT_CRS_SAVED interval.
- */
-static void App_SetCRSSavedPresentation(void)
-{
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, current_time_ms);
-    (void)LCD_BacklightOn(&App_Lcd);
-    (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_SAVED);
-    (void)DRS_Update();
-}
-
-/**
- * @brief   Executes one semantic Lock Control action and optionally produces a synchronous follow-up event.
- *
- * @details Coordinates CES sessions, CRS staging and validation, CSS loading and persistence, authentication, timeout ownership,
- *          actuator safety and presentation according to the action selected by LCS. Synchronous outcomes are returned as
- *          follow-up events so they are dispatched only after the current LCS_Process() call has returned.
- *
- * @note    The function-local runtime_credential_valid flag prevents repeated Flash reads after the installed credential has been
- *          loaded or successfully replaced. The controlled-reset path erases the runtime reference and clears that flag.
- *
- * @param   Action - Semantic action returned by LCS_Process().
- *
- * @return  A synchronous semantic follow-up event, or LCS_EVENT_NONE when the action is complete.
- */
-static LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
-{
-    static bool runtime_credential_valid = false;
-
-    uint32_t current_time_ms = Platform_GetMillis();
-
-    switch(Action)
-    {
-        case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
-
-            (void)CRS_ClearStaging();
-            App_ClearRuntimeCandidate();
-
-            if(CES_BeginSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                (void)CES_EndSession();
-                (void)CRS_ClearStaging();
-
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            App_SetCRSFirstEntryPresentation();
-
-        break;
-
-        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
-
-            if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
-
-            App_SetCRSFirstEntryPresentation();
-
-        break;
-
-        case LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)CRS_ClearStaging();
-
-            App_ClearRuntimeCandidate();
-
-            (void)App_ForceLock();
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION:
-        {
-            App_CancelTimeout();
-            App_ClearRuntimeCandidate();
-
-            if(CES_GetCandidate(&App_RuntimeCandidate) != CES_OPERATION_OK)
-            {
-                goto controlled_reset;
-            }
-
-            CRS_OpStatus_t staging_status = CRS_StageCredential(App_RuntimeCandidate.Digits);
-
-            App_ClearRuntimeCandidate();
-
-            if(staging_status != CRS_OPERATION_OK)
-            {
-                goto controlled_reset;
-            }
-
-            if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                (void)CES_EndSession();
-                (void)CRS_ClearStaging();
-
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            App_SetCRSConfirmEntryPresentation();
-        }
-        break;
-
-        case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION:
-
-            if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
-
-            App_SetCRSConfirmEntryPresentation();
-
-        break;
-
-        case LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)CRS_ClearStaging();
-
-            App_ClearRuntimeCandidate();
-
-            (void)App_ForceLock();
-
-            (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION:
-
-            App_CancelTimeout();
-
-        break;
-
-        case LCS_ACTION_END_CREDENTIAL_REGISTER_SAVING_SESSION:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)CRS_ClearStaging();
-
-            App_ClearRuntimeCandidate();
-
-            (void)App_ForceLock();
-
-            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-
-            App_SetCRSSavedPresentation();
-
-            (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, current_time_ms);
-
-            if(!App_StartTimeout(APP_TIMEOUT_CRS_SAVED))
-            {
-                return LCS_EVENT_CREDENTIAL_REGISTER_DONE;
-            }
-
-        break;
-
-        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION:
-
-            if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                (void)CES_EndSession();
-
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            App_SetCRSAuthPresentation();
-
-        break;
-
-        case LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION:
-
-            if(CES_BeginSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                (void)CES_EndSession();
-
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            App_SetCESPresentation();
-
-        break;
-
-        case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION:
-
-            if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
-            {
-                App_CancelTimeout();
-
-                return LCS_EVENT_CREDENTIAL_CANCELLED;
-            }
-
-            (void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, current_time_ms);
-
-            App_SetCESPresentation();
-
-        break;
-
-        case LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)App_ForceLock();
-            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKED);
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_REQUEST_AUTHENTICATION:
-
-            App_CancelTimeout();
-
-            if(!runtime_credential_valid)
-            {
-                if(CSS_GetCredential(App_RuntimeCredential) != CSS_OPERATION_OK)
-                {
-                    goto controlled_reset;
-                }
-
-                runtime_credential_valid = true;
-            }
-
-            return App_ProcessAuthentication();
-
-        case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION:
-        {
-            App_CancelTimeout();
-            App_ClearRuntimeCandidate();
-
-            if(CES_GetCandidate(&App_RuntimeCandidate) != CES_OPERATION_OK)
-            {
-                goto controlled_reset;
-            }
-
-            CRS_ValidationResult_t validation_result =
-                CRS_ValidateConfirmation(App_RuntimeCandidate.Digits);
-
-            App_ClearRuntimeCandidate();
-
-            if(validation_result == CRS_VALIDATION_MATCH)
-            {
-                return LCS_EVENT_STAGING_VALIDATION_SUCCESS;
-            }
-
-            if(validation_result == CRS_VALIDATION_MISMATCH)
-            {
-                return LCS_EVENT_STAGING_VALIDATION_FAILURE;
-            }
-
-            goto controlled_reset;
-        }
-
-        case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STORAGE:
-        {
-            uint8_t temporary_credential[CRS_CREDENTIAL_LENGTH] = {0U};
-            LCS_Event_t storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE;
-
-            App_CancelTimeout();
-
-            if(CRS_GetValidatedCredential(temporary_credential) == CRS_OPERATION_OK &&
-               CSS_SaveCredential(temporary_credential) == CSS_OPERATION_OK)
-            {
-                for(size_t index = 0U; index < sizeof(App_RuntimeCredential); index++)
-                {
-                    App_RuntimeCredential[index] = temporary_credential[index];
-                }
-
-                runtime_credential_valid = true;
-                storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS;
-            }
-
-            (void)CRS_ClearStaging();
-
-            volatile uint8_t* temporary_bytes = (volatile uint8_t*)temporary_credential;
-
-            for(size_t index = 0U; index < sizeof(temporary_credential); index++)
-            {
-                temporary_bytes[index] = 0U;
-            }
-
-            return storage_event;
-        }
-
-        case LCS_ACTION_GRANT_ACCESS_UNLOCK:
-
-            if(!App_StartTimeout(APP_TIMEOUT_UNLOCK))
-            {
-                (void)App_ForceLock();
-
-                return LCS_EVENT_UNLOCK_TIMEOUT;
-            }
-
-            if(!App_RequestUnlock())
-            {
-                App_CancelTimeout();
-                (void)App_ForceLock();
-
-                return LCS_EVENT_UNLOCK_TIMEOUT;
-            }
-
-            (void)LCD_BacklightOn(&App_Lcd);
-            (void)DRS_SetScreen(DRS_SCREEN_ACCESS_GRANTED);
-            (void)DRS_Update();
-            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_ACCESS_GRANTED);
-            (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, current_time_ms);
-
-        break;
-
-        case LCS_ACTION_DENY_ACCESS:
-
-            (void)App_ForceLock();
-
-            if(!App_StartTimeout(APP_TIMEOUT_ACCESS_DENIED))
-            {
-                return LCS_EVENT_DENIED_ACCESS_TIMEOUT;
-            }
-
-            (void)LCD_BacklightOn(&App_Lcd);
-            (void)DRS_SetScreen(DRS_SCREEN_ACCESS_DENIED);
-            (void)DRS_Update();
-            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_ACCESS_DENIED);
-            (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
-
-        break;
-
-        case LCS_ACTION_ENTER_LOCKOUT:
-
-            (void)App_ForceLock();
-
-            if(!App_StartTimeout(APP_TIMEOUT_LOCKOUT))
-            {
-                return LCS_EVENT_LOCKOUT_TIMEOUT;
-            }
-
-            (void)LCD_BacklightOn(&App_Lcd);
-            (void)DRS_SetScreen(DRS_SCREEN_LOCKOUT);
-            (void)DRS_Update();
-            (void)SIS_SetIndication(&App_LockStatusIndication, SIS_INDICATION_LOCKOUT_ENTRY);
-            (void)SGS_Ring(SGS_RINGTONE_LOCKOUT, current_time_ms);
-
-        break;
-
-        case LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)App_ForceLock();
-            (void)SGS_Ring(SGS_RINGTONE_ENTRY_TIMEOUT, current_time_ms);
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_RETURN_TO_LOCKED:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)App_ForceLock();
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION:
-
-            App_CancelTimeout();
-
-            (void)CES_EndSession();
-            (void)CRS_ClearStaging();
-            App_ClearRuntimeCandidate();
-            (void)App_ForceLock();
-
-            App_SetLockedPresentation();
-
-        break;
-
-        case LCS_ACTION_REQUEST_CONTROLLED_RESET:
-
-            goto controlled_reset;
-
-        case LCS_ACTION_NONE:
-        default:
-
-        break;
-    }
-
-    return LCS_EVENT_NONE;
-
-controlled_reset:
-
-    /* CRS integration faults share the same fail-safe cleanup as an LCS-requested reset. */
-    runtime_credential_valid = false;
-
-    App_CancelTimeout();
-
-    (void)CES_EndSession();
-    (void)CRS_ClearStaging();
-    App_ClearRuntimeCandidate();
-
-    volatile uint8_t* runtime_credential_bytes = (volatile uint8_t*)App_RuntimeCredential;
-
-    for(size_t index = 0U; index < sizeof(App_RuntimeCredential); index++)
-    {
-        runtime_credential_bytes[index] = 0U;
-    }
-
-    (void)App_ForceLock();
-    (void)SGS_Stop();
-    (void)LCD_BacklightOff(&App_Lcd);
-
-    App_RequestControlledReset();
-
-    return LCS_EVENT_NONE;
-}
-
-/**
  * @brief   Serially dispatches one event and every bounded synchronous follow-up through Lock Control.
  *
  * @details Calls LCS_Process(), executes its returned action, and repeats while authentication, registration validation, storage or
  *          fail-safe execution produces a synchronous follow-up event. A small fixed bound prevents an accidental action cycle
- *          from monopolizing the caller. Exceeding that bound cancels timing, ends CES, forces the actuator safe and requests a
- *          controlled reset.
+ *          from monopolizing the caller. The current overflow fallback cancels timing, ends CES, stops sound and disables the LCD
+ *          backlight.
  *
  * @param   Event - First semantic event to dispatch; sentinels and out-of-range values are ignored.
  *
  * @note    All event processing and synchronous follow-up actions complete in the serialized context that initiated dispatch,
  *          whether App_ReadInput() or App_Dispatch().
- * @warning The dispatch-depth fallback requests reset directly and therefore does not execute the full credential erasure owned
- *          by LCS_ACTION_REQUEST_CONTROLLED_RESET before the hardware reset takes effect.
+ * @warning Direct actuator-safe and controlled-reset calls are currently disabled in the overflow fallback. Until this path is
+ *          consolidated with App Executor's controlled-reset cleanup, it does not provide the complete fail-safe behavior.
  */
 static void App_DispatchLcsEvent(LCS_Event_t Event)
 {
@@ -1930,11 +761,10 @@ static void App_DispatchLcsEvent(LCS_Event_t Event)
         App_CancelTimeout();
 
         (void)CES_EndSession();
-        (void)App_ForceLock();
         (void)SGS_Stop();
-        (void)LCD_BacklightOff(&App_Lcd);
+        (void)LCD_BacklightOff(App_Instance->Lcd);
 
-        App_RequestControlledReset();
+        App_ExecuteAction(LCS_ACTION_REQUEST_CONTROLLED_RESET);
     }
 }
 
@@ -2082,8 +912,8 @@ static void App_UpdateServices(void)
     uint32_t current_time_ms = Platform_GetMillis();
 
     (void)DRS_Update();
-    (void)SIS_Update(&App_LockStatusIndication);
-    (void)SIS_Update(&App_LowBatteryStatusIndication);
+    (void)SIS_Update(App_Instance->Lock_Status_Indication);
+    (void)SIS_Update(App_Instance->LowBattery_Status_Indication);
     (void)SGS_Update(current_time_ms);
 }
 
@@ -2099,29 +929,10 @@ static void App_HandleInputFault(void)
     uint32_t current_time_ms = Platform_GetMillis();
 
     App_DispatchLcsEvent(LCS_EVENT_CREDENTIAL_CANCELLED);
-    (void)LCD_BacklightOn(&App_Lcd);
+    (void)LCD_BacklightOn(App_Instance->Lcd);
     (void)DRS_SetScreen(DRS_SCREEN_ACCESS_DENIED);
     (void)DRS_Update();
     (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
-}
-
-/**
- * @brief   Executes the target-controlled reset endpoint after outputs are safe.
- *
- * @details Disables interrupt activity and invokes the CMSIS system-reset request. Callers must force the actuator safe, erase
- *          credentials, stop sound and disable the LCD backlight before entering this endpoint.
- *
- * @note    This function is not expected to return on the STM32 target.
- */
-static void App_RequestControlledReset(void)
-{
-    __disable_irq();
-    NVIC_SystemReset();
-
-    for(;;)
-    {
-        /* Wait for the reset request to take effect. */
-    }
 }
 
 /**********************************************************************************************************************************
@@ -2130,11 +941,11 @@ static void App_RequestControlledReset(void)
 /**
  * @brief   Initializes the complete electronic-lock application object graph.
  *
- * @details Initializes the actuator safe path first, followed by the LCD/render path, keyboard, buzzer/sound path and both
+ * @details Initializes the actuator descriptor first, followed by the LCD/render path, keyboard, buzzer/sound path and both
  *          indication instances. After every dependency succeeds, CSS availability selects either the first-registration route
  *          through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through LCS_EVENT_INIT_OK and locked-idle presentation.
  *
- * @note    CSS_HasCredential() provides only availability. The installed credential is copied into App_RuntimeCredential lazily
+ * @note    CSS_HasCredential() provides only availability. The installed credential is copied into the configured runtime buffer lazily
  *          when the first authentication action executes.
  * @note    This operation shall run after CubeMX peripheral initialization and before the first App_ReadInput() or App_Dispatch().
  * @note    A failure forces the actuator low when possible and reports LCS_EVENT_INIT_FAIL while the FSM remains in boot. The
@@ -2146,6 +957,8 @@ static void App_RequestControlledReset(void)
  */
 App_InitStatus_t App_Init(void)
 {
+    App_Instance = App_GetRuntimeInstances();
+
     bool initialized = App_InitLockActuator()               &&
                        App_InitLcd()                        &&
                        App_InitKeyboard()                   &&
@@ -2155,7 +968,7 @@ App_InitStatus_t App_Init(void)
 
     if(!initialized)
     {
-        (void)App_ForceLock();
+        // (void)App_ForceLock();
 
         LCS_Action_t failure_action = LCS_Process(LCS_EVENT_INIT_FAIL);
 
@@ -2172,8 +985,11 @@ App_InitStatus_t App_Init(void)
     else
     {
         (void)LCS_Process(LCS_EVENT_INIT_OK);
-
-        App_SetLockedPresentation();
+        (void)DRS_SetScreen(DRS_SCREEN_IDLE);
+        (void)DRS_SetEnteredDigits(0U);
+        (void)DRS_Update();
+        (void)LCD_BacklightOff(App_Instance->Lcd);
+        (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_LOCKED);
     }
 
     return APP_INIT_SUCCESSFULLY;

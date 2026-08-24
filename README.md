@@ -88,7 +88,8 @@ so credential updates remain unavailable in the current product integration.
 | PCF8574 address | 0x20, 7-bit | App Core |
 | Backlight request | 1,500 Hz at 50% | App Core/PWM adapter |
 
-The four durations in
+The five durations configured in
+[App_Config.h](App/Config/Inc/App_Config.h) and mapped to semantic events in
 [App_Core.c](App/Core/Src/App_Core.c) are the authoritative product timeouts.
 Older architecture documents do not override them.
 
@@ -117,14 +118,14 @@ Older architecture documents do not override them.
 
 Detailed behavior:
 
-- [complete App Core reference](App/Core/README.md);
-- [FSM diagram and transition table](App/Core/README.md#12-lock-control-state-machine-integration);
+- [complete application-layer reference](App/README.md);
+- [authoritative Lock Control FSM](Libs/Services/Lock_Control/README.md);
 - [native host tests for the LCS FSM](Tests/README.md);
-- [timeout lifecycle](App/Core/README.md#15-application-timeout-model);
-- [service update order](App/Core/README.md#16-service-update-cycle);
-- [keyboard and physical-input model](App/Core/README.md#10-keyboard-model);
-- [credential-entry outcomes](App/Core/README.md#11-credential-entry-outcomes);
-- [presentation policy](App/Core/README.md#17-presentation-policy).
+- [timeout lifecycle](App/README.md#9-timeout-model);
+- [public API and service update order](App/README.md#5-public-api-and-execution-model);
+- [keyboard and physical-input model](App/README.md#8-keyboard-policy);
+- [credential ownership and security](App/README.md#12-credential-ownership-and-security);
+- [action and presentation coordination](App/README.md#11-action-execution).
 
 ---
 
@@ -150,16 +151,18 @@ Detailed behavior:
 | TIM2 | Raw time counter; microsecond resolution/wrap contract requires validation |
 | PC13 | On-board diagnostic LED |
 
-CubeMX-generated GPIO initialization and App Core both request PB8 low before
-normal operation. Firmware state describes the commanded output, not confirmed
-mechanical lock position. The external actuator stage remains responsible for
-load current, inductive protection and electrical safety.
+CubeMX-generated GPIO initialization requests PB8 low before `App_Init()`. App
+Core then binds the Platform descriptor; its redundant explicit safe-state write
+is currently disabled and tracked as application safety debt. Firmware state
+describes the commanded output, not confirmed mechanical lock position. The
+external actuator stage remains responsible for load current, inductive
+protection and electrical safety.
 
 Hardware and Platform details:
 
 - [CubeMX configuration](Electronic-Lock.ioc);
 - [Platform interfaces](Platforms/README.md);
-- [App Core board composition](App/Core/README.md#7-product-configuration-owned-by-app-core).
+- [App configuration and hardware bindings](App/Config/README.md#5-hardware-bindings).
 
 ---
 
@@ -168,7 +171,7 @@ Hardware and Platform details:
 ~~~mermaid
 flowchart TB
     MAIN["Execution owner"]
-    APP["Application Core"]
+    APP["Application Layer<br/>Config + Core + Executor"]
     DOMAIN["Domain services"]
     UI["Presentation services"]
     COMPONENTS["Components and adapters"]
@@ -185,10 +188,11 @@ flowchart TB
     PLATFORM --> HAL
 ~~~
 
-Dependencies point toward hardware capabilities. App Core is the composition
-root; LCS owns authoritative product state; CES owns the active candidate;
-presentation services own UI patterns; components own device behavior; Platform
-interfaces isolate HAL and generated handles.
+Dependencies point toward hardware capabilities. App Config owns product
+bindings and retained objects, App Core initializes and dispatches, and App
+Executor applies semantic actions. LCS owns authoritative product state; CES
+owns the active candidate; presentation services own UI patterns; components
+own device behavior; Platform interfaces isolate HAL and generated handles.
 
 Runtime APIs are serialized and non-reentrant:
 
@@ -201,13 +205,14 @@ void             App_Dispatch  (void);
 `App_ReadInput()` performs one keyboard acquisition and immediately processes
 completed input. `App_Dispatch()` polls the active timeout and advances
 display, two indication instances and sound once. See the
-[public API and execution model](App/Core/README.md#5-public-api).
+[public API and execution model](App/README.md#5-public-api-and-execution-model).
 
 ### Application and infrastructure
 
 | Module | Responsibility | Detailed documentation |
 | --- | --- | --- |
-| App Core | Composition, input routing, authentication coordination, actions, timeouts and UI orchestration | [README](App/Core/README.md) |
+| Application Layer | Product configuration, static composition, input/event orchestration, action execution, timeouts and UI coordination | [README](App/README.md) |
+| App Config | Board/product policy and static runtime-object registry | [README](App/Config/README.md) |
 | Platform | Project-owned GPIO, I2C, PWM and Time boundary over STM32 | [README](Platforms/README.md) |
 | CubeMX Core | Generated startup, clocks, GPIO, I2C and timers | [main.c](Core/Src/main.c), [IOC](Electronic-Lock.ioc) |
 | STM32 Drivers | Vendor HAL and CMSIS implementation | [Drivers](Drivers) |
@@ -257,18 +262,19 @@ display, two indication instances and sound once. See the
   sound and disables the backlight before reset.
 
 The detailed failure mapping is maintained in the
-[App Core failure policy](App/Core/README.md#20-failure-policy).
+[application safety and failure policy](App/README.md#13-safety-and-failure-policy).
 
 ### Security boundary
 
-The credential is fixed in firmware. CES stores the active candidate; App Core
-copies it only for authentication and explicitly erases that copy. UI services
-receive masked length, never raw digits.
+CSS owns the persistent credential record. CES stores the active candidate;
+App Executor copies it only for one synchronous authentication or registration
+operation and explicitly erases that copy. App Config retains the installed
+credential in RAM after a successful load or replacement. UI services receive
+masked length, never raw digits.
 
-This reduces accidental exposure but does not provide secure storage,
-firmware-extraction resistance, a secure element, tamper response, protected
-debug, credential rotation or audit logging. Do not reuse the development
-credential in a real installation.
+This reduces accidental exposure but does not provide a secure element,
+firmware-extraction resistance, tamper response, protected debug or audit
+logging. Production deployment still requires a dedicated security review.
 
 ---
 
@@ -281,7 +287,7 @@ credential in a real installation.
 4. Flash the target and verify PB8 safe startup before connecting an actuator
    load.
 
-Pending integration belongs only in CubeMX user-code regions:
+The current integration is kept inside CubeMX user-code regions:
 
 ~~~c
 if (App_Init() != APP_INIT_SUCCESSFULLY)
@@ -310,8 +316,8 @@ After CubeMX regeneration, review the diff and confirm:
 - PB6/PB7 remain I2C1;
 - every project-owned source directory remains in the build.
 
-See the [execution model](App/Core/README.md#6-current-execution-model) and
-[initialization graph](App/Core/README.md#9-initialization-graph).
+See the [execution model](App/README.md#5-public-api-and-execution-model) and
+[initialization graph](App/README.md#6-initialization-and-object-lifetime).
 
 ---
 
@@ -329,18 +335,19 @@ Before product use, verify at minimum:
 - reset or induced fault while unlocked;
 - UI failure cannot produce or prolong unlock.
 
-Use the [App Core verification checklist](App/Core/README.md#26-verification-checklist)
+Use the [App Config validation checklist](App/Config/README.md#13-validation-checklist)
 and each module README for unit-, integration- and hardware-specific cases.
 
 ---
 
 ## Known Constraints
 
-- Generated `main.c` is not yet connected to App Core.
 - Main-loop cadence and maximum timeout-observation latency are not yet
   measured.
 - PB8 is controlled directly through Platform GPIO; no dedicated actuator
   driver or redundant local energization deadline exists.
+- `App_InitLockActuator()` currently relies on the CubeMX PB8 startup level
+  because its explicit safe-state write is disabled.
 - Presentation-service failures are mostly treated as degraded feedback rather
   than global operational faults.
 - Low-battery sensing and policy are not implemented.
@@ -358,8 +365,8 @@ and each module README for unit-, integration- and hardware-specific cases.
 - Mechanical position sensing is absent.
 
 Implementation-specific constraints are tracked in the
-[App Core deferred-work section](App/Core/README.md#24-known-constraints-and-deferred-work)
-and the corresponding module READMEs.
+[App known-constraints section](App/README.md#17-known-constraints) and the
+corresponding module READMEs.
 
 ---
 
