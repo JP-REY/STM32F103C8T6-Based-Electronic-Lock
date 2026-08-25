@@ -4,7 +4,8 @@
  *
  * @details Defines the immutable keyboard policy and owns every Platform descriptor, adapter context, component handle,
  *          instance-based service runtime and credential buffer composed by the App layer. A single immutable registry exposes
- *          borrowed pointers to App_Core.c and App_Executor.c while preserving static lifetime and centralized ownership.
+ *          borrowed pointers to App_Core.c, App_Executor.c and the HAL callback bridge while preserving static lifetime and
+ *          centralized ownership.
  *
  *          This module performs no hardware initialization and executes no business workflow. App_Init() binds and initializes the
  *          object graph; App_ExecuteAction() operates on it in response to semantic Lock Control actions.
@@ -12,8 +13,8 @@
  * @note    No dynamic allocation is used. All referenced storage remains valid for the complete firmware lifetime.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-23
+ * @version 1.1.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -221,12 +222,70 @@ static SIS_Handle_t App_LockStatusIndication = {0};
 /**
  * @brief   Platform GPIO descriptor controlling the physical lock actuator.
  *
- * @details Is bound to the CubeMX LOCKER_PIN output and temporarily realizes the actuator boundary until a dedicated Lock Actuator
- *          Driver is introduced. GPIO reset is the safe locked state; GPIO set requests physical unlock.
+ * @details App Core binds this descriptor to the CubeMX LOCK_ACTUATOR output before passing it to App_LockActuator. PB8 LOW is the
+ *          current product safe locked request; PB8 HIGH requests physical unlock. App Executor still uses the same descriptor
+ *          directly until command orchestration is migrated to the planned Door Control Service.
  *
  * @note    Only serialized application action paths access this descriptor after initialization.
  */
 static GPIO_Handle_t App_LockActuatorGpio = {0};
+
+/**
+ * @brief   Lock Actuator Driver instance for the product's physical locking output.
+ *
+ * @details Borrows App_LockActuatorGpio after App Core initializes both objects. The handle normalizes the active-low locked command
+ *          but does not establish an unlock timeout or confirm mechanical bolt position.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static LockActuator_Handle_t App_LockActuator;
+
+/**********************************************************************************************************************************
+ Door Sensor Platform Object
+ **********************************************************************************************************************************/
+/**
+ * @brief   Platform GPIO descriptor connected to the physical door-contact sensor.
+ *
+ * @details App Core binds this descriptor to the CubeMX DOOR_SENSOR input on PB0 and passes it to App_DoorSensor. CubeMX configures
+ *          the pin as a pull-up digital input; the driver interprets LOW as the active contact state.
+ *
+ * @note    The future Door Control Service will assign the product meaning of the active contact and consume runtime state reads.
+ */
+static GPIO_Handle_t App_DoorSensorGpio = {0};
+
+/**
+ * @brief   Door Sensor Driver instance for the product's physical door contact.
+ *
+ * @details Borrows App_DoorSensorGpio after App Core initializes both objects. Runtime state acquisition and door-policy decisions
+ *          are intentionally deferred to the planned Door Control Service.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static DoorSensor_Handle_t App_DoorSensor;
+
+/**********************************************************************************************************************************
+ Exit Button Platform Object
+ **********************************************************************************************************************************/
+/**
+ * @brief   Platform GPIO descriptor connected to the physical request-to-exit button.
+ *
+ * @details App Core binds this descriptor to the CubeMX EXIT_BUTTON input on PB10 and passes it to App_ExitButton. CubeMX configures
+ *          the pin with a pull-up and rising/falling EXTI so press and release edges reach the HAL callback bridge.
+ *
+ * @note    The interrupt callback publishes edge timestamps only; debounced runtime processing belongs to the planned Door Control
+ *          Service.
+ */
+static GPIO_Handle_t App_ExitButtonGpio = {0};
+
+/**
+ * @brief   Exit Button Driver instance for the product's request-to-exit input.
+ *
+ * @details Retains the active-low interpretation, 20 ms debounce policy and interrupt handoff state. The HAL callback notifies this
+ *          instance; a future Door Control Service will call ExitButton_Update() and interpret validated events.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static ExitButton_Handle_t App_ExitButton;
 
 /**********************************************************************************************************************************
  Credential and Timeout Runtime Objects
@@ -283,6 +342,11 @@ const App_RuntimeInstances_t App_Instances =
     .Lock_Status_Led                = &App_LockStatusLed,
     .Lock_Status_Indication         = &App_LockStatusIndication,
     .Lock_Actuator_Gpio             = &App_LockActuatorGpio,
+    .Lock_Actuator                  = &App_LockActuator,
+    .Door_Sensor_Gpio               = &App_DoorSensorGpio,
+    .Door_Sensor                    = &App_DoorSensor,
+    .Exit_Button_Gpio               = &App_ExitButtonGpio,
+    .Exit_Button                    = &App_ExitButton,
     .Runtime_Candidate              = &App_RuntimeCandidate,
     .Runtime_Credential             = App_RuntimeCredential,
 };

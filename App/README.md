@@ -49,6 +49,10 @@ The application layer owns:
 - the product-level hardware bindings and policy constants;
 - the static object graph used by the firmware;
 - initialization order and fail-fast dependency validation;
+- composition of the lock actuator, door sensor and exit button required by the
+  planned Door Control Service;
+- publication of exit-button EXTI activity to the Exit Button Driver through a
+  minimal HAL callback bridge;
 - matrix-keyboard acquisition and translation to Credential Entry Service
   commands;
 - application-level timeout lifecycle;
@@ -80,7 +84,8 @@ App/
 │   ├── Inc/
 │   │   └── App_Config.h
 │   ├── Src/
-│   │   └── App_Config.c
+│   │   ├── App_Config.c
+│   │   └── App_ConfigHalCallbacks.c
 │   └── README.md
 ├── Core/
 │   ├── Inc/
@@ -99,6 +104,7 @@ App/
 | `Config/README.md` | Detailed configuration, binding and object-ownership reference | Project documentation |
 | `Config/Inc/App_Config.h` | Board bindings, product constants, timeout types and runtime-registry contract | App internal |
 | `Config/Src/App_Config.c` | Static storage for configuration, handles, adapter contexts, services and secret buffers | App internal |
+| `Config/Src/App_ConfigHalCallbacks.c` | HAL EXTI bridge that publishes exit-button edges to the application-owned driver instance | App internal / HAL callback |
 | `Core/Inc/App_Core.h` | Lifecycle and cooperative runtime entry points | Public |
 | `Core/Inc/App_Core_Internal.h` | Timeout operations shared by Core and Executor | App internal |
 | `Core/Inc/App_Executor.h` | Semantic LCS action-execution boundary | App internal |
@@ -141,6 +147,7 @@ flowchart TB
         CORE["App_Core.c<br/>initialize, read input,<br/>poll and dispatch"]
         EXEC["App_Executor.c<br/>execute LCS actions"]
         CONFIG["App_Config.c/.h<br/>policy, bindings and<br/>static object registry"]
+        HALCB["App_ConfigHalCallbacks.c<br/>EXTI notification bridge"]
         INTERNAL["App_Core_Internal.h<br/>timeout collaboration"]
     end
 
@@ -153,6 +160,7 @@ flowchart TB
     MAIN --> API --> CORE
     CONFIG --> CORE
     CONFIG --> EXEC
+    CONFIG --> HALCB
     CORE --> LCS
     CORE --> EXEC
     EXEC --> SERVICES
@@ -161,6 +169,7 @@ flowchart TB
     CORE --> SERVICES
     CORE --> COMPONENTS
     COMPONENTS --> PLATFORM --> HAL
+    HAL --> HALCB --> COMPONENTS
     CORE --> PLATFORM
     CONFIG -. "compile-time bindings" .-> HAL
 ```
@@ -173,6 +182,8 @@ Dependency rules:
   `App_Core_Internal.h` for timeout lifecycle.
 - `App_Config.c` owns storage but performs no hardware initialization and no
   business workflow.
+- `App_ConfigHalCallbacks.c` implements only the HAL-to-driver interrupt handoff;
+  it performs no debounce, service dispatch or actuator command.
 - LCS returns actions; it does not call App Executor, other services or hardware
   directly.
 - Reusable services and components must not depend on `App/`.
@@ -249,8 +260,10 @@ then initializes the graph in fail-fast order:
 ```mermaid
 flowchart TD
     START["App_Init"] --> REG["Bind App_Instance to<br/>App Config registry"]
-    REG --> ACT["Bind lock-actuator<br/>GPIO descriptor"]
-    ACT --> LCD["PCF8574, LCD bus,<br/>backlight PWM, LCD, DRS"]
+    REG --> ACT["Bind lock-actuator GPIO<br/>and initialize driver"]
+    ACT --> DOOR["Bind door-sensor GPIO<br/>and initialize driver"]
+    DOOR --> EXIT["Bind exit-button GPIO<br/>and initialize driver"]
+    EXIT --> LCD["PCF8574, LCD bus,<br/>backlight PWM, LCD, DRS"]
     LCD --> KEY["Keyboard GPIOs,<br/>driver and scan adapter"]
     KEY --> BUZ["Buzzer PWM,<br/>Buzzer Driver and SGS"]
     BUZ --> LOCKLED["Lock-status GPIO,<br/>LED and SIS instance"]
@@ -259,6 +272,8 @@ flowchart TD
     CSS -->|No| FIRST["Dispatch credential not<br/>registered"]
     CSS -->|Yes| READY["Dispatch init-ok and<br/>apply locked idle UI"]
     ACT -->|Failure| FAIL["Dispatch init-fail action"]
+    DOOR -->|Failure| FAIL
+    EXIT -->|Failure| FAIL
     LCD -->|Failure| FAIL
     KEY -->|Failure| FAIL
     BUZ -->|Failure| FAIL
@@ -301,6 +316,15 @@ Immediate follow-ups are used for operations that complete synchronously, such
 as authentication, credential-stage comparison and credential persistence.
 Human-scale timeouts remain asynchronous and are observed later by
 `App_Dispatch()`.
+
+The current door-mechanism boundary is intentionally limited to composition and
+interrupt publication. App Core initializes the Lock Actuator, Door Sensor and
+Exit Button drivers. `HAL_GPIO_EXTI_Callback()` forwards PB10 edges to
+`ExitButton_NotifyInterrupt()`. No App runtime path currently calls
+`DoorSensor_GetState()` or `ExitButton_Update()`, and actuator commands remain in
+App Executor through the shared Platform GPIO descriptor. Those runtime reads,
+debounced event consumption and coordinated lock policy belong to the planned
+Door Control Service.
 
 ---
 
@@ -500,12 +524,13 @@ serialization remains required.
 
 ## 15. Build Integration
 
-The root `CMakeLists.txt` must compile all three implementation units and expose
+The root `CMakeLists.txt` must compile all four implementation units and expose
 both App include directories privately to the firmware target:
 
 ```cmake
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Config/Src/App_Config.c
+    App/Config/Src/App_ConfigHalCallbacks.c
     App/Core/Src/App_Core.c
     App/Core/Src/App_Executor.c
 )
@@ -565,8 +590,13 @@ as `Describe this module`, `Brief description` or fictitious parameter names.
 ## 17. Known Constraints
 
 - Only one application timeout can be active.
-- The application has no dedicated Lock Actuator Driver; the Executor writes the
-  Platform GPIO directly.
+- The Lock Actuator Driver is instantiated and initialized, but App Executor
+  still commands its shared Platform GPIO descriptor directly.
+- The Door Sensor Driver is instantiated on PB0, but state sampling and
+  open/closed policy await the planned Door Control Service.
+- The Exit Button Driver is instantiated on PB10 and receives EXTI
+  notifications, but `ExitButton_Update()` and request-to-exit policy await the
+  planned Door Control Service.
 - The explicit safe-state write in `App_InitLockActuator()` is currently
   disabled, so startup depends on CubeMX driving PB8 low before `App_Init()`.
 - The actuator path has no mechanical position feedback.
@@ -593,6 +623,9 @@ as `Describe this module`, `Brief description` or fictitious parameter names.
 - [Credential Register Service](../Libs/Services/Credential_Register/README.md)
 - [Credential Storage Service](../Libs/Services/Credential_Storage/README.md)
 - [Authentication Service](../Libs/Services/Authentication/README.md)
+- [Lock Actuator Driver](../Libs/Components/LockActuator/README.md)
+- [Door Sensor Driver](../Libs/Components/DoorSensor/README.md)
+- [Exit Button Driver](../Libs/Components/ExitButton/README.md)
 - [Timeout Validation Service](../Libs/Services/Timeout_Validation/README.md)
 - [Display Render Service](../Libs/Services/Display_Render/README.md)
 - [Status Indication Service](../Libs/Services/Status_Indication/README.md)

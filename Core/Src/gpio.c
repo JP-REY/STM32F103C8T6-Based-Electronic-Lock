@@ -71,7 +71,7 @@ void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : KEYBOARD_ROW_3_Pin KEYBOARD_ROW_2_Pin KEYBOARD_ROW_1_Pin KEYBOARD_ROW_0_Pin */
   GPIO_InitStruct.Pin = KEYBOARD_ROW_3_Pin|KEYBOARD_ROW_2_Pin|KEYBOARD_ROW_1_Pin|KEYBOARD_ROW_0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -83,6 +83,18 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DOOR_SENSOR_Pin */
+  GPIO_InitStruct.Pin = DOOR_SENSOR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(DOOR_SENSOR_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : EXIT_BUTTON_Pin */
+  GPIO_InitStruct.Pin = EXIT_BUTTON_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(EXIT_BUTTON_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LOCK_ACTUATOR_Pin */
   GPIO_InitStruct.Pin = LOCK_ACTUATOR_Pin;
@@ -103,6 +115,9 @@ void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 

@@ -4,7 +4,8 @@
  *
  * @details Centralizes the board bindings, product policy constants, timeout data model and statically allocated object graph used
  *          by the electronic-lock application. App_Config.c owns the concrete storage; App_Core.c initializes the objects and
- *          coordinates input and timing; App_Executor.c consumes the same registry while executing semantic Lock Control actions.
+ *          coordinates input and timing; App_Executor.c consumes the same registry while executing semantic Lock Control actions;
+ *          App_ConfigHalCallbacks.c borrows the exit-button instance only to publish PB10 interrupt activity.
  *
  *          This header is internal to the App layer. It intentionally exposes component, service, Platform and CubeMX types to the
  *          application implementation modules, but none of those dependencies cross the public App_Core.h boundary.
@@ -13,8 +14,8 @@
  *          the pointed-to objects.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-23
+ * @version 1.1.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 
 #ifndef APP_CONFIG_H
@@ -59,6 +60,9 @@ static "C" {
 #include "MatrixKeyboard_GPIO_ScanAdapter.h"
 #include "Buzzer_Driver.h"
 #include "Led_Driver.h"
+#include "LockActuator_Driver.h"
+#include "DoorSensor_Driver.h"
+#include "ExitButton_Driver.h"
 
 /**
  * @brief Platform interfaces used directly by the composition root.
@@ -182,6 +186,36 @@ static "C" {
 /** @brief Electrical level that turns the low-battery status LED on. */
 #define APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL (LED_ACTIVE_LOW)
 
+/** @brief STM32 GPIO port connected to the physical lock actuator control input. */
+#define APP_LOCK_ACTUATOR_GPIO_PORT             (GPIOB)
+
+/** @brief Zero-based STM32 GPIO pin number connected to the physical lock actuator control input. */
+#define APP_LOCK_ACTUATOR_PIN_NUMBER            (8U)
+
+/** @brief Electrical level interpreted by the Lock Actuator Driver as the locked command. */
+#define APP_LOCK_ACTUATOR_ACTIVE_LEVEL          (LOCK_ACTUATOR_ACTIVE_LEVEL_LOW)
+
+/** @brief STM32 GPIO port connected to the physical door sensor input. */
+#define APP_DOOR_SENSOR_GPIO_PORT               (GPIOB)
+
+/** @brief Zero-based STM32 GPIO pin number connected to the physical door sensor input. */
+#define APP_DOOR_SENSOR_PIN_NUMBER              (0U)
+
+/** @brief Electrical level interpreted by the Door Sensor Driver as its active contact state. */
+#define APP_DOOR_SENSOR_ACTIVE_LEVEL            (DOOR_SENSOR_ACTIVE_LEVEL_LOW)
+
+/** @brief STM32 GPIO port connected to the physical exit button input. */
+#define APP_EXIT_BUTTON_GPIO_PORT               (GPIOB)
+
+/** @brief Zero-based STM32 GPIO pin number connected to the physical exit button input. */
+#define APP_EXIT_BUTTON_PIN_NUMBER              (10U)
+
+/** @brief Electrical level interpreted by the Exit Button Driver as a pressed button. */
+#define APP_EXIT_BUTTON_ACTIVE_LEVEL            (EXIT_BUTTON_ACTIVE_LEVEL_LOW)
+
+/** @brief Required quiet interval after the most recent exit-button edge, in milliseconds. */
+#define APP_EXIT_BUTTON_DEBOUNCE_TIME_MS        (20U)
+
 /** @brief Credential Entry Service numeric value associated with keyboard key '0'. */
 #define APP_CREDENTIAL_ENTRY_DIGIT_0            (0U)
 
@@ -232,12 +266,6 @@ static "C" {
 
 /** @brief Maximum number of synchronous LCS follow-up events processed in one dispatch chain. */
 #define APP_MAX_LCS_DISPATCH_DEPTH              (4U)
-
-/** @brief STM32 GPIO port connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_GPIO_PORT             (GPIOB)
-
-/** @brief Zero-based STM32 GPIO pin number connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_PIN_NUMBER            (8U)
 
 /**********************************************************************************************************************************
  Macros
@@ -351,7 +379,12 @@ typedef struct
     GPIO_Handle_t*         Lock_Status_Led_Gpio;         /*< Platform GPIO descriptor for the lock-status LED.             */
     LED_Handle_t*          Lock_Status_Led;              /*< LED Driver instance for lock-state indication.                */
     SIS_Handle_t*          Lock_Status_Indication;       /*< Independent lock-state Status Indication runtime.             */
-    GPIO_Handle_t*         Lock_Actuator_Gpio;           /*< Temporary GPIO-based physical lock-actuator boundary.         */
+    GPIO_Handle_t*         Lock_Actuator_Gpio;           /*< Platform GPIO descriptor for the physical lock actuator.      */
+    LockActuator_Handle_t* Lock_Actuator;                /*< Polarity-independent lock-actuator component instance.        */
+    GPIO_Handle_t*         Door_Sensor_Gpio;             /*< Platform GPIO descriptor for the physical door contact.       */
+    DoorSensor_Handle_t*   Door_Sensor;                  /*< Polarity-independent door-sensor component instance.          */
+    GPIO_Handle_t*         Exit_Button_Gpio;             /*< Platform GPIO descriptor for the physical exit button.        */
+    ExitButton_Handle_t*   Exit_Button;                  /*< Interrupt-oriented debounced exit-button component instance.  */
     CES_Candidate_t*       Runtime_Candidate;            /*< Short-lived credential candidate transfer buffer.             */
     uint8_t*               Runtime_Credential;           /*< Installed credential retained for authentication.             */
 

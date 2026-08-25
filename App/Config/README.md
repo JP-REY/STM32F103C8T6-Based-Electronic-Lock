@@ -42,7 +42,8 @@ It owns:
 
 - LCD geometry, expander address, PWM selection and brightness policy;
 - matrix-keyboard dimensions, pins, active level, debounce and logical key map;
-- buzzer, status LED and actuator bindings;
+- buzzer, status LED, lock actuator, door sensor and exit button bindings;
+- exit-button debounce and HAL EXTI handoff configuration;
 - application timeout durations and dispatch-depth bound;
 - compile-time credential-length compatibility checks;
 - Platform descriptors, adapter contexts and component handles;
@@ -69,7 +70,8 @@ Config/
 ├── Inc/
 │   └── App_Config.h
 ├── Src/
-│   └── App_Config.c
+│   ├── App_Config.c
+│   └── App_ConfigHalCallbacks.c
 └── README.md
 ```
 
@@ -77,6 +79,7 @@ Config/
 |---|---|
 | `Inc/App_Config.h` | Internal dependency imports, `APP_*` definitions, compile-time assertions, timeout data model and registry declaration |
 | `Src/App_Config.c` | Immutable keyboard policy, static runtime-object storage, registry bindings and getter implementation |
+| `Src/App_ConfigHalCallbacks.c` | Strong HAL GPIO EXTI callback that forwards PB10 activity to the application-owned Exit Button Driver instance |
 | `README.md` | Configuration ownership, hardware map and maintenance contract |
 
 ---
@@ -146,6 +149,22 @@ mutates a referenced handle. No ownership transfer occurs.
 | Lock-status LED active level | Low |
 | Low-battery LED active level | Low |
 
+### Door mechanism
+
+| Setting | Value |
+|---|---|
+| Lock-actuator locked command | PB8 LOW |
+| Door-sensor active contact | PB0 LOW |
+| Exit-button pressed level | PB10 LOW |
+| Exit-button debounce | 20 ms |
+| Exit-button EXTI | Rising and falling edges |
+| Runtime policy owner | Planned Door Control Service |
+
+The current App integration composes and initializes all three drivers. It also
+publishes PB10 EXTI timestamps to the Exit Button Driver. Door-state sampling,
+debounced exit-event consumption and coordinated actuator policy are not App
+Config responsibilities and remain pending in the planned Door Control Service.
+
 ### Application policy
 
 | Setting | Value |
@@ -179,14 +198,17 @@ The following table must remain consistent with
 | Lock-status LED | PA15, active low | `APP_LOCK_STATUS_LED_*` |
 | Low-battery LED | PA12, active low | `APP_LOW_BATTERY_STATUS_LED_*` |
 | Lock actuator | PB8; low requests locked state | `APP_LOCK_ACTUATOR_*` |
+| Door sensor | PB0; pull-up input, low active contact | `APP_DOOR_SENSOR_*` |
+| Exit button | PB10; pull-up, active low, rising/falling EXTI | `APP_EXIT_BUTTON_*` |
 
 GPIO pin-number definitions are zero-based pin indexes, not HAL bit masks.
 `PGPIO_Init()` performs the Platform-specific conversion.
 
-CubeMX currently configures keyboard rows as falling-edge EXTI inputs with
+CubeMX currently configures keyboard rows as rising/falling-edge EXTI inputs with
 pull-ups and columns as push-pull outputs. App runtime acquisition remains
 polling/cooperative through the Matrix Keyboard Driver; no App ISR consumes a
-key event.
+key event. The application HAL callback filters the GPIO pin and publishes only
+the PB10 exit-button line to the Exit Button Driver.
 
 ---
 
@@ -252,7 +274,9 @@ lifecycle state and uses `Active` as its authoritative validity flag.
 | `Buzzer_*`, `Buzzer` | buzzer PWM and Buzzer Driver handle |
 | `Lock_Status_*` | GPIO, LED handle and lock SIS runtime |
 | `LowBattery_Status_*` | GPIO, LED handle and low-battery SIS runtime |
-| `Lock_Actuator_Gpio` | direct Platform GPIO actuator boundary |
+| `Lock_Actuator_Gpio`, `Lock_Actuator` | PB8 Platform descriptor and Lock Actuator Driver handle |
+| `Door_Sensor_Gpio`, `Door_Sensor` | PB0 Platform descriptor and Door Sensor Driver handle |
+| `Exit_Button_Gpio`, `Exit_Button` | PB10 Platform descriptor and Exit Button Driver handle |
 | `Runtime_Candidate` | transient complete CES candidate copy |
 | `Runtime_Credential` | installed credential retained in RAM |
 
@@ -277,12 +301,21 @@ Only `App_Init()` may establish the usable dependency graph. In order, it:
 
 1. binds `App_Instance`;
 2. binds the actuator GPIO descriptor after CubeMX has established the safe-low
-   startup level;
-3. initializes the LCD/PCF8574/backlight/render path;
-4. initializes keyboard GPIOs, driver and scan adapter;
-5. initializes buzzer PWM, driver and Sound Generator;
-6. initializes both GPIO/LED/SIS indication paths;
-7. selects the first-registration or normal locked startup route.
+   startup level and initializes the Lock Actuator Driver;
+3. binds PB0 and initializes the Door Sensor Driver;
+4. binds PB10 and initializes the Exit Button Driver with active-low polarity
+   and a 20 ms debounce interval;
+5. initializes the LCD/PCF8574/backlight/render path;
+6. initializes keyboard GPIOs, driver and scan adapter;
+7. initializes buzzer PWM, driver and Sound Generator;
+8. initializes both GPIO/LED/SIS indication paths;
+9. selects the first-registration or normal locked startup route.
+
+CubeMX enables the PB10 EXTI before `App_Init()` runs. The callback bridge may
+therefore execute during startup; `ExitButton_NotifyInterrupt()` safely ignores
+notifications until the driver is initialized. A button state already present
+at startup is not converted into an event unless a subsequent edge is observed
+and the future Door Control Service processes it.
 
 Do not call `App_GetRuntimeInstances()` from unrelated project modules to bypass
 this lifecycle or gain access to internal handles.
@@ -320,6 +353,8 @@ instead of silently truncating data.
   reusable services.
 - `App_Config.c` defines storage and bindings only; it must not grow workflow or
   state-machine decisions.
+- `App_ConfigHalCallbacks.c` may publish hardware interrupt activity to a
+  driver, but it must not debounce input, call services or command actuators.
 - App Core is responsible for initialization and periodic orchestration.
 - App Executor is responsible for concrete `LCS_Action_t` side effects.
 - `App_Core_Internal.h` is the supported cross-translation-unit route for the
@@ -348,6 +383,16 @@ instead of silently truncating data.
 5. Initialize it in the correct fail-fast order from App Core.
 6. Add cleanup or explicit erasure if the object carries sensitive state.
 
+### Add an interrupt-backed input
+
+1. Configure and label the GPIO/EXTI line in CubeMX.
+2. Add the Platform descriptor, component handle and board policy to App Config.
+3. Initialize the Platform descriptor before the component handle.
+4. Filter the generated HAL pin mask in `App_ConfigHalCallbacks.c`.
+5. Keep the callback bounded to notification; perform debounce and policy in
+   serialized application or service context.
+6. Document whether notifications can arrive before component initialization.
+
 ### Add a timeout
 
 1. Add a concrete identifier before `APP_TIMEOUT_COUNT`.
@@ -368,9 +413,11 @@ make an inconsistent build pass.
 - [ ] `App_Config.h` contains no placeholder Doxygen text.
 - [ ] Every registry member has a role comment.
 - [ ] Every static object in `App_Config.c` documents ownership and lifetime.
+- [ ] `App_ConfigHalCallbacks.c` contains no policy, blocking work or actuator command.
 - [ ] `App_Instances` binds every member to correctly sized static storage.
 - [ ] Pin and peripheral definitions match `Electronic-Lock.ioc`.
 - [ ] Active-level definitions match the electrical design.
+- [ ] EXTI edge selection, pull configuration and HAL pin filtering match the `.ioc` file.
 - [ ] Timeout durations and elapsed events match LCS behavior.
 - [ ] The longest valid synchronous event chain fits the dispatch-depth bound.
 - [ ] Credential-length assertions compile.

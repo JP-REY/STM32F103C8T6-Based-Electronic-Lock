@@ -3,8 +3,9 @@
  * @brief   Electronic-lock application initialization and event-orchestration core.
  *
  * @details Initializes the electronic-lock object graph supplied by App Config, binds it to CubeMX-generated peripheral resources
- *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. App Config owns the
- *          static runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
+ *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. It also composes the
+ *          lock actuator, door sensor and exit button required by the planned Door Control Service. App Config owns the static
+ *          runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
  *
  *          Initialization is fail-fast: each private initializer validates every stage and immediately reports failure to
  *          App_Init(). Stateless services and services that own an internal singleton runtime do not require an additional
@@ -18,8 +19,8 @@
  *          service instances live in App_Config.c and are borrowed through App_Instance.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    Aug 22, 2026
+ * @version 1.2.0
+ * @date    Aug 25, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -128,8 +129,14 @@ static bool App_InitLockStatusIndication(void);
 /** @brief Initializes the low-battery LED and its Status Indication Service instance. */
 static bool App_InitLowBatteryStatusIndication(void);
 
-/** @brief Initializes the temporary GPIO-based lock actuator and immediately forces its safe state. */
+/** @brief Initializes the lock-actuator Platform descriptor and component instance. */
 static bool App_InitLockActuator(void);
+
+/** @brief Initializes the door-sensor Platform descriptor and component instance. */
+static bool App_InitDoorSensor(void);
+
+/** @brief Initializes the exit-button Platform descriptor and component instance. */
+static bool App_InitExitButton(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Keyboard Acquisition and Translation
@@ -470,17 +477,17 @@ static bool App_InitLowBatteryStatusIndication(void)
 }
 
 /**
- * @brief   Initializes the temporary GPIO-based lock-actuator descriptor.
+ * @brief   Initializes the lock-actuator Platform descriptor and driver instance.
  *
- * @details Binds the configured lock-actuator GPIO descriptor to the CubeMX-configured LOCK_ACTUATOR pin. CubeMX-generated GPIO
- *          initialization has already driven that output low, which is the product's current safe locked request. The explicit
- *          Platform safe-state write in this initializer is currently disabled.
+ * @details Binds the application-owned GPIO descriptor to PB8 and injects it into the Lock Actuator Driver with an active-low locked
+ *          command. CubeMX-generated GPIO initialization has already driven the output LOW, which is the product's current safe
+ *          locked request. Driver initialization deliberately does not change the output level.
  *
- * @note    A dedicated Lock Actuator Driver shall eventually replace this direct Platform binding while preserving the same
- *          force-safe behavior and bounded-unlock contract.
+ * @note    App Executor continues to command the shared GPIO descriptor directly. Runtime command ownership will move to the planned
+ *          Door Control Service without changing this composition step.
  *
- * @return  true  - When the GPIO descriptor is initialized successfully.
- * @return  false - When GPIO descriptor initialization fails.
+ * @return  true  - When both the GPIO descriptor and Lock Actuator Driver initialize successfully.
+ * @return  false - When either initialization step fails.
  */
 static bool App_InitLockActuator(void)
 {
@@ -492,7 +499,83 @@ static bool App_InitLockActuator(void)
         return false;
     }
 
+    if(LockActuator_Init(App_Instance->Lock_Actuator,
+                         App_Instance->Lock_Actuator_Gpio,
+                         APP_LOCK_ACTUATOR_ACTIVE_LEVEL)
+                         != LOCK_ACTUATOR_OPERATION_OK)
+    {
+        return false;
+    }
+
     // return App_ForceLock();
+    return true;
+}
+
+/**
+ * @brief   Initializes the door-sensor Platform descriptor and driver instance.
+ *
+ * @details Binds the application-owned GPIO descriptor to the CubeMX-configured PB0 door-contact input and injects it into the Door
+ *          Sensor Driver with active-low polarity. Initialization stores configuration only and does not read or interpret the door
+ *          state.
+ *
+ * @note    Runtime reads and the physical meaning of an active contact are reserved for the planned Door Control Service.
+ *
+ * @return  true  - When both the GPIO descriptor and Door Sensor Driver initialize successfully.
+ * @return  false - When either initialization step fails.
+ */
+static bool App_InitDoorSensor(void)
+{
+    if(PGPIO_Init(App_Instance->Door_Sensor_Gpio,
+                  APP_DOOR_SENSOR_GPIO_PORT,
+                  APP_DOOR_SENSOR_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if(DoorSensor_Init(App_Instance->Door_Sensor,
+                       App_Instance->Door_Sensor_Gpio,
+                       APP_DOOR_SENSOR_ACTIVE_LEVEL)
+                       != DOOR_SENSOR_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief   Initializes the exit-button Platform descriptor and driver instance.
+ *
+ * @details Binds the application-owned GPIO descriptor to the CubeMX-configured PB10 request-to-exit input and injects it into the
+ *          Exit Button Driver with active-low polarity and the configured debounce interval. Initialization resets the driver's
+ *          interrupt handoff state without reading the GPIO or generating an event.
+ *
+ * @note    HAL_GPIO_EXTI_Callback() records edges through ExitButton_NotifyInterrupt(). Debounced processing through
+ *          ExitButton_Update() is reserved for the planned Door Control Service.
+ *
+ * @return  true  - When both the GPIO descriptor and Exit Button Driver initialize successfully.
+ * @return  false - When either initialization step fails.
+ */
+static bool App_InitExitButton(void)
+{
+    if(PGPIO_Init(App_Instance->Exit_Button_Gpio,
+                  APP_EXIT_BUTTON_GPIO_PORT,
+                  APP_EXIT_BUTTON_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if(ExitButton_Init(App_Instance->Exit_Button,
+                       App_Instance->Exit_Button_Gpio,
+                       APP_EXIT_BUTTON_ACTIVE_LEVEL,
+                       APP_EXIT_BUTTON_DEBOUNCE_TIME_MS)
+                       != EXIT_BUTTON_OPERATION_OK)
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -941,9 +1024,10 @@ static void App_HandleInputFault(void)
 /**
  * @brief   Initializes the complete electronic-lock application object graph.
  *
- * @details Initializes the actuator descriptor first, followed by the LCD/render path, keyboard, buzzer/sound path and both
- *          indication instances. After every dependency succeeds, CSS availability selects either the first-registration route
- *          through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through LCS_EVENT_INIT_OK and locked-idle presentation.
+ * @details Initializes the lock-actuator, door-sensor and exit-button Platform/driver pairs first, followed by the LCD/render path,
+ *          keyboard, buzzer/sound path and both indication instances. After every dependency succeeds, CSS availability selects
+ *          either the first-registration route through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through
+ *          LCS_EVENT_INIT_OK and locked-idle presentation.
  *
  * @note    CSS_HasCredential() provides only availability. The installed credential is copied into the configured runtime buffer lazily
  *          when the first authentication action executes.
@@ -960,6 +1044,8 @@ App_InitStatus_t App_Init(void)
     App_Instance = App_GetRuntimeInstances();
 
     bool initialized = App_InitLockActuator()               &&
+                       App_InitDoorSensor()                 &&
+                       App_InitExitButton()                 &&
                        App_InitLcd()                        &&
                        App_InitKeyboard()                   &&
                        App_InitBuzzer()                     &&
