@@ -29,16 +29,17 @@
  * @note    Operations are synchronous, use no dynamic allocation and create no
  *          task, queue, mutex, timer or other RTOS object.
  *
- * @note    One eight-byte record is stored at the start of linker-reserved
- *          STM32F411 sector 7. The complete sector is exclusively owned by CSS.
+ * @note    One eight-byte record is stored at the start of the linker-reserved
+ *          final 1 KiB page of STM32F103C8T6 Flash. CSS exclusively owns the
+ *          complete page because it is the physical erase unit.
  *
  * @warning The stored representation is not encrypted or cryptographically
  *          authenticated. Its marker and CRC detect format errors and likely
  *          corruption; they do not protect credential confidentiality.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-21
+ * @version 2.0.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 
 #ifndef LIBS_SERVICES_CREDENTIAL_STORAGE_INC_CREDENTIAL_STORAGE_SERVICE_H_

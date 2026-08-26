@@ -1,6 +1,6 @@
-# STM32F411 Electronic Lock
+# STM32F103C8T6 Electronic Lock
 
-Layered firmware for an STM32F411CEU6 electronic lock with a 4x4 matrix
+Layered firmware for an STM32F103C8T6 electronic lock with a 4x4 matrix
 keyboard, 16x2 LCD, status LEDs, passive buzzer and GPIO-controlled actuator.
 
 ## Contents
@@ -46,7 +46,7 @@ The firmware:
 
 | Area | Current state |
 | --- | --- |
-| Target and CubeMX project | STM32F411CEU6 configuration present |
+| Target and CubeMX project | STM32F103C8T6 configuration present |
 | Platform layer | GPIO, I2C, PWM and Time implemented |
 | Component layer | Keyboard, LCD, PCF8574, LED, buzzer, lock actuator, door sensor and exit button implemented |
 | Service layer | Domain and presentation services implemented |
@@ -130,27 +130,28 @@ Detailed behavior:
 
 ## Hardware Baseline
 
-- MCU: STM32F411CEU6, Arm Cortex-M4F, UFQFPN48;
-- system clock: 100 MHz from HSI through PLL;
-- APB1: 50 MHz, with 100 MHz timer clock;
-- APB2: 100 MHz;
+- MCU: STM32F103C8T6, Arm Cortex-M3;
+- system clock: 72 MHz from HSI through PLL;
+- APB1 Peripherals: 36 MHz, with 72 MHz timer clock;
+- APB1 Timers: 72 MHz, with 72 MHz timer clock;
+- APB2: 72 MHz;
 - HAL millisecond time: SysTick;
 - configuration source: [Electronic-Lock.ioc](Electronic-Lock.ioc).
 
 | Resource | Assignment |
 | --- | --- |
-| PA3, PA2, PA1, PA0 | Keyboard rows 0 through 3; pull-up/rising-and-falling EXTI configuration |
-| PA7, PA6, PA5, PA4 | Keyboard columns 0 through 3 |
-| PA15 | Active-low lock-status LED |
-| PA12 | Active-low low-battery LED |
-| PB8 | Lock actuator; low safe, high unlock request |
-| PB0 | Door-contact sensor; pull-up input, low active |
-| PB10 | Exit button; pull-up, active low, rising/falling EXTI |
-| PB6/PB7 | I2C1 SCL/SDA at 100 kHz |
+| PB15, PB14, PB13, PB12 | Keyboard rows 0 through 3; pull-up/rising-and-falling EXTI configuration |
+| PA6, PA5, PA4, PA3 | Keyboard columns 0 through 3 |
+| PB10 | Active-low lock-status LED |
+| PB11 | Active-low low-battery LED |
+| PA8 | Lock actuator; low safe, high unlock request |
+| PA11 | Door sensor; pull-up input, low active |
+| PA0 | Exit button; pull-up, active low, rising/falling EXTI |
+| PB8/PB9 | I2C1 SCL/SDA at 100 kHz |
 | PB4 | TIM3 channel 1 buzzer PWM |
-| PB9 | TIM4 channel 4 LCD-backlight PWM |
+| PB6 | TIM4 channel 1 LCD-backlight PWM |
 | TIM2 | Raw time counter; microsecond resolution/wrap contract requires validation |
-| PC13 | On-board diagnostic LED |
+| PC12 | On-board diagnostic LED |
 
 CubeMX-generated GPIO initialization requests PB8 low before `App_Init()`. App
 Core then binds the Platform descriptor; its redundant explicit safe-state write
@@ -159,8 +160,8 @@ describes the commanded output, not confirmed mechanical lock position. The
 external actuator stage remains responsible for load current, inductive
 protection and electrical safety.
 
-App Core also binds PB0 to the Door Sensor Driver and PB10 to the Exit Button
-Driver. `App_ConfigHalCallbacks.c` forwards PB10 EXTI activity to
+App Core also binds PA11 to the Door Sensor Driver and PA0 to the Exit Button
+Driver. `App_ConfigHalCallbacks.c` forwards PA0 EXTI activity to
 `ExitButton_NotifyInterrupt()` using the application millisecond time base. The
 planned Door Control Service will own `DoorSensor_GetState()`,
 `ExitButton_Update()` and coordinated lock policy; those runtime operations are

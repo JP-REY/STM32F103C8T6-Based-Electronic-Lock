@@ -21,8 +21,8 @@
  *          The acronym PFLASH means Platform Flash and prefixes every public
  *          function exposed by this module.
  *
- * @note    The current backend targets the 512 KiB internal Flash organization
- *          of the STM32F411CEU6, from 0x08000000 through 0x0807FFFF.
+ * @note    The current backend targets the 64 KiB internal Flash organization
+ *          of the STM32F103C8T6.
  *
  * @note    Callers own serialization. Concurrent erase, program, protection or
  *          lock-state operations are outside this interface contract.
@@ -117,7 +117,7 @@ typedef enum
 FLASH_OpStatus_t PFLASH_Lock            (void);
 FLASH_OpStatus_t PFLASH_Unlock          (void);
 FLASH_OpStatus_t PFLASH_SetProtection   (FLASH_ProtectionLevel_t ProtectionLevel);
-FLASH_OpStatus_t PFLASH_EraseSectorAt   (uint32_t Address);
+FLASH_OpStatus_t PFLASH_ErasePageAt     (uint32_t Address);
 FLASH_OpStatus_t PFLASH_Program         (FLASH_ProgramType_t ProgramType, uint32_t Address, uint64_t Data);
 FLASH_OpStatus_t PFLASH_ReadDoubleWord  (uint32_t Address, uint64_t* Data);
 

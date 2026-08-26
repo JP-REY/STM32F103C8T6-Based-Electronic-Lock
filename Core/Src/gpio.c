@@ -45,50 +45,16 @@ void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED_ON_BOARD_GPIO_Port, LED_ON_BOARD_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin
+                          |LOCK_ACTUATOR_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LOW_BATTERY_INDICATION_LED_Pin|LOCK_STATUS_INDICATION_LED_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LOCK_ACTUATOR_GPIO_Port, LOCK_ACTUATOR_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : LED_ON_BOARD_Pin */
-  GPIO_InitStruct.Pin = LED_ON_BOARD_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_ON_BOARD_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : KEYBOARD_ROW_3_Pin KEYBOARD_ROW_2_Pin KEYBOARD_ROW_1_Pin KEYBOARD_ROW_0_Pin */
-  GPIO_InitStruct.Pin = KEYBOARD_ROW_3_Pin|KEYBOARD_ROW_2_Pin|KEYBOARD_ROW_1_Pin|KEYBOARD_ROW_0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : KEYBOARD_COL_3_Pin KEYBOARD_COL_2_Pin KEYBOARD_COL_1_Pin KEYBOARD_COL_0_Pin
-                           LOW_BATTERY_INDICATION_LED_Pin LOCK_STATUS_INDICATION_LED_Pin */
-  GPIO_InitStruct.Pin = KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin
-                          |LOW_BATTERY_INDICATION_LED_Pin|LOCK_STATUS_INDICATION_LED_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : DOOR_SENSOR_Pin */
-  GPIO_InitStruct.Pin = DOOR_SENSOR_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(DOOR_SENSOR_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(GPIOB, LOCK_STATUS_LED_Pin|LOW_BATTERY_STATUS_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : EXIT_BUTTON_Pin */
   GPIO_InitStruct.Pin = EXIT_BUTTON_Pin;
@@ -96,25 +62,37 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(EXIT_BUTTON_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LOCK_ACTUATOR_Pin */
-  GPIO_InitStruct.Pin = LOCK_ACTUATOR_Pin;
+  /*Configure GPIO pins : KEYBOARD_COL_3_Pin KEYBOARD_COL_2_Pin KEYBOARD_COL_1_Pin KEYBOARD_COL_0_Pin
+                           LOCK_ACTUATOR_Pin */
+  GPIO_InitStruct.Pin = KEYBOARD_COL_3_Pin|KEYBOARD_COL_2_Pin|KEYBOARD_COL_1_Pin|KEYBOARD_COL_0_Pin
+                          |LOCK_ACTUATOR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(LOCK_ACTUATOR_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : LOCK_STATUS_LED_Pin LOW_BATTERY_STATUS_LED_Pin */
+  GPIO_InitStruct.Pin = LOCK_STATUS_LED_Pin|LOW_BATTERY_STATUS_LED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : KEYBOARD_ROW_3_Pin KEYBOARD_ROW_2_Pin KEYBOARD_ROW_1_Pin KEYBOARD_ROW_0_Pin */
+  GPIO_InitStruct.Pin = KEYBOARD_ROW_3_Pin|KEYBOARD_ROW_2_Pin|KEYBOARD_ROW_1_Pin|KEYBOARD_ROW_0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DOOR_SENSOR_Pin */
+  GPIO_InitStruct.Pin = DOOR_SENSOR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(DOOR_SENSOR_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);

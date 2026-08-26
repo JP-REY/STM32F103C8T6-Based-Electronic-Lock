@@ -44,6 +44,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    # Add user sources here
+
     # Application
     App/Core/Src/App_Core.c
     App/Config/Src/App_Config.c
@@ -55,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Platforms/Src/I2C_Platform_Interface.c
     Platforms/Src/PWM_Platform_Interface.c
     Platforms/Src/Time_Platform_Interface.c
+    Platforms/Src/FLASH_Platform_Interface.c
 
     # Components
     Libs/Components/Buzzer/Src/Buzzer_Driver.c
@@ -79,11 +82,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Libs/Services/Sound_Generator/Src/Sound_Generator_Service.c
     Libs/Services/Status_Indication/Src/Status_Indication_Service.c
     Libs/Services/Timeout_Validation/Src/Timeout_Validation_Service.c
-    Platforms/Src/FLASH_Platform_Interface.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    # Add user defined include paths
+
     # Application
     App/Core/Inc
     App/Config/Inc

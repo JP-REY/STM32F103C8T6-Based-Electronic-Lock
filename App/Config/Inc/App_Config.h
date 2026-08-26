@@ -94,7 +94,7 @@ static "C" {
 #define APP_LCD_BACKLIGHT_PWM_CONTEXT           (&htim4)
 
 /** @brief Platform PWM channel associated with the LCD-backlight output. */
-#define APP_LCD_BACKLIGHT_PWM_CHANNEL           (PWM_CHANNEL_4)
+#define APP_LCD_BACKLIGHT_PWM_CHANNEL           (PWM_CHANNEL_1)
 
 /** @brief LCD-backlight PWM frequency, in hertz. */
 #define APP_LCD_BACKLIGHT_PWM_FREQUENCY         (1500U)
@@ -115,52 +115,52 @@ static "C" {
 #define APP_KEYBOARD_DEBOUNCE_MS                (40U)
 
 /** @brief STM32 GPIO port connected to matrix-keyboard row zero. */
-#define APP_KEYBOARD_ROW_0_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_ROW_0_GPIO_PORT            (KEYBOARD_ROW_0_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row zero. */
-#define APP_KEYBOARD_ROW_0_PIN_NUMBER           (3U)
+#define APP_KEYBOARD_ROW_0_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_ROW_0_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard row one. */
-#define APP_KEYBOARD_ROW_1_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_ROW_1_GPIO_PORT            (KEYBOARD_ROW_1_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row one. */
-#define APP_KEYBOARD_ROW_1_PIN_NUMBER           (2U)
+#define APP_KEYBOARD_ROW_1_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_ROW_1_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard row two. */
-#define APP_KEYBOARD_ROW_2_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_ROW_2_GPIO_PORT            (KEYBOARD_ROW_2_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row two. */
-#define APP_KEYBOARD_ROW_2_PIN_NUMBER           (1U)
+#define APP_KEYBOARD_ROW_2_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_ROW_2_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard row three. */
-#define APP_KEYBOARD_ROW_3_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_ROW_3_GPIO_PORT            (KEYBOARD_ROW_3_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard row three. */
-#define APP_KEYBOARD_ROW_3_PIN_NUMBER           (0U)
+#define APP_KEYBOARD_ROW_3_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_ROW_3_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard column zero. */
-#define APP_KEYBOARD_COL_0_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_COL_0_GPIO_PORT            (KEYBOARD_COL_0_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column zero. */
-#define APP_KEYBOARD_COL_0_PIN_NUMBER           (7U)
+#define APP_KEYBOARD_COL_0_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_COL_0_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard column one. */
-#define APP_KEYBOARD_COL_1_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_COL_1_GPIO_PORT            (KEYBOARD_COL_1_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column one. */
-#define APP_KEYBOARD_COL_1_PIN_NUMBER           (6U)
+#define APP_KEYBOARD_COL_1_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_COL_1_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard column two. */
-#define APP_KEYBOARD_COL_2_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_COL_2_GPIO_PORT            (KEYBOARD_COL_2_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column two. */
-#define APP_KEYBOARD_COL_2_PIN_NUMBER           (5U)
+#define APP_KEYBOARD_COL_2_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_COL_2_Pin))
 
 /** @brief STM32 GPIO port connected to matrix-keyboard column three. */
-#define APP_KEYBOARD_COL_3_GPIO_PORT            (GPIOA)
+#define APP_KEYBOARD_COL_3_GPIO_PORT            (KEYBOARD_COL_3_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to matrix-keyboard column three. */
-#define APP_KEYBOARD_COL_3_PIN_NUMBER           (4U)
+#define APP_KEYBOARD_COL_3_PIN_NUMBER           ((uint8_t)__builtin_ctz(KEYBOARD_COL_3_Pin))
 
 /** @brief CubeMX timer handle used to generate the passive-buzzer PWM signal. */
 #define APP_BUZZER_PWM_CONTEXT                  (&htim3)
@@ -169,46 +169,46 @@ static "C" {
 #define APP_BUZZER_PWM_CHANNEL                  (PWM_CHANNEL_1)
 
 /** @brief STM32 GPIO port connected to the lock-status LED. */
-#define APP_LOCK_STATUS_LED_GPIO_PORT           (GPIOA)
+#define APP_LOCK_STATUS_LED_GPIO_PORT           (LOCK_STATUS_LED_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to the lock-status LED. */
-#define APP_LOCK_STATUS_LED_PIN_NUMBER          (15U)
+#define APP_LOCK_STATUS_LED_PIN_NUMBER          ((uint8_t)__builtin_ctz(LOCK_STATUS_LED_Pin))
 
 /** @brief Electrical level that turns the lock-status LED on. */
-#define APP_LOCK_STATUS_LED_ACTIVE_LEVEL        (LED_ACTIVE_LOW)
+#define APP_LOCK_STATUS_LED_ACTIVE_LEVEL        (LED_ACTIVE_HIGH)
 
 /** @brief STM32 GPIO port connected to the low-battery status LED. */
-#define APP_LOW_BATTERY_STATUS_LED_GPIO_PORT    (GPIOA)
+#define APP_LOW_BATTERY_STATUS_LED_GPIO_PORT    (LOW_BATTERY_STATUS_LED_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to the low-battery status LED. */
-#define APP_LOW_BATTERY_STATUS_LED_PIN_NUMBER   (12U)
+#define APP_LOW_BATTERY_STATUS_LED_PIN_NUMBER   ((uint8_t)__builtin_ctz(LOW_BATTERY_STATUS_LED_Pin))
 
 /** @brief Electrical level that turns the low-battery status LED on. */
-#define APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL (LED_ACTIVE_LOW)
+#define APP_LOW_BATTERY_STATUS_LED_ACTIVE_LEVEL (LED_ACTIVE_HIGH)
 
 /** @brief STM32 GPIO port connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_GPIO_PORT             (GPIOB)
+#define APP_LOCK_ACTUATOR_GPIO_PORT             (LOCK_ACTUATOR_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to the physical lock actuator control input. */
-#define APP_LOCK_ACTUATOR_PIN_NUMBER            (8U)
+#define APP_LOCK_ACTUATOR_PIN_NUMBER            ((uint8_t)__builtin_ctz(LOCK_ACTUATOR_Pin))
 
 /** @brief Electrical level interpreted by the Lock Actuator Driver as the locked command. */
 #define APP_LOCK_ACTUATOR_ACTIVE_LEVEL          (LOCK_ACTUATOR_ACTIVE_LEVEL_LOW)
 
 /** @brief STM32 GPIO port connected to the physical door sensor input. */
-#define APP_DOOR_SENSOR_GPIO_PORT               (GPIOB)
+#define APP_DOOR_SENSOR_GPIO_PORT               (DOOR_SENSOR_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to the physical door sensor input. */
-#define APP_DOOR_SENSOR_PIN_NUMBER              (0U)
+#define APP_DOOR_SENSOR_PIN_NUMBER              ((uint8_t)__builtin_ctz(DOOR_SENSOR_Pin))
 
 /** @brief Electrical level interpreted by the Door Sensor Driver as its active contact state. */
 #define APP_DOOR_SENSOR_ACTIVE_LEVEL            (DOOR_SENSOR_ACTIVE_LEVEL_LOW)
 
 /** @brief STM32 GPIO port connected to the physical exit button input. */
-#define APP_EXIT_BUTTON_GPIO_PORT               (GPIOB)
+#define APP_EXIT_BUTTON_GPIO_PORT               (EXIT_BUTTON_GPIO_Port)
 
 /** @brief Zero-based STM32 GPIO pin number connected to the physical exit button input. */
-#define APP_EXIT_BUTTON_PIN_NUMBER              (10U)
+#define APP_EXIT_BUTTON_PIN_NUMBER              ((uint8_t)__builtin_ctz(EXIT_BUTTON_Pin))
 
 /** @brief Electrical level interpreted by the Exit Button Driver as a pressed button. */
 #define APP_EXIT_BUTTON_ACTIVE_LEVEL            (EXIT_BUTTON_ACTIVE_LEVEL_LOW)

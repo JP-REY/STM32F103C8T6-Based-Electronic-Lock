@@ -549,7 +549,7 @@ Current implementation limitations:
 - No direct distinction between door open and door closed.
 - State reading depends on the behavior of the GPIO Platform Interface.
 - No internal synchronization for concurrent callers.
-- The STM32F411 App binds and initializes the driver on PB0 as an active-low,
+- The STM32F103 App binds and initializes the driver on PB0 as an active-low,
   pull-up input. Periodic state reads and product door policy await the planned
   Door Control Service.
 

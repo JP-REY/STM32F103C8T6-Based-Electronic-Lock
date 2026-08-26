@@ -106,7 +106,7 @@ The EXTI callback does not read the GPIO or wait for contact bounce to finish. I
 
 This architecture keeps human-scale timing and application behavior outside the ISR.
 
-In the current STM32F411 integration, App Config binds the active-low button to
+In the current STM32F103 integration, App Config binds the active-low button to
 PB10 with a pull-up and rising/falling EXTI, configures a 20 ms debounce interval
 and forwards HAL notifications through `App_ConfigHalCallbacks.c`. The planned
 Door Control Service will own periodic updates and request-to-exit policy.
@@ -661,7 +661,7 @@ Current implementation limitations:
 - No event timestamp is returned to the application.
 - No internal synchronization for multiple application-context callers.
 - The sequence handoff assumes atomic aligned 32-bit access on the target platform.
-- The STM32F411 App binds and initializes the component on PB10 and publishes
+- The STM32F103 App binds and initializes the component on PB10 and publishes
   EXTI notifications. Periodic `ExitButton_Update()` calls and request-to-exit
   policy await the planned Door Control Service.
 

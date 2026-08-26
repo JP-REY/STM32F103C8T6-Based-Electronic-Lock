@@ -3,7 +3,7 @@
 <p align="left">
   <big>
     Project-owned boundary between portable firmware modules and the<br>
-    STM32F411CEU6 HAL, generated peripheral handles and hardware registers.
+    STM32F103C8T6 HAL, generated peripheral handles and hardware registers.
   </big>
 </p>
 
@@ -53,7 +53,7 @@
 * [10. Flash Platform Interface](#10-flash-platform-interface)
   * [10.1 Contract](#101-contract)
   * [10.2 Public Data Model](#102-public-data-model)
-  * [10.3 STM32F411 Flash Organization](#103-stm32f411-flash-organization)
+  * [10.3 STM32F103C8T6 Flash Organization](#103-stm32f103c8t6-flash-organization)
   * [10.4 Write Lifecycle](#104-write-lifecycle)
   * [10.5 API](#105-api)
   * [10.6 Programming and Alignment Rules](#106-programming-and-alignment-rules)
@@ -101,7 +101,7 @@
 `Platforms/` isolates microcontroller-specific access from the component
 drivers and all higher software layers. It exposes small project-owned
 interfaces for the hardware capabilities required by the electronic lock and
-translates those calls to the current STM32F411 backend.
+translates those calls to the current STM32F103 backend.
 
 The layer exists to keep vendor headers, HAL status codes, generated handle
 types and direct peripheral-register access out of reusable component APIs.
@@ -117,7 +117,7 @@ The current platform layer provides five interfaces:
 * millisecond and microsecond time services;
 * internal Flash lock, erase, program, read and readout-protection mechanics.
 
-The only implemented backend is STM32F411CEU6 with STM32CubeF4 HAL/CMSIS and
+The only implemented backend is STM32F103C8T6 with STM32CubeF1 HAL/CMSIS and
 CubeMX-generated peripheral handles. SPI, UART, ADC, RTC and a second MCU
 backend are not part of the current platform contract.
 
@@ -129,10 +129,10 @@ backend are not part of the current platform contract.
 
 ```mermaid
 flowchart TD
-    A["Application and Services"] --> B["Component Drivers and Adapters"]
+    A["Application and Services"] --> B["Component Drivers and <br/>Adapters"]
     B --> C["Platform Interfaces"]
-    C --> D["STM32 HAL, CMSIS and Generated Handles"]
-    D --> E["STM32F411CEU6 Hardware"]
+    C --> D["STM32 HAL, CMSIS and <br/>Generated Handles"]
+    D --> E["STM32F103C8T6 Hardware"]
 ```
 
 Component drivers depend on project-owned platform headers or on narrow
@@ -190,9 +190,9 @@ handles and the portable modules that receive them.
 ```text
 Platforms/
 ├── Inc/
+│   ├── FLASH_Platform_Interface.h
 │   ├── GPIO_Platform_Interface.h
 │   ├── I2C_Platform_Interface.h
-│   ├── FLASH_Platform_Interface.h
 │   ├── PWM_Platform_Interface.h
 │   └── Time_Platform_Interface.h
 ├── Src/
@@ -292,15 +292,11 @@ read or modify them directly.
 ### 6.3 API
 
 ```c
-GPIO_OpStatus_t PGPIO_Init(
-    GPIO_Handle_t *Instance,
-    void *GPIO_Port,
-    uint16_t GPIO_Pin);
-
-GPIO_OpStatus_t PGPIO_Set(GPIO_Handle_t *Instance);
-GPIO_OpStatus_t PGPIO_Reset(GPIO_Handle_t *Instance);
-GPIO_OpStatus_t PGPIO_Toggle(GPIO_Handle_t *Instance);
-GPIO_Level_t PGPIO_GetLevel(const GPIO_Handle_t *Instance);
+GPIO_OpStatus_t PGPIO_Init     (GPIO_Handle_t* Instance, void* GPIO_Port, uint16_t GPIO_Pin);
+GPIO_OpStatus_t PGPIO_Set      (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Reset    (GPIO_Handle_t* Instance);
+GPIO_OpStatus_t PGPIO_Toggle   (GPIO_Handle_t* Instance);
+GPIO_Level_t    PGPIO_GetLevel (const GPIO_Handle_t* Instance);
 ```
 
 | Function | Result |
@@ -365,18 +361,20 @@ the product-level fault response.
 
 ```c
 I2C_OpStatus_t PI2C_Write(
-    void *Context,
-    uint8_t Address,
-    uint8_t *Data,
+    void*    Context,
+    uint8_t  Address,
+    uint8_t* Data,
     uint16_t Size,
-    uint32_t Timeout);
+    uint32_t Timeout
+);
 
 I2C_OpStatus_t PI2C_Read(
-    void *Context,
-    uint8_t Address,
-    uint8_t *Data,
+    void*    Context,
+    uint8_t  Address,
+    uint8_t* Data,
     uint16_t Size,
-    uint32_t Timeout);
+    uint32_t Timeout
+);
 ```
 
 | Parameter | Contract |
@@ -466,39 +464,26 @@ step itself.
 ### 8.4 API
 
 ```c
-PWM_OpStatus_t PPWM_Create(
-    PWM_Handle_t *Instance,
-    void *Context,
-    PWM_Channel_t Channel);
+PWM_OpStatus_t PPWM_Create         (PWM_Handle_t* Instance, void* Context, PWM_Channel_t Channel);
+PWM_OpStatus_t PPWM_Init           (PWM_Handle_t* Instance);
 
-PWM_OpStatus_t PPWM_Init(PWM_Handle_t *Instance);
-PWM_OpStatus_t PPWM_Enable(PWM_Handle_t *Instance);
-PWM_OpStatus_t PPWM_Disable(PWM_Handle_t *Instance);
+PWM_OpStatus_t PPWM_Enable         (PWM_Handle_t* Instance);
+PWM_OpStatus_t PPWM_Disable        (PWM_Handle_t* Instance);
 
-PWM_OpStatus_t PPWM_SetDutyVal(
-    PWM_Handle_t *Instance,
-    uint16_t Duty);
+PWM_OpStatus_t PPWM_SetDutyVal     (PWM_Handle_t* Instance, uint16_t Duty);
+PWM_OpStatus_t PPWM_SetDutyPercent (PWM_Handle_t* Instance, uint16_t Duty_Percent);
 
-PWM_OpStatus_t PPWM_SetDutyPercent(
-    PWM_Handle_t *Instance,
-    uint16_t Duty_Percent);
+uint16_t       PPWM_GetDutyVal     (const PWM_Handle_t* Instance);
+uint16_t       PPWM_GetDutyPercent (const PWM_Handle_t* Instance);
+uint16_t       PPWM_GetMaxDuty     (const PWM_Handle_t* Instance);
 
-uint16_t PPWM_GetDutyVal(const PWM_Handle_t *Instance);
-uint16_t PPWM_GetDutyPercent(const PWM_Handle_t *Instance);
-uint16_t PPWM_GetMaxDuty(const PWM_Handle_t *Instance);
+PWM_OpStatus_t PPWM_SetFrequency   (PWM_Handle_t* Instance, uint32_t Frequency);
+uint32_t       PPWM_GetFrequency   (const PWM_Handle_t* Instance);
 
-PWM_OpStatus_t PPWM_SetFrequency(
-    PWM_Handle_t *Instance,
-    uint32_t Frequency);
+PWM_OpStatus_t PPWM_SetPolarity    (PWM_Handle_t* Instance, PWM_Polarity_t Polarity);
+PWM_Polarity_t PPWM_GetPolarity    (const PWM_Handle_t* Instance);
 
-uint32_t PPWM_GetFrequency(const PWM_Handle_t *Instance);
-
-PWM_OpStatus_t PPWM_SetPolarity(
-    PWM_Handle_t *Instance,
-    PWM_Polarity_t Polarity);
-
-PWM_Polarity_t PPWM_GetPolarity(const PWM_Handle_t *Instance);
-PWM_State_t PPWM_GetState(const PWM_Handle_t *Instance);
+PWM_State_t    PPWM_GetState       (const PWM_Handle_t* Instance);
 ```
 
 | Operation group | Behavior |
@@ -563,11 +548,10 @@ the blocking delay functions.
 ### 9.2 API
 
 ```c
-void Platform_DelayMs(uint32_t Delay);
-uint32_t Platform_GetMillis(void);
-
-void Platform_DelayUs(uint32_t Delay);
-uint32_t Platform_GetMicros(void);
+void     Platform_DelayMs   (uint32_t Delay);
+void     Platform_DelayUs   (uint32_t Delay);
+uint32_t Platform_GetMillis (void);
+uint32_t Platform_GetMicros (void);
 ```
 
 | Function | Current source | Behavior |
@@ -599,12 +583,12 @@ on `Platform_DelayUs` across a counter wrap.
 ### 10.1 Contract
 
 The Flash Platform Interface exposes the target-dependent mechanics needed by
-hardware-backed storage services while keeping STM32 HAL types and sector
-constants out of those services. It supports:
+hardware-backed storage services while keeping STM32 HAL types and page
+geometry out of those services. It supports:
 
 * locking and unlocking the Flash programming interface;
-* erasing the one complete sector that contains a supplied address;
-* programming byte, halfword, word or double-word widths;
+* erasing the one complete 1 KiB page that contains a supplied address;
+* programming halfword, word or double-word widths;
 * reading one eight-byte-aligned 64-bit value through memory-mapped Flash;
 * configuring supported STM32 readout-protection levels.
 
@@ -623,11 +607,11 @@ initialization function.
 | Type | Values | Meaning |
 |:---|:---|:---|
 | `FLASH_OpStatus_t` | `FLASH_OPERATION_OK`, `FLASH_OPERATION_FAIL` | project-owned completion result; HAL details remain private |
-| `FLASH_ProgramType_t` | `FLASH_PROGRAM_BYTE`, `FLASH_PROGRAM_HALFWORD`, `FLASH_PROGRAM_WORD`, `FLASH_PROGRAM_DOUBLEWORD` | requested programming width and natural alignment |
+| `FLASH_ProgramType_t` | `FLASH_PROGRAM_HALFWORD`, `FLASH_PROGRAM_WORD`, `FLASH_PROGRAM_DOUBLEWORD` | requested programming width and natural alignment |
 | `FLASH_ProtectionLevel_t` | `FLASH_PROTECTION_LEVEL_0`, `FLASH_PROTECTION_LEVEL_1` | reversible readout-protection levels exposed by this interface |
 
 `PFLASH_Program` accepts a `uint64_t Data` value for every width. Only the
-least-significant 8, 16, 32 or 64 bits are programmed according to
+least-significant 16, 32 or 64 bits are programmed according to
 `ProgramType`. Callers shall use the named enumerators and shall not depend on
 their numeric values or on STM32 `FLASH_TYPEPROGRAM_x` encodings.
 
@@ -636,36 +620,37 @@ operation failures. Higher layers decide whether that result means retry,
 abandoning a transaction, entering a fault path or treating a record as
 unavailable.
 
-### 10.3 STM32F411 Flash Organization
+### 10.3 STM32F103C8T6 Flash Organization
 
-The backend models the 512 KiB STM32F411CEU6 internal Flash interval from
-`0x08000000` through `0x0807FFFF`:
+The backend deliberately models only the official 64 KiB STM32F103C8T6
+internal Flash interval from `0x08000000` through `0x0800FFFF`. Medium-density
+STM32F103 devices divide this interval into 64 physical erase pages of 1 KiB
+each:
 
-| Sector | Start | End | Size |
+| Page | Start | End | Size |
 |---:|---:|---:|---:|
-| 0 | `0x08000000` | `0x08003FFF` | 16 KiB |
-| 1 | `0x08004000` | `0x08007FFF` | 16 KiB |
-| 2 | `0x08008000` | `0x0800BFFF` | 16 KiB |
-| 3 | `0x0800C000` | `0x0800FFFF` | 16 KiB |
-| 4 | `0x08010000` | `0x0801FFFF` | 64 KiB |
-| 5 | `0x08020000` | `0x0803FFFF` | 128 KiB |
-| 6 | `0x08040000` | `0x0805FFFF` | 128 KiB |
-| 7 | `0x08060000` | `0x0807FFFF` | 128 KiB |
+| 0 | `0x08000000` | `0x080003FF` | 1 KiB |
+| n | `0x08000000 + n * 0x400` | start + `0x3FF` | 1 KiB |
+| 62 | `0x0800F800` | `0x0800FBFF` | 1 KiB |
+| 63 | `0x0800FC00` | `0x0800FFFF` | 1 KiB |
 
-`PFLASH_EraseSectorAt(Address)` accepts any valid byte address and resolves the
-containing sector internally. The operation always erases that complete sector.
-It never erases only the requested address or a record-sized range.
+`PFLASH_ErasePageAt(Address)` accepts any valid byte address, rounds it down to
+the containing page start and erases exactly that page. It never erases only
+the requested address or a record-sized range.
 
-Both project linker scripts reserve sector 7 for credential persistence:
+The active linker script reserves page 63 for credential persistence:
 
 ```text
-Executable FLASH:     0x08000000 .. 0x0805FFFF  (384 KiB)
-Credential sector:    0x08060000 .. 0x0807FFFF  (128 KiB)
+Executable FLASH:   0x08000000 .. 0x0800FBFF  (63 KiB)
+Credential page:    0x0800FC00 .. 0x0800FFFF  (1 KiB)
 ```
 
 This reservation is a storage-policy decision expressed by the linker and CSS.
-The Platform implementation only knows the physical sector organization and
-can mechanically operate on any valid internal-Flash sector.
+The Platform implementation only knows the physical page organization and can
+mechanically operate on any valid internal-Flash page.
+
+The backend does not use undocumented capacity sometimes observed in nominal
+STM32F103C8 or compatible devices; every range check stops at `0x0800FFFF`.
 
 ### 10.4 Write Lifecycle
 
@@ -673,15 +658,22 @@ One erase/program transaction follows this lifecycle:
 
 ```mermaid
 stateDiagram-v2
+    direction LR
+
     [*] --> Locked
+
     Locked --> Unlocked: PFLASH_Unlock succeeds
-    Unlocked --> Erased: PFLASH_EraseSectorAt when erase is required
-    Unlocked --> Programming: PFLASH_Program when destination is already erased
+
+    Unlocked --> Erased: Erase required / <br/>PFLASH_ErasePageAt
+    Unlocked --> Programming: Destination already erased / <br/>PFLASH_Program
+
     Erased --> Programming: PFLASH_Program
-    Programming --> Programming: additional bounded program operation
-    Programming --> Locked: PFLASH_Lock
-    Erased --> Locked: PFLASH_Lock after failure
-    Unlocked --> Locked: PFLASH_Lock after failure
+
+    Programming --> Locked: Programming complete / <br/>PFLASH_Lock
+
+    Unlocked --> Locked: Operation failed / <br/>PFLASH_Lock
+    Erased --> Locked: Operation failed / <br/>PFLASH_Lock
+    Programming --> Locked: Operation failed / <br/>PFLASH_Lock
 ```
 
 The higher-level owner is responsible for this sequence and shall attempt
@@ -695,22 +687,12 @@ program operations, not ordinary instruction or data reads.
 ### 10.5 API
 
 ```c
-FLASH_OpStatus_t PFLASH_Lock(void);
-FLASH_OpStatus_t PFLASH_Unlock(void);
-
-FLASH_OpStatus_t PFLASH_SetProtection(
-    FLASH_ProtectionLevel_t ProtectionLevel);
-
-FLASH_OpStatus_t PFLASH_EraseSectorAt(uint32_t Address);
-
-FLASH_OpStatus_t PFLASH_Program(
-    FLASH_ProgramType_t ProgramType,
-    uint32_t Address,
-    uint64_t Data);
-
-FLASH_OpStatus_t PFLASH_ReadDoubleWord(
-    uint32_t Address,
-    uint64_t *Data);
+FLASH_OpStatus_t PFLASH_Lock           (void);
+FLASH_OpStatus_t PFLASH_Unlock         (void);
+FLASH_OpStatus_t PFLASH_SetProtection  (FLASH_ProtectionLevel_t ProtectionLevel);
+FLASH_OpStatus_t PFLASH_ErasePageAt    (uint32_t Address);
+FLASH_OpStatus_t PFLASH_Program        (FLASH_ProgramType_t ProgramType, uint32_t Address, uint64_t Data);
+FLASH_OpStatus_t PFLASH_ReadDoubleWord (uint32_t Address, uint64_t *Data);
 ```
 
 | Function | Preconditions | Side effects |
@@ -718,7 +700,7 @@ FLASH_OpStatus_t PFLASH_ReadDoubleWord(
 | `PFLASH_Lock` | none | prevents later erase/program until unlock |
 | `PFLASH_Unlock` | serialized caller ownership | enables erase/program operations |
 | `PFLASH_SetProtection` | valid exposed level and approved destructive/reset policy | programs option bytes; successful reload resets the MCU |
-| `PFLASH_EraseSectorAt` | valid internal-Flash address and unlocked interface | erases every byte in the containing sector |
+| `PFLASH_ErasePageAt` | valid internal-Flash address and unlocked interface | erases every byte in the containing 1 KiB page |
 | `PFLASH_Program` | valid type/range/alignment, unlocked interface and erased destination bits | programs the selected width and waits for completion |
 | `PFLASH_ReadDoubleWord` | valid destination and eight-byte-aligned internal-Flash address | copies one 64-bit memory-mapped value; no unlock required |
 
@@ -729,19 +711,18 @@ It performs a volatile memory-mapped read and does not invoke STM32 HAL.
 
 | Program type | Width | Required destination alignment | Supply constraint used by CSS |
 |:---|---:|---:|:---|
-| `FLASH_PROGRAM_BYTE` | 8 bits | 1 byte | supported but not used by CSS |
 | `FLASH_PROGRAM_HALFWORD` | 16 bits | 2 bytes | supported but not used by CSS |
 | `FLASH_PROGRAM_WORD` | 32 bits | 4 bytes | used by CSS with normal 3.3 V operation |
-| `FLASH_PROGRAM_DOUBLEWORD` | 64 bits | 8 bytes | requires the external Vpp conditions specified by STM32F4 documentation |
+| `FLASH_PROGRAM_DOUBLEWORD` | 64 bits | 8 bytes | implemented by STM32F1 HAL as four halfword program operations |
 
 Internal Flash programming can clear bits from one to zero but cannot restore a
-stored zero to one. The containing sector must be erased before programming a
+stored zero to one. The containing page must be erased before programming a
 new value that requires any zero-to-one transition.
 
 CSS stores an eight-byte logical record but deliberately programs it with two
-32-bit word operations. That policy avoids depending on external Vpp. The
-marker and CRC reside in the second word, allowing the storage layer to reject
-a transaction interrupted after only the first word.
+32-bit word operations. The marker and CRC reside in the second word, allowing
+the storage layer to reject a transaction interrupted after only the first
+word and to verify each bounded Platform call independently.
 
 The backend rejects a program request when the selected width is unsupported,
 the complete write would leave internal Flash, or Address is not a multiple of
@@ -750,8 +731,8 @@ alignment.
 
 ### 10.7 Readout Protection
 
-`PFLASH_SetProtection` exposes Level 0 and Level 1 only. Level 2 is omitted
-because it is irreversible.
+`PFLASH_SetProtection` exposes the STM32F103C8T6 Level 0 and Level 1 states.
+This target has no STM32F4-style RDP Level 2 state.
 
 The operation programs the RDP option byte and launches option-byte reload. A
 successful reload resets the target, so execution is not expected to return.
@@ -785,7 +766,7 @@ configuration unless a public runtime operation explicitly requires it.
 
 Internal Flash has no generated peripheral handle. The active linker script
 owns the executable/persistent address partition, while the Flash Platform
-backend owns target sector mapping and STM32 HAL operation translation.
+backend owns target page mapping and STM32 HAL operation translation.
 
 ### 11.2 Application Composition
 
@@ -815,7 +796,7 @@ No component driver shall discover global HAL handles by itself.
 | TIM3 buzzer PWM | Application Task | no direct access from other tasks or ISR |
 | TIM4 backlight PWM | Application Task | no direct access from other tasks or ISR |
 | TIM2 and HAL time reads | read-only multi-context access where safe | no module may reconfigure the time base |
-| internal Flash sector 7 | Credential Storage Service through Application orchestration | no concurrent erase/program/protection operation; CSS exclusively owns persistent contents |
+| internal Flash page 63 | Credential Storage Service through Application orchestration | no concurrent erase/program/protection operation; CSS exclusively owns persistent contents |
 
 Ownership is the primary concurrency mechanism. If a future design introduces
 multiple writers to one peripheral, its synchronization and failure behavior
@@ -1128,14 +1109,14 @@ module boundaries and avoids hidden blocking.
 
 ### 18.7 Flash Mechanics Without Storage Policy
 
-The Flash Platform owns only STM32 range validation, sector resolution,
+The Flash Platform owns only STM32 range validation, page resolution,
 alignment, HAL programming-width translation, option-byte mechanics and the
 volatile memory-mapped read. CSS owns the credential address, serialized record,
 integrity checks, erase decision, write ordering and post-write verification.
 
 This boundary prevents a hardware interface from learning credential semantics
-and prevents the storage service from including STM32 HAL headers or sector
-identifiers.
+and prevents the storage service from including STM32 HAL headers or page
+geometry.
 
 ---
 
@@ -1159,11 +1140,11 @@ identifiers.
 14. Operate on internal Flash only through a serialized owner and never from an
     ISR or periodic polling loop.
 15. Call `PFLASH_Lock()` on every path reached after a successful unlock.
-16. Erase only a linker-reserved sector whose complete contents belong to the
+16. Erase only a linker-reserved page whose complete contents belong to the
     requesting storage policy.
 17. Use naturally aligned addresses and an erased destination for programming.
-18. Do not use double-word programming under a 3.3 V-only supply; use word or
-    narrower operations unless the required external Vpp is deliberately present.
+18. Remember that STM32F1 word and double-word HAL operations are sequences of
+    physical halfword writes; design record validation for interrupted writes.
 19. Treat readout-protection changes as provisioning operations with reset and
     mass-erase consequences, not ordinary runtime configuration.
 
@@ -1211,11 +1192,10 @@ Platform verification shall combine contract tests with target measurements.
   misaligned read/program requests through focused host or target seams;
 * verify every public programming type maps to the correct HAL constant and
   byte width;
-* verify address-to-sector mapping at every sector boundary;
-* verify erase removes the complete selected sector and no adjacent sector;
+* verify address-to-page rounding at the first, intermediate and last page boundaries;
+* verify erase removes the complete selected page and no adjacent page;
 * verify program operations fail while locked and succeed after unlock on target;
-* verify byte, halfword and word programming at supported supply conditions;
-* do not exercise double-word programming without the required external Vpp;
+* verify halfword, word and double-word programming at supported supply conditions;
 * verify 64-bit readback and invalid-destination behavior;
 * verify CSS restores the lock after success and every post-unlock failure path;
 * validate Level 0/Level 1 provisioning only with a recoverable target image and
@@ -1293,17 +1273,17 @@ ready:
     `Libs` and `Platforms` sources, while Release configuration requires
     reconciliation before it can serve as an equivalent product build.
 17. **Flash failure detail:** `FLASH_OPERATION_FAIL` does not preserve the HAL
-    status, Flash error flags or failing erase sector. The current CSS contract
+    status, Flash error flags or failing erase page. The current CSS contract
     needs only success/failure, but target diagnostics may require a separate
     non-sensitive fault channel later.
 18. **Protection completion contract:** a successful option-byte launch resets
     the target, so `PFLASH_SetProtection` cannot return a normal success result.
     Provisioning code must validate the resulting protection level after reboot.
-19. **Target-specific memory map:** internal-Flash start/end addresses and sector
-    boundaries are fixed to the 512 KiB STM32F411CEU6 organization. A second MCU
+19. **Target-specific memory map:** internal-Flash start/end addresses and page
+    size are fixed to the official 64 KiB STM32F103C8T6 organization. A second MCU
     backend requires a different private implementation.
 20. **Erase granularity:** the smallest exposed erase operation is one physical
-    sector. Higher layers must reserve and own the complete sector even when the
+    page. Higher layers must reserve and own the complete page even when the
     persistent record occupies only a few bytes.
 
 These are concrete engineering constraints, not reasons to add a broad
@@ -1325,7 +1305,7 @@ priority order is:
 6. normalize time getter declarations to strict `(void)` prototypes;
 7. make PWM getters return explicit validity where compatibility permits;
 8. reconcile Debug and Release source inclusion;
-9. add target Flash tests for sector boundaries, alignment, lock discipline and
+9. add target Flash tests for page boundaries, alignment, lock discipline and
    readback under the actual supply conditions;
 10. add focused host fakes only for modules that need deterministic GPIO, I2C,
     PWM, time or Flash contract behavior;
@@ -1342,4 +1322,10 @@ documented public semantics or introduce an explicit versioned contract change.
 
 ## 23. License
 
-This module is distributed under the repository [MIT License](../LICENSE).
+This module is part of the:
+
+```text
+Electronic Lock Project
+```
+
+and follows the project's license terms.
