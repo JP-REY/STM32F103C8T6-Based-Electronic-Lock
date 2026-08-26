@@ -88,6 +88,10 @@ typedef enum
 
     SGS_RINGTONE_ACCESS_GRANTED,    /*< Rising feedback pattern for granted access.     */
 
+    SGS_RINGTONE_LOCKING,           /*< Descending feedback pattern for door locking.   */
+
+    SGS_RINGTONE_UNLOCKING,         /*< Rising feedback pattern for door unlocking.     */
+
     SGS_RINGTONE_ERROR,             /*< Descending feedback pattern for an error.       */
 
     SGS_RINGTONE_LOCKOUT,           /*< Feedback pattern for lockout entry.             */

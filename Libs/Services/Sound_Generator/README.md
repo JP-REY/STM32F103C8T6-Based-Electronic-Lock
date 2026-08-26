@@ -55,7 +55,7 @@
 
 The Sound Generator Service converts application-level sound meanings into fixed buzzer patterns.
 
-The application requests `SGS_RINGTONE_KEYPRESS`, `SGS_RINGTONE_ACCESS_GRANTED` or `SGS_RINGTONE_ERROR`. It does not provide frequencies, phase arrays, output states or durations. Those acoustic details remain centralized in the service-owned pattern map.
+The application requests semantic feedback such as `SGS_RINGTONE_KEYPRESS`, `SGS_RINGTONE_ENTRY_INCOMPLETE`, `SGS_RINGTONE_ENTRY_TIMEOUT`, `SGS_RINGTONE_ACCESS_GRANTED`, `SGS_RINGTONE_LOCKING`, `SGS_RINGTONE_UNLOCKING`, `SGS_RINGTONE_ERROR` or `SGS_RINGTONE_LOCKOUT`. It does not provide frequencies, phase arrays, output states or durations. Those acoustic details remain centralized in the service-owned pattern map.
 
 Each pattern is a sequence of timed phases. A phase specifies:
 
@@ -120,7 +120,7 @@ flowchart LR
 
     subgraph PLATFORM["Platform Layer"]
         PWM["PWM Platform Interface"]
-        TIMER["Target Timer and Pin"]
+        TIMER["Target Timer and <br/>Pin"]
     end
 
     ROOT -->|"initialized buzzer handle"| API
@@ -165,8 +165,8 @@ SGS_OpStatus_t SGS_Init(Buzzer_Handle_t* Buzzer);
 The intended dependency direction is:
 
 ```text
-Composition Root ──injects──> Sound Generator Service ──uses──> Buzzer Driver
-Application      ─requests──> Sound Generator Service ──uses──> Timeout Validation Service
+Composition Root ── injects ──> Sound Generator Service ── uses ──> Buzzer Driver
+Application ────── requests ──> Sound Generator Service ── uses ──> Timeout Validation Service
 ```
 
 The service does not depend directly on STM32 HAL, CMSIS, timer headers, the PWM Platform Interface, the Time Platform Interface, FreeRTOS, keyboard types, authentication types or Lock Controller state enumerations.
@@ -196,7 +196,7 @@ The Sound Generator Service is responsible for:
 
 - Retaining the Buzzer Driver reference injected by the composition root.
 - Establishing an idle, buzzer-off state during initialization.
-- Mapping semantic ringtones to immutable phase sequences.
+- Mapping semantic application and mechanical-feedback ringtones to immutable phase sequences.
 - Associating every pattern with a replacement priority.
 - Applying the first phase immediately when a request is accepted.
 - Tracking the active pattern.
@@ -288,8 +288,13 @@ typedef enum
 typedef enum
 {
     SGS_RINGTONE_KEYPRESS,
+    SGS_RINGTONE_ENTRY_INCOMPLETE,
+    SGS_RINGTONE_ENTRY_TIMEOUT,
     SGS_RINGTONE_ACCESS_GRANTED,
+    SGS_RINGTONE_LOCKING,
+    SGS_RINGTONE_UNLOCKING,
     SGS_RINGTONE_ERROR,
+    SGS_RINGTONE_LOCKOUT,
     SGS_RINGTONE_COUNT
 
 }SGS_Ringtone_t;
@@ -298,11 +303,16 @@ typedef enum
 | Ringtone | Application meaning |
 | --- | --- |
 | `SGS_RINGTONE_KEYPRESS` | A valid keypress was accepted. |
-| `SGS_RINGTONE_ACCESS_GRANTED` | Authentication succeeded and access feedback is required. |
-| `SGS_RINGTONE_ERROR` | Input was incomplete, authentication failed or another generic application error requires feedback. |
+| `SGS_RINGTONE_ENTRY_INCOMPLETE` | Credential confirmation was requested before the required entry was complete. |
+| `SGS_RINGTONE_ENTRY_TIMEOUT` | The active credential-entry window expired. |
+| `SGS_RINGTONE_ACCESS_GRANTED` | Access authorization succeeded and positive application feedback is required. |
+| `SGS_RINGTONE_LOCKING` | The door lock mechanism is performing or completing the locking operation. |
+| `SGS_RINGTONE_UNLOCKING` | The door lock mechanism is performing the unlocking operation. |
+| `SGS_RINGTONE_ERROR` | A generic application error requires negative feedback. |
+| `SGS_RINGTONE_LOCKOUT` | The application entered the authentication lockout condition. |
 | `SGS_RINGTONE_COUNT` | Pattern-map size and invalid ringtone boundary; not playable. |
 
-The application decides when each meaning applies. The service does not consume keyboard, credential or authentication objects.
+`SGS_RINGTONE_ACCESS_GRANTED` and the mechanical `LOCKING` / `UNLOCKING` ringtones intentionally represent different semantics. Authorization feedback reports the access decision; the mechanical ringtones report lock-actuator behavior. The application decides when each meaning applies. The service does not consume keyboard, credential, authentication, door-control or actuator objects.
 
 ### 7.3 Function-Based API
 
@@ -386,6 +396,19 @@ Before `SGS_Init()`, static-duration initialization leaves the pointer and activ
 
 ## 9. Built-In Pattern Catalog
 
+The current pattern map exposes eight playable semantic ringtones. `SGS_RINGTONE_KEYPRESS` uses `SGS_PRIORITY_KEYPRESS`; every other built-in pattern uses `SGS_PRIORITY_FEEDBACK`.
+
+| Ringtone | Character | Priority |
+| --- | --- | --- |
+| `SGS_RINGTONE_KEYPRESS` | Short acknowledgement tone. | `SGS_PRIORITY_KEYPRESS` |
+| `SGS_RINGTONE_ENTRY_INCOMPLETE` | Short high-frequency incomplete-entry indication. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_ENTRY_TIMEOUT` | Multi-phase timeout feedback. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_ACCESS_GRANTED` | Rising positive-access chime. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_LOCKING` | Descending mechanical-locking chime. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_UNLOCKING` | Rising mechanical-unlocking chime. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_ERROR` | Descending generic-error feedback. | `SGS_PRIORITY_FEEDBACK` |
+| `SGS_RINGTONE_LOCKOUT` | Dedicated lockout-entry feedback. | `SGS_PRIORITY_FEEDBACK` |
+
 ### Keypress
 
 | Phase | Frequency | Duration | Output |
@@ -393,6 +416,20 @@ Before `SGS_Init()`, static-duration initialization leaves the pointer and activ
 | 0 | 2600 Hz | 40 ms | Enabled |
 
 Total nominal duration: **40 ms**. Priority: `SGS_PRIORITY_KEYPRESS`.
+
+### Entry Incomplete
+
+| Phase | Frequency | Duration | Output |
+| ---: | ---: | ---: | --- |
+| 0 | 4600 Hz | 40 ms | Enabled |
+
+Total nominal duration: **40 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
+
+### Entry Timeout
+
+`SGS_RINGTONE_ENTRY_TIMEOUT` uses a dedicated multi-phase feedback pattern beginning with an 80 ms 5000 Hz tone followed by a 60 ms silent interval. The complete phase sequence remains private configuration in `Sound_Generator_Service.c`.
+
+Priority: `SGS_PRIORITY_FEEDBACK`.
 
 ### Access Granted
 
@@ -404,6 +441,32 @@ Total nominal duration: **40 ms**. Priority: `SGS_PRIORITY_KEYPRESS`.
 
 Total nominal duration: **260 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
 
+This ringtone represents the positive access decision. It is separate from the actuator-specific unlocking feedback.
+
+### Locking
+
+| Phase | Frequency | Duration | Output |
+| ---: | ---: | ---: | --- |
+| 0 | 2200 Hz | 80 ms | Enabled |
+| 1 | Ignored | 40 ms | Disabled |
+| 2 | 1100 Hz | 180 ms | Enabled |
+
+Total nominal duration: **300 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
+
+The descending sequence provides a distinct closing acknowledgement for the mechanical locking operation.
+
+### Unlocking
+
+| Phase | Frequency | Duration | Output |
+| ---: | ---: | ---: | --- |
+| 0 | 1400 Hz | 90 ms | Enabled |
+| 1 | Ignored | 40 ms | Disabled |
+| 2 | 2200 Hz | 180 ms | Enabled |
+
+Total nominal duration: **310 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
+
+The rising sequence represents mechanical unlocking rather than authentication success.
+
 ### Error
 
 | Phase | Frequency | Duration | Output |
@@ -414,7 +477,13 @@ Total nominal duration: **260 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
 
 Total nominal duration: **390 ms**. Priority: `SGS_PRIORITY_FEEDBACK`.
 
-The exact acoustic result depends on the passive buzzer, supply voltage, PWM duty cycle, timer resolution, board mechanics and enclosure. Frequency and duration changes belong in the private pattern configuration, not in Lock Controller calls.
+### Lockout
+
+`SGS_RINGTONE_LOCKOUT` uses a dedicated multi-phase lockout pattern beginning with a 120 ms 1200 Hz tone followed by a 70 ms silent interval. The complete phase sequence remains private configuration in `Sound_Generator_Service.c`.
+
+Priority: `SGS_PRIORITY_FEEDBACK`.
+
+The exact acoustic result of every pattern depends on the passive buzzer, supply voltage, PWM duty cycle, timer resolution, board mechanics and enclosure. Frequency and duration changes belong in the private pattern configuration, not in application calls.
 
 ---
 
@@ -430,12 +499,13 @@ After synchronization:
 - Equal requested priority replaces the active pattern.
 - Higher requested priority replaces the active pattern.
 
-| Active pattern | Requested keypress | Requested access granted | Requested error |
-| --- | --- | --- | --- |
-| None | Start | Start | Start |
-| Keypress | Replace | Replace | Replace |
-| Access granted | Ignore | Replace | Replace |
-| Error | Ignore | Replace | Replace |
+| Active pattern class | Requested keypress | Requested feedback ringtone |
+| --- | --- | --- |
+| None | Start | Start |
+| Keypress | Replace | Replace |
+| Any `SGS_PRIORITY_FEEDBACK` pattern | Ignore | Replace |
+
+`ENTRY_INCOMPLETE`, `ENTRY_TIMEOUT`, `ACCESS_GRANTED`, `LOCKING`, `UNLOCKING`, `ERROR` and `LOCKOUT` all belong to the same feedback-priority class. They therefore replace one another when requested, while a keypress cannot interrupt any of them.
 
 Priority belongs to the private `SGS_Pattern_t`. Public callers cannot elevate a keypress or override product feedback policy.
 
@@ -647,7 +717,7 @@ The composition root owns the PWM and Buzzer Driver objects. It passes only the 
 #include "Sound_Generator_Service.h"
 #include "tim.h"
 
-static PWM_Handle_t    BuzzerPwm;
+static PWM_Handle_t BuzzerPwm;
 static Buzzer_Handle_t Buzzer;
 
 static bool SoundComposition_Init(void)
@@ -692,11 +762,22 @@ uint32_t now_ms = Platform_GetMillis();
 /* Valid key accepted. */
 (void)SGS_Ring(SGS_RINGTONE_KEYPRESS, now_ms);
 
-/* Authentication succeeded. */
+/* Credential confirmation requested too early. */
+(void)SGS_Ring(SGS_RINGTONE_ENTRY_INCOMPLETE, now_ms);
+
+/* Credential-entry session expired. */
+(void)SGS_Ring(SGS_RINGTONE_ENTRY_TIMEOUT, now_ms);
+
+/* Access decision succeeded. */
 (void)SGS_Ring(SGS_RINGTONE_ACCESS_GRANTED, now_ms);
 
-/* Authentication failed or confirmation was incomplete. */
+/* Mechanical actuator feedback. */
+(void)SGS_Ring(SGS_RINGTONE_UNLOCKING, now_ms);
+(void)SGS_Ring(SGS_RINGTONE_LOCKING, now_ms);
+
+/* Generic negative feedback or lockout entry. */
 (void)SGS_Ring(SGS_RINGTONE_ERROR, now_ms);
+(void)SGS_Ring(SGS_RINGTONE_LOCKOUT, now_ms);
 ```
 
 Priority rejection can be handled explicitly:
@@ -837,13 +918,17 @@ Recommended host-side validation covers:
 - Keypress starts at 2600 Hz and enables output immediately.
 - Keypress remains active before 40 ms.
 - Keypress completes and disables output at exactly 40 ms.
+- Entry-incomplete feedback starts at 4600 Hz and completes at 40 ms.
+- Entry-timeout feedback progresses through its configured multi-phase sequence.
 - Access granted transitions at cumulative boundaries of 80, 120 and 260 ms.
+- Locking feedback transitions at cumulative boundaries of 80, 120 and 300 ms.
+- Unlocking feedback transitions at cumulative boundaries of 90, 130 and 310 ms.
 - Error transitions at cumulative boundaries of 120, 170 and 390 ms.
+- Lockout feedback progresses through its complete configured phase sequence.
 - Keypress replaces keypress.
-- Feedback replaces keypress.
-- Keypress is ignored during access-granted feedback.
-- Keypress is ignored during error feedback.
-- Access granted and error replace one another at equal priority.
+- Any feedback ringtone replaces an active keypress.
+- Keypress is ignored while any feedback-priority ringtone remains active.
+- Feedback-priority ringtones replace one another at equal priority.
 - An expired feedback pattern is updated before priority comparison.
 - A delayed update skips one expired phase.
 - A delayed update skips multiple expired phases.
@@ -863,9 +948,11 @@ Target integration should additionally verify:
 - PWM output appears on the configured passive-buzzer pin.
 - Every built-in frequency is accepted by the PWM Platform.
 - Silent phases disable PWM output.
-- Access feedback is perceptibly rising.
-- Error feedback is perceptibly descending.
-- A keypress cannot interrupt feedback.
+- Access-granted feedback is perceptibly rising and distinguishable from mechanical unlocking.
+- Locking feedback is perceptibly descending.
+- Unlocking feedback is perceptibly rising and distinct from access-granted feedback.
+- Entry-incomplete, entry-timeout, generic-error and lockout feedback are distinguishable enough for the intended product UX.
+- A keypress cannot interrupt any feedback-priority ringtone.
 - Sound execution does not block keyboard or lock-control deadlines.
 - The buzzer remains off while idle and after `SGS_Stop()`.
 - Acoustic output is acceptable across expected supply voltage and enclosure conditions.
@@ -877,7 +964,7 @@ Target integration should additionally verify:
 Current V1 limitations include:
 
 - Exactly one Sound Generator runtime is supported.
-- Only three semantic ringtones are implemented.
+- Eight semantic ringtones are implemented.
 - Patterns are fixed at compile time.
 - Callers cannot register custom phase arrays.
 - Only two priority levels are available.
@@ -891,7 +978,7 @@ Current V1 limitations include:
 - PWM duty cycle remains a Buzzer Driver concern.
 - Timing resolution is limited to caller-supplied milliseconds and update cadence.
 - No internal metrics are maintained for accepted, ignored, completed or failed requests.
-- No lockout, low-battery or critical-fault ringtone is built in.
+- No low-battery or critical-fault ringtone is built in.
 - Thread and ISR safety are not provided internally.
 - The service does not recover or reinitialize failed PWM hardware.
 - Acoustic characteristics vary across buzzers and enclosures.
