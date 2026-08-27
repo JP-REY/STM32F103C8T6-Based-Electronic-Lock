@@ -616,7 +616,6 @@ The current design detects incomplete/corrupted writes; it does not preserve the
 The following limitations describe the current implementation and are intentionally kept visible rather than hidden behind the prototype label.
 
 - **Main-loop timing is not yet characterized.** Maximum loop latency, input-response latency and timeout-observation error still need measured worst-case values.
-- **Unlock execution has no dedicated semantic failure event.** If `DCS_RequestUnlock()` fails, App Executor requests a force lock, but LCS does not yet receive an actuator-failure result that can reconcile its already-committed `ACCESS_UNLOCKED` state through a dedicated transition.
 - **Some DCS update failures are not promoted.** The current periodic application path ignores `DCS_Update()` return status rather than mapping every component-update failure to an explicit App/LCS fault.
 - **Presentation failures are mainly degraded-feedback faults.** Not every LCD/LED/sound failure is promoted to global operational failure.
 - **Low-battery sensing is not implemented.** The low-battery LED and indication runtime exist, but no measurement source or product threshold policy drives them.
