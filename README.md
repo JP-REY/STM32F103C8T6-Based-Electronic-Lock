@@ -17,11 +17,11 @@ Layered embedded firmware for an STM32F103C8T6 electronic access-control prototy
 2. [Product Contract](#product-contract)
 3. [Hardware Baseline](#hardware-baseline)
 4. [Architecture and Documentation](#architecture-and-documentation)
-5. [Safety and Security](#safety-and-security)
-6. [Build and Integration](#build-and-integration)
-7. [Verification](#verification)
-8. [Known Constraints](#known-constraints)
-9. [Documentation Authority](#documentation-authority)
+6. [Safety and Security](#safety-and-security)
+7. [Build and Integration](#build-and-integration)
+8. [Verification](#verification)
+9. [Known Constraints](#known-constraints)
+10. [Documentation Authority](#documentation-authority)
 
 ---
 
@@ -31,7 +31,7 @@ The project implements a complete local electronic-lock workflow while keeping p
 
 The current firmware supports:
 
-- first-boot credential registration when no valid credential exists in Flash;
+- mandatory first-boot credential enrollment when no valid credential exists in Flash;
 - one persistent six-digit numeric credential;
 - authenticated credential replacement;
 - masked credential entry through a 4x4 matrix keyboard;
@@ -53,6 +53,7 @@ The firmware intentionally emphasizes architectural and verification concerns th
 - **Explicit dependency direction** — reusable modules do not include the application layer and hardware-dependent STM32 types are kept behind application/configuration and Platform boundaries.
 - **Static composition** — runtime objects have static storage duration; the application uses no dynamic allocation.
 - **Semantic action boundary** — Lock Control returns actions instead of directly performing hardware or UI side effects.
+- **Mandatory enrollment policy** — Lock Control distinguishes first-boot provisioning from authenticated runtime replacement without duplicating the registration state topology; cancellation cannot escape initial enrollment and successful provisioning completes through a controlled reset.
 - **Door-mechanism service boundary** — lock actuator, door sensor and exit button are coordinated through Door Control rather than being independently manipulated by product logic.
 - **Deferred interrupt processing** — GPIO EXTI callbacks publish timestamps only; debounce, event interpretation and state-machine dispatch occur later in serialized application context.
 - **Non-blocking runtime policy** — product timing is timestamp-based; human-scale delays are not used to implement application timeouts.
@@ -123,24 +124,26 @@ The five product timeout definitions in [`App_Config.h`](App/Config/Inc/App_Conf
 
 1. **PA8 low is the configured safe locked command.** High requests unlock.
 2. On normal startup, the application checks Credential Storage before activating locked idle behavior.
-3. If no valid credential record exists, LCS enters the first-registration path directly from boot.
-4. The first complete keyboard click while `LOCKED` opens a credential-entry session and is consumed as the wake action.
-5. Digits `0` through `9` enter the candidate; `#` confirms and `*` clears or cancels according to CES state.
-6. Key `C` during an active credential-entry route changes the pending operation from unlock to credential registration; the currently installed credential must then authenticate before replacement begins.
-7. Successful authentication for normal entry moves LCS to `ACCESS_UNLOCKED` and requests `DCS_RequestUnlock()`.
-8. A validated request-to-exit press bypasses authentication but converges on the same `ACCESS_UNLOCKED` and door-aware relock sequence.
-9. Request-to-exit does not reset or increment the authentication-failure counter.
-10. A debounced Door Sensor `ACTIVE` event while access is unlocked starts an 800 ms confirmation interval.
-11. After that delay, App Executor requests a synchronous current door-sensor status through DCS.
-12. Only a lock-permissive current sensor status generates `READY_TO_LOCK`.
-13. Normal relock calls `DCS_RequestLock()`, which samples the Door Sensor again immediately before commanding the actuator.
-14. A final lock denial caused by a late door-position change returns the logical flow to `ACCESS_UNLOCKED`; actuator-operation failure enters controlled-reset handling.
-15. Authentication failure starts 1.5 seconds of denial feedback. The third consecutive failed authentication enters a 10-second lockout after denial feedback completes.
-16. Authentication success and lockout expiry reset the authentication-failure count; request-to-exit does not.
-17. Credential replacement requires a first new entry and a confirmation entry. Repeated staging mismatch is bounded by the Lock Control registration policy.
-18. A successfully validated replacement is persisted through Credential Storage before the application updates its runtime credential copy.
-19. App Core owns one mutually exclusive product timeout at a time and emits each expiration once.
-20. Raw credentials are never rendered. Short-lived application-owned copies are explicitly erased after use.
+3. If no valid credential record exists, LCS enters mandatory first-boot enrollment directly from boot and marks that registration route with private first-boot policy state.
+4. First-boot cancellation cannot return the FSM to normal `LOCKED` operation; the active registration-entry phase is refreshed instead.
+5. The first complete keyboard click while `LOCKED` opens a credential-entry session and is consumed as the wake action.
+6. Digits `0` through `9` enter the candidate; `#` confirms and `*` clears or cancels according to CES state.
+7. Key `C` during an active credential-entry route changes the pending operation from unlock to credential registration; the currently installed credential must then authenticate before replacement begins.
+8. Successful authentication for normal entry moves LCS to `ACCESS_UNLOCKED` and requests `DCS_RequestUnlock()`.
+9. A validated request-to-exit press bypasses authentication but converges on the same `ACCESS_UNLOCKED` and door-aware relock sequence.
+10. Request-to-exit does not reset or increment the authentication-failure counter.
+11. A debounced Door Sensor `ACTIVE` event while access is unlocked starts an 800 ms confirmation interval.
+12. After that delay, App Executor requests a synchronous current door-sensor status through DCS.
+13. Only a lock-permissive current sensor status generates `READY_TO_LOCK`.
+14. Normal relock calls `DCS_RequestLock()`, which samples the Door Sensor again immediately before commanding the actuator.
+15. A final lock denial caused by a late door-position change returns the logical flow to `ACCESS_UNLOCKED`; actuator-operation failure enters controlled-reset handling.
+16. Authentication failure starts 1.5 seconds of denial feedback. The third consecutive failed authentication enters a 10-second lockout after denial feedback completes.
+17. Authentication success and lockout expiry reset the authentication-failure count; request-to-exit does not.
+18. Credential registration requires a first new entry and a confirmation entry. The first two staging mismatches retry confirmation; the third clears mismatch history and restarts registration from first entry.
+19. A successfully validated credential is persisted through Credential Storage before the application updates its runtime credential copy.
+20. After successful first-boot persistence and bounded save feedback, LCS selects a dedicated completion action that routes App Executor through controlled reset; the next startup loads the newly installed credential through the normal boot path.
+21. App Core owns one mutually exclusive product timeout at a time and emits each expiration once.
+22. Raw credentials are never rendered. Short-lived application-owned copies are explicitly erased after use.
 
 Detailed behavior is maintained in:
 
@@ -553,7 +556,7 @@ STM32CubeIDE may still be used for target debugging and CubeMX-related workflows
 
 ### Current automated verification
 
-The repository currently contains a native Lock Control FSM suite with **17 independently executable scenarios**.
+The repository currently contains a native Lock Control FSM suite with **independently executable scenarios**.
 
 The test architecture intentionally:
 
@@ -567,6 +570,12 @@ The test architecture intentionally:
 - applies a short per-scenario timeout to detect accidental hangs.
 
 Current scenarios cover boot gating/failure, normal access, cancellation/timeouts, authentication lockout, failure-count reset, registration authorization, first-boot registration, authorized replacement, mismatch limits, storage failure, invalid-event state preservation, request-to-exit behavior, failure-counter preservation and relock recovery when the door condition is not confirmed.
+
+The LCS production policy now additionally specializes mandatory first-boot
+cancellation, third-mismatch restart and first-boot completion reset behavior.
+The host suite is the next verification artifact to update so those new branches
+are explicitly covered rather than being inferred from older registration
+scenarios.
 
 See [Tests/README.md](Tests/README.md) for the authoritative scenario catalog and debugging workflow.
 
@@ -584,7 +593,8 @@ Before treating the prototype as a reliable physical lock, verify at minimum:
 - 800 ms door confirmation delay and final immediate sensor recheck before lock;
 - recovery when the door contact changes between confirmation and final relock;
 - six masked digits, incomplete-entry behavior and clear/cancel semantics;
-- first-boot registration and authenticated credential replacement;
+- mandatory first-boot enrollment, including cancellation containment, third-mismatch restart and post-persistence reset;
+- authenticated credential replacement;
 - exact 5 s, 800 ms, 1.5 s, 10 s and credential-saved 1.5 s intervals plus measured dispatch latency;
 - failure-count reset and lockout entry after the third rejected authentication;
 - persistent credential survival across reset/power cycle;
@@ -629,7 +639,7 @@ The following limitations describe the current implementation and are intentiona
 - **Interrupted credential replacement can lose the old credential.** Marker and CRC prevent acceptance of an incomplete replacement but cannot preserve the previous record after the page has been erased.
 - **The credential is recoverable from Flash.** Digits are stored directly and CRC is not encryption, hashing or authentication.
 - **`CSS_HasCredential()` collapses unavailable conditions.** Erased, malformed, corrupted and unreadable records all appear as `false` to its Boolean caller.
-- **Initial-enrollment cancellation policy is not fully specialized.** A first-boot registration cancellation/timeout can return the FSM to `LOCKED` while no usable credential exists; a production policy should explicitly define recovery/provisioning behavior.
+- **First-boot timeout handling is only partially specialized.** Cancellation can no longer escape mandatory enrollment, but `LCS_EVENT_ENTRY_TIMEOUT` has no dedicated first-boot registration transition. The event is ignored by LCS and enrollment remains active without an automatic timeout refresh/feedback cycle.
 - **No direct lock-bolt position feedback exists.** The firmware knows the commanded actuator state and door-contact state, not confirmed mechanical lock engagement.
 - **Security provisioning remains external.** Debug/readout protection, secure provisioning, tamper policy and physical-attack resistance require a dedicated product-security design.
 

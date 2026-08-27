@@ -98,6 +98,8 @@ pending-request value records whether success shall enter the shared unlocked-ac
 This avoids duplicating entry and authentication states while keeping the result deterministic. Once registration is authorized,
 the LCS explicitly models first entry, confirmation entry, staging validation, persistent storage and bounded success feedback.
 
+A second private policy flag distinguishes mandatory first-boot enrollment from an authorized runtime credential replacement. When startup reports that no credential is installed, LCS activates directly in the registration flow and marks that flow as first-boot enrollment. That policy prevents cancellation from escaping registration and routes successful completion through a controlled reset so the persisted credential is consumed by the normal startup path.
+
 It deliberately does not answer how that operation is physically performed. For example, granted access may require the application to coordinate:
 
 - Physical unlock through the door-control or actuator path.
@@ -139,9 +141,12 @@ The acronym `LCS` means **Lock Control Service** and is used as the prefix for e
 - Request-to-exit preserves accumulated authentication-failure history.
 - Explicit credential-register first-entry, confirmation, validation, persistence, and success-feedback states.
 - Independent, saturating credential-confirmation mismatch counter.
-- Confirmation retry after the first two mismatches and registration abortion on the third.
+- Confirmation retry after the first two mismatches and restart from first credential entry on the third.
 - Explicit pending-request and registration-mismatch cleanup on terminal paths.
-- Direct first-boot registration activation when no stored credential exists.
+- Direct mandatory first-boot registration activation when no stored credential exists.
+- Private first-boot policy distinguishing initial enrollment from authorized credential replacement.
+- First-boot cancellation containment so mandatory enrollment cannot return to normal locked idle.
+- Boot-policy-dependent registration completion: normal replacement returns to locked idle, while first-boot enrollment requests a controlled reset.
 - Safe rejection of events that are invalid in the current state.
 - Boot gating through explicit initialization-result events.
 - Synchronous and deterministic processing.
@@ -251,9 +256,10 @@ Consequently, the service can be tested on a native host without providing mocks
 ### 3.3 Singleton Ownership
 
 The source file allocates one private `LCS_Handle_t` instance. It is the single authoritative runtime context for the product lock
-FSM, including the operation currently awaiting authentication.
+FSM, including the operation currently awaiting authentication and the boot-policy flag that distinguishes mandatory initial enrollment
+from normal operation with an already provisioned credential.
 
-The singleton is appropriate while the firmware owns exactly one physical lock and invokes the service from one serialized application context. No public handle is exposed, so callers cannot mutate the current state, failure counter, or initialization flag directly.
+The singleton is appropriate while the firmware owns exactly one physical lock and invokes the service from one serialized application context. No public handle is exposed, so callers cannot mutate the current state, policy counters, first-boot marker, pending purpose, or activation flag directly.
 
 ---
 
@@ -300,7 +306,10 @@ The Lock Control Service is responsible for:
 - Distinguishing the unlock and credential-register destinations of successful authentication.
 - Owning and clearing the pending authentication purpose.
 - Owning the credential-register phase transitions and confirmation-mismatch counter.
-- Selecting another confirmation attempt or session abortion after a mismatch.
+- Selecting another confirmation attempt or restarting registration from first entry when the configured mismatch limit is reached.
+- Distinguishing mandatory first-boot enrollment from normal authorized credential replacement.
+- Preventing cancellation from escaping mandatory first-boot enrollment.
+- Selecting normal locked return or controlled-reset completion according to the active registration boot policy.
 - Selecting success feedback or the controlled fault policy after persistent-storage completion.
 - Applying private internal effects.
 - Committing the target state of an accepted transition.
@@ -357,7 +366,7 @@ The private implementation uses only:
 #include "stddef.h"
 ```
 
-These headers provide the service contract, the fixed-width failure counter, the initialization flag, `size_t`, and `NULL`.
+These headers provide the service contract, fixed-width policy counters, boolean runtime flags, `size_t`, and `NULL`.
 
 The service does not depend on:
 
@@ -387,9 +396,9 @@ its result and is the only integration boundary that calls `LCS_Process()`.
 | `LCS_EVENT_NONE` | App Core | No semantic follow-up event is available; never causes a transition. |
 | `LCS_EVENT_INIT_OK` | App Core startup | Critical startup dependencies are valid and normal locked operation may begin. |
 | `LCS_EVENT_INIT_FAIL` | App Core startup | Critical startup validation failed and the controlled fault path is required. |
-| `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` | Credential Storage Service | No installed credential was found; initial credential registration is required. |
+| `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` | Credential Storage Service | No installed credential was found; mandatory first-boot credential enrollment is required. |
 | `LCS_EVENT_CREDENTIAL_REGISTER_REQUESTED` | User command mapping | Active credential entry is reclassified as authorization for credential registration. |
-| `LCS_EVENT_CREDENTIAL_REGISTER_DONE` | Registration-feedback timing | Registration completion feedback ended and normal locked operation may resume. |
+| `LCS_EVENT_CREDENTIAL_REGISTER_DONE` | Registration-feedback timing | Registration success feedback ended; LCS selects normal locked return or first-boot controlled-reset completion according to boot policy. |
 | `LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED` | Matrix Keyboard Driver | A wake key requests credential-entry mode; the triggering key is not a credential digit. |
 | `LCS_EVENT_CREDENTIAL_CANCELLED` | Credential Entry Service | The user cancelled the currently active credential-entry phase. |
 | `LCS_EVENT_CANDIDATE_READY` | Credential Entry Service | A complete credential candidate is available for the current entry purpose. |
@@ -423,7 +432,7 @@ semantic outcomes: LCS never interprets raw exit-button edges or raw door-sensor
 |---|---|
 | `LCS_ACTION_NONE` | No application-level coordination is requested. |
 | `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Begin collection of the first new credential entry. |
-| `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Erase and restart the incomplete first credential entry. |
+| `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Clear transient registration state as required and restart credential collection from the first-entry phase. |
 | `LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` | Abort first entry, clear transient registration data and restore locked idle. |
 | `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` | Stage the first entry and begin collection of its confirmation entry. |
 | `LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` | Erase and restart confirmation while retaining the staged first entry. |
@@ -443,7 +452,8 @@ semantic outcomes: LCS never interprets raw exit-button edges or raw door-sensor
 | `LCS_ACTION_ENTER_LOCKOUT` | Preserve the locked state, reject credential entry and begin lockout timing. |
 | `LCS_ACTION_RETURN_TO_LOCKED` | Restore normal locked-idle operation. |
 | `LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT` | Restore locked idle and request credential-entry timeout feedback. |
-| `LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` | Restore locked idle after registration completion feedback. |
+| `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` | Complete mandatory first-boot registration through the application-controlled reset path. |
+| `LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` | Restore locked idle after normal runtime registration completion feedback. |
 | `LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION` | Begin the bounded interval following confirmation of the required door state. |
 | `LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION` | Request evaluation of the current door-control conditions for safe relocking. |
 | `LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` | Request physical relock and restore locked idle after granted access. |
@@ -508,26 +518,26 @@ flowchart TB
     AUTH -->|T10| FIRST
     AUTH -->|T11| ACCESS["ACCESS<br/>UNLOCKED"]
 
-    LOCKED -->|T12| ACCESS
+    LOCKED -->|T14| ACCESS
 
-    ACCESS -->|T13| CONFIRM["DOOR SENSOR<br/>CONFIRMATION"]
-    ACCESS -->|T36| FAULT
-    ACCESS -->|T37| RETURN["LOCKED<br/>return rail"]
+    ACCESS -->|T15| CONFIRM["DOOR SENSOR<br/>CONFIRMATION"]
+    ACCESS -->|T12| FAULT
+    ACCESS -->|T13| RETURN["LOCKED<br/>return rail"]
 
-    CONFIRM -->|T14| READY["READY TO LOCK<br/>wait"]
+    CONFIRM -->|T16| READY["READY TO LOCK<br/>wait"]
 
-    READY -->|T15| RETURN
-    READY -->|T16| ACCESS
+    READY -->|T17| RETURN
+    READY -->|T18| ACCESS
 
-    LOCKED -->|T17| ACCESS
+    LOCKED -->|T19| ACCESS
 
-    AUTH -->|T18| DENIED["ACCESS DENIED<br/>FEEDBACK"]
+    AUTH -->|T20| DENIED["ACCESS DENIED<br/>FEEDBACK"]
 
     ENTRY -->|"T05 / T07"| RETURN
 
-    DENIED -->|T19| RETURN
-    DENIED -->|T20| LOCKOUT["LOCKOUT"]
-    LOCKOUT -->|T21| RETURN
+    DENIED -->|T21| RETURN
+    DENIED -->|T22| LOCKOUT["LOCKOUT"]
+    LOCKOUT -->|T23| RETURN
 
     RETURN --> LOCKED
 
@@ -548,25 +558,25 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    FIRST["FIRST ENTRY<br/>T24 ↺"] -->|T22| CONFIRM["CONFIRM ENTRY<br/>T28 ↺"]
+    FIRST["FIRST ENTRY<br/>T26 / T27 ↺"] -->|T24| CONFIRM["CONFIRM ENTRY<br/>T31 / T32 ↺"]
 
-    CONFIRM -->|T26| VALIDATE["VALIDATING"]
+    CONFIRM -->|T29| VALIDATE["VALIDATING"]
 
-    VALIDATE -->|T30| PERSIST["PERSISTING"]
+    VALIDATE -->|T34| PERSIST["PERSISTING"]
 
-    PERSIST -->|T33| FEEDBACK["SUCCESS<br/>FEEDBACK"]
+    PERSIST -->|T37| FEEDBACK["SUCCESS<br/>FEEDBACK"]
 
-    FEEDBACK -->|T35| LOCKED["LOCKED"]
+    FEEDBACK -->|"T39 / T40"| LOCKED["LOCKED"]
 
-    VALIDATE -->|T31| CONFIRM
+    VALIDATE -->|T35| CONFIRM
 
-    FIRST -->|"T23 / T25"| LOCKED
+    VALIDATE -->|T36| FIRST
 
-    CONFIRM -->|"T27 / T29"| LOCKED
+    FIRST -->|"T25 / T28<br/>normal boot"| LOCKED
 
-    VALIDATE -->|T32| LOCKED
+    CONFIRM -->|"T30 / T33<br/>normal boot"| LOCKED
 
-    PERSIST -->|T34| FAULT["FAULT"]
+    PERSIST -->|T38| FAULT["FAULT"]
 
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
     classDef active fill:#eaf4fb,stroke:#3478a8,color:#17324d
@@ -579,11 +589,11 @@ flowchart LR
 
 Every edge corresponds to the transition identifier in [Section 9.4](#94-transition-table). `START` is only the static-initialization
 marker. `RETURN` is a layout-only duplicate of `LOCKED`, not another `LCS_State_t`; no long edge reconnects the two boxes because
-that visual cycle would obscure the operational paths. `T06`, `T08`, `T22` and `T26` are self-transitions displayed inside their
-state nodes to keep the graphs free of looping edges.
+that visual cycle would obscure the operational paths. `T06` and `T08` are self-transitions in normal credential entry; `T26`, `T27`,
+`T31`, and `T32` are registration self-transitions displayed inside their state nodes to keep the graphs free of looping edges.
 
-The two ways into `ACCESS_UNLOCKED` are intentionally visible: `T11` follows successful credential authentication, while `T12`
-accepts a validated request-to-exit directly from `LOCKED`. Both then share `T13` through `T15` for door-position confirmation and relock.
+The two normal ways into `ACCESS_UNLOCKED` are intentionally visible: `T11` follows successful credential authentication, while `T14`
+accepts a validated request-to-exit directly from `LOCKED`. Both then share `T15` through `T17` for door-position confirmation and relock.
 
 The topology diagrams use transition IDs instead of full event/action labels to remain readable. The transition table in
 [Section 9.4](#94-transition-table) expands every ID into its complete source state, event, guard, target state, internal effect and
@@ -600,6 +610,7 @@ typedef struct
     uint8_t       failed_attempt_count;
     uint8_t       credential_register_mismatch_count;
     LCS_Pending_t pending_request;
+    bool          first_boot;
     bool          initialized;
 
 }LCS_Handle_t;
@@ -611,7 +622,8 @@ typedef struct
 | `failed_attempt_count` | Saturating number of consecutive rejected authentications. |
 | `credential_register_mismatch_count` | Saturating number of confirmation mismatches in the active registration session. |
 | `pending_request` | Operation selected after successful authentication: none, unlock, or credential registration. |
-| `initialized` | Enables normal event processing only after successful startup. |
+| `first_boot` | Identifies mandatory enrollment entered because no persisted credential existed at startup. |
+| `initialized` | Enables operational event processing after successful normal startup or activation of mandatory first-boot enrollment. |
 
 The transition table is not part of the mutable handle because it is immutable module policy stored in read-only static data.
 
@@ -644,25 +656,33 @@ The implementation preserves these invariants:
 - The initial failure count is zero.
 - The initial registration-mismatch count is zero.
 - The initial pending request is `LCS_PENDING_NONE`.
+- The initial `first_boot` policy flag is `false`.
 - Normal processing is initially inactive.
-- `LCS_EVENT_INIT_OK` and `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` can set `initialized` to `true` from boot.
+- `LCS_EVENT_INIT_OK` activates normal operation without enabling first-boot enrollment policy.
+- `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` activates the service and sets mandatory first-boot enrollment policy.
 - Before activation, events other than `INIT_OK`, `INIT_FAIL`, and `CREDENTIAL_NOT_REGISTERED` cannot mutate runtime state.
 - The failure counter never exceeds `LCS_FAILURE_ATTEMPTS_LIMIT`.
 - The registration-mismatch counter never exceeds `LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT`.
 - Authentication failures and registration mismatches use independent counters.
 - Authentication success resets the consecutive-failure counter.
-- `LOCKED` has no pending request after every completed, failed, cancelled, or timed-out operation.
 - Active entry and authentication preserve exactly one pending purpose.
 - Authentication success is accepted only when its record's pending-operation discriminator equals `pending_request`.
 - Authentication failure clears the pending request before denial feedback begins.
+- Every route that returns normal operation to `LOCKED` leaves no pending authentication purpose.
 - Request-to-exit enters the unlocked-access path without creating an authentication pending purpose.
 - Request-to-exit does not reset or increment the authentication-failure counter.
 - `ACCESS_UNLOCKED` accepts door-position confirmation from both authenticated-access and request-to-exit routes.
 - Final relock occurs only after `READY_TO_LOCK` is received in `LCS_STATE_READY_TO_LOCK`.
 - Lockout completion resets the consecutive-failure counter.
-- Every terminal registration path resets the registration-mismatch counter.
+- A registration mismatch below the configured limit returns to confirmation entry and increments only the registration-mismatch counter.
+- The mismatch that reaches the configured limit resets mismatch history and restarts registration from `CREDENTIAL_REGISTER_FIRST_ENTRY`.
+- First-boot registration cancellation cannot transition the FSM to `LOCKED`.
+- Successful normal registration completion returns to locked idle after bounded success feedback.
+- Successful first-boot registration completion selects the controlled-reset path after bounded success feedback.
+- Registration mismatch history is reset when validation succeeds, the mismatch limit restarts registration, normal-boot registration is aborted, or persistence completes.
 - Invalid current-state/event combinations do not mutate runtime state.
 - At most one transition is committed by one `LCS_Process()` call.
+
 
 ---
 
@@ -710,14 +730,16 @@ The current private guards are:
 | Guard | Condition |
 |---|---|
 | `LCS_GUARD_ALWAYS` | Always authorizes the matching source/event record. |
-| `LCS_GUARD_UNDER_ATTEMPT_LIMIT` | Authorizes while the failure count is below three. |
-| `LCS_GUARD_ATTEMPT_COUNT_LIMIT` | Authorizes once the failure count reaches three. |
+| `LCS_GUARD_FIRST_BOOT` | Authorizes a boot-policy-specific transition while mandatory first-boot enrollment is active. |
+| `LCS_GUARD_NORMAL_BOOT` | Authorizes the complementary route while operating with an already provisioned credential. |
+| `LCS_GUARD_UNDER_ATTEMPT_LIMIT` | Authorizes while the authentication-failure count is below three. |
+| `LCS_GUARD_ATTEMPT_COUNT_LIMIT` | Authorizes once the authentication-failure count reaches three. |
 | `LCS_GUARD_REGISTER_RETRY_AVAILABLE` | Authorizes when the current mismatch still leaves another confirmation attempt. |
 | `LCS_GUARD_REGISTER_ATTEMPT_LIMIT` | Authorizes when the current mismatch consumes the third and final confirmation attempt. |
 
-The authentication-attempt pair is complementary and selects return-to-locked or lockout after denial feedback. The
-registration-attempt pair is also complementary and selects another confirmation attempt or registration abortion on the third
-mismatch.
+The authentication-attempt pair is complementary and selects return-to-locked or lockout after denial feedback. The registration-attempt pair is also complementary and selects either another confirmation attempt or a restart from credential-register first entry when the configured mismatch limit is reached.
+
+`LCS_GUARD_FIRST_BOOT` and `LCS_GUARD_NORMAL_BOOT` are complementary boot-policy guards. They allow the same source/event pair to preserve mandatory enrollment during initial provisioning while retaining normal cancellation and completion behavior for an already provisioned product.
 
 An unknown guard evaluates to `false`. This fail-closed default prevents malformed transition data from authorizing a state change.
 
@@ -728,7 +750,8 @@ The current private internal effects are:
 | Internal effect | Mutation |
 |---|---|
 | `LCS_INTERNAL_EFFECT_NONE` | Preserves all runtime fields except the mandatory target-state commit. |
-| `LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE` | Marks successful startup activation. |
+| `LCS_INTERNAL_EFFECT_SET_FIRST_BOOT_FLAG` | Activates the service and marks mandatory first-boot credential enrollment as active. |
+| `LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE` | Marks successful normal startup activation. |
 | `LCS_INTERNAL_EFFECT_SET_PENDING_REGISTER_SESSION` | Routes the next successful authentication to credential registration. |
 | `LCS_INTERNAL_EFFECT_SET_PENDING_UNLOCK` | Routes the next successful authentication to the shared unlocked-access path. |
 | `LCS_INTERNAL_EFFECT_CLEAR_PENDING` | Restores the no-pending-request invariant. |
@@ -745,13 +768,13 @@ Target-state assignment is mandatory for every accepted transition and is theref
 
 ### 9.4 Transition Table
 
-The current table contains **33 declared transition records**:
+The current table contains **40 declared transition records**. IDs below follow the actual record order used by the first-match lookup:
 
 | ID | Source state | Event | Guard | Pending discriminator | Target state | Internal effect | Returned action |
 |---:|---|---|---|---|---|---|---|
 | `T01` | `BOOT` | `INIT_OK` | Always | None | `LOCKED` | Set service active | `NONE` |
 | `T02` | `BOOT` | `INIT_FAIL` | Always | None | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
-| `T03` | `BOOT` | `CREDENTIAL_NOT_REGISTERED` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Set service active | `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T03` | `BOOT` | `CREDENTIAL_NOT_REGISTERED` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Set first-boot flag | `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
 | `T04` | `LOCKED` | `CREDENTIAL_ENTRY_REQUESTED` | Always | None | `CREDENTIAL_SESSION_ACTIVE` | Set pending unlock | `BEGIN_CREDENTIAL_ENTRY_SESSION` |
 | `T05` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Clear pending | `END_CREDENTIAL_ENTRY_SESSION` |
 | `T06` | `CREDENTIAL_SESSION_ACTIVE` | `CREDENTIAL_REGISTER_REQUESTED` | Always | None | `CREDENTIAL_SESSION_ACTIVE` | Set pending register session | `REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION` |
@@ -760,35 +783,39 @@ The current table contains **33 declared transition records**:
 | `T09` | `CREDENTIAL_SESSION_ACTIVE` | `CANDIDATE_READY` | Always | None | `AUTHENTICATING` | None | `REQUEST_AUTHENTICATION` |
 | `T10` | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | Credential register | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Clear pending and reset failures | `BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
 | `T11` | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | Unlock | `ACCESS_UNLOCKED` | Clear pending and reset failures | `REQUEST_UNLOCK` |
-| `T12` | `LOCKED` | `EXIT_REQUEST` | Always | None | `ACCESS_UNLOCKED` | Clear pending | `EXIT_REQUEST_UNLOCK` |
-| `T13` | `ACCESS_UNLOCKED` | `DOOR_POSITION_CONFIRMED` | Always | None | `DOOR_SENSOR_CONFIRMATION` | None | `BEGIN_DOOR_SENSOR_CONFIRMATION` |
-| `T14` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | None | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
-| `T15` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
-| `T16` | `READY_TO_LOCK` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
-| `T17` | `LOCKED` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
-| `T18` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
-| `T19` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
-| `T20` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
-| `T21` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
-| `T22` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
-| `T23` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T24` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T25` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T26` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
-| `T27` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T28` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T29` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T30` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
-| `T31` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T32` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T33` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
-| `T34` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
-| `T35` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Always | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
-| `T36` | `ACCESS_UNLOCKED` | `CRITICAL_FAULT` | Always | Unlock | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
-| `T37` | `ACCESS_UNLOCKED` | `UNLOCK_REQUEST_FAILED` | Always | Unlock | `LOCKED` | None | `RETURN_TO_LOCKED` |
+| `T12` | `ACCESS_UNLOCKED` | `CRITICAL_FAULT` | Always | None | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
+| `T13` | `ACCESS_UNLOCKED` | `UNLOCK_REQUEST_FAILED` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED` |
+| `T14` | `LOCKED` | `EXIT_REQUEST` | Always | None | `ACCESS_UNLOCKED` | Clear pending | `EXIT_REQUEST_UNLOCK` |
+| `T15` | `ACCESS_UNLOCKED` | `DOOR_POSITION_CONFIRMED` | Always | None | `DOOR_SENSOR_CONFIRMATION` | None | `BEGIN_DOOR_SENSOR_CONFIRMATION` |
+| `T16` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | None | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
+| `T17` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
+| `T18` | `READY_TO_LOCK` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
+| `T19` | `LOCKED` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
+| `T20` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
+| `T21` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
+| `T22` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
+| `T23` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
+| `T24` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
+| `T25` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T26` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T27` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T28` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T29` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
+| `T30` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T31` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T32` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T33` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T34` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
+| `T35` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T36` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T37` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
+| `T38` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
+| `T39` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | First boot | None | `LOCKED` | Reset register mismatch count | `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` |
+| `T40` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Normal boot | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
 
-`T11` and `T12` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the
-failure counter. `T12` is request-to-exit and preserves that history. `T13` through `T15` form the shared post-unlock relock sequence.
+`T11` and `T14` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the failure counter. `T14` is request-to-exit and preserves that history. `T15` through `T17` form the shared post-unlock relock sequence.
+
+`T25`/`T26`, `T30`/`T31`, and `T39`/`T40` share source/event pairs but are selected by complementary normal-boot and first-boot guards. `T35`/`T36` likewise share a source/event pair and use complementary mismatch-policy guards.
 
 ### 9.5 Selection Rules
 
@@ -936,11 +963,18 @@ pending_request == CREDENTIAL_REGISTER -> enter CREDENTIAL_REGISTER_FIRST_ENTRY
 pending_request == NONE                -> reject AUTH_SUCCESS
 ```
 
+The registration boot-policy pairs are also complementary:
+
+```text
+first_boot == true  -> mandatory enrollment branch
+first_boot == false -> normal runtime registration branch
+```
+
 The validation-failure pair uses complementary guards evaluated against the current mismatch as the next attempt:
 
 ```text
-current failure leaves count below 3 -> retry CONFIRM_ENTRY
-current failure reaches count 3      -> abort registration to LOCKED
+current mismatch leaves count below 3 -> retry CONFIRM_ENTRY
+current mismatch reaches count 3      -> restart at FIRST_ENTRY
 ```
 
 If deliberate priority is introduced later, it shall be documented beside those records and validated by tests. Accidental overlapping guards should be treated as a transition-table defect.
@@ -965,7 +999,7 @@ static void APP_DispatchLockEvent(LCS_Event_t Event)
             break;
 
         case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
-            /* Erase/restart an incomplete first entry. */
+            /* Clear transient registration state as required and restart from first entry. */
             break;
 
         case LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
@@ -1056,8 +1090,12 @@ static void APP_DispatchLockEvent(LCS_Event_t Event)
             /* End entry, enforce lock, restore idle UI and provide timeout feedback. */
             break;
 
+        case LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT:
+            /* Complete mandatory first-boot enrollment through the controlled-reset path. */
+            break;
+
         case LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION:
-            /* End registration-success feedback and restore locked idle. */
+            /* End normal registration-success feedback and restore locked idle. */
             break;
 
         case LCS_ACTION_REQUEST_CONTROLLED_RESET:
@@ -1125,6 +1163,8 @@ The service does not read timestamps. The application or a timeout service owns 
 | Access-denied feedback duration | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
 | Temporary lockout duration | `LCS_EVENT_LOCKOUT_TIMEOUT` |
 | Successful-registration feedback duration | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` |
+
+Registration entry timeout is currently specialized only for normal boot. While mandatory first-boot enrollment is active, no first-boot `ENTRY_TIMEOUT` transition is authorized; a stale or elapsed timeout event is therefore ignored and the mandatory enrollment state is preserved.
 
 The previous standalone authorized-unlock timeout is no longer part of the LCS contract. Granted access remains in
 `LCS_STATE_ACCESS_UNLOCKED` until Door Control Service reports `LCS_EVENT_DOOR_POSITION_CONFIRMED`. After the bounded confirmation delay,
@@ -1270,19 +1310,37 @@ LCS owns the product phase and retry policy but never owns credential digits. Th
 first entry and compares the confirmation; CSS owns persistent storage. App Core maps their results back into LCS events.
 
 On validation failure, the first two mismatches return to `CREDENTIAL_REGISTER_CONFIRM_ENTRY` and increment only the registration
-mismatch counter. The third mismatch resets that counter, erases transient registration data through
-`LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`, and returns to `LOCKED`. Authentication failures and registration
-mismatches remain independent policies.
+mismatch counter. The third mismatch resets that counter and returns the FSM to `CREDENTIAL_REGISTER_FIRST_ENTRY` through
+`LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION`, forcing the current registration attempt to restart from a new first
+credential entry.
+
+This restart policy applies to both normal runtime registration and mandatory first-boot enrollment. During normal boot, the user may
+subsequently cancel or time out from an entry phase and return to `LOCKED`; during first boot, the mandatory-enrollment policy prevents
+cancellation from escaping registration. Authentication failures and registration-confirmation mismatches remain independent policies.
 
 ### 13.4 First-Boot Registration Route
 
-When startup retrieval reports that no credential exists, App Core may dispatch `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` while LCS is
-still in `BOOT`. That transition activates the service directly in `CREDENTIAL_REGISTER_FIRST_ENTRY`; authentication is intentionally
-bypassed because no installed credential exists. The remaining registration phases are identical to the authorized replacement flow.
+When startup credential retrieval reports that no installed credential exists, App Core dispatches `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` while LCS remains in `BOOT`.
 
-The LCS route is operational, but App Core still has to perform startup CSS retrieval and select this event instead of
-`LCS_EVENT_INIT_OK`. Cancellation or entry timeout currently returns to `LOCKED` even on first boot; because that leaves no usable
-credential, a future product policy may need to distinguish initial enrollment from credential replacement.
+That transition activates the service, sets the private first-boot policy flag and enters `CREDENTIAL_REGISTER_FIRST_ENTRY` directly. Authentication is intentionally bypassed because no credential exists yet that could authorize enrollment.
+
+First-boot registration uses the same first-entry, confirmation, validation, persistence and success-feedback states as authorized runtime credential replacement, but boot-policy guards specialize its escape and completion behavior.
+
+During mandatory first-boot enrollment:
+
+- Cancellation in `CREDENTIAL_REGISTER_FIRST_ENTRY` refreshes the first-entry phase instead of returning to `LOCKED`.
+- Cancellation in `CREDENTIAL_REGISTER_CONFIRM_ENTRY` refreshes the confirmation phase instead of returning to `LOCKED`.
+- The first two confirmation mismatches retry confirmation.
+- The third confirmation mismatch resets mismatch history and restarts registration from `CREDENTIAL_REGISTER_FIRST_ENTRY`.
+- Persistent-storage failure enters `FAULT` and requests controlled reset.
+- Successful persistence enters bounded registration-success feedback.
+- When `LCS_EVENT_CREDENTIAL_REGISTER_DONE` completes that feedback, the FSM commits `LOCKED` and returns `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`.
+- The application interprets that action by requesting a controlled reset. The next startup therefore retrieves the newly persisted credential and enters the normal boot path.
+
+Consequently, cancellation and confirmation-mismatch policy cannot leave the product in normal locked operation without a usable credential.
+
+> [!NOTE]
+> `LCS_EVENT_ENTRY_TIMEOUT` currently has only normal-boot registration transitions. During first-boot registration no timeout record is authorized, so the event is ignored and the mandatory enrollment state is preserved. If first-boot-specific timeout feedback or session refresh is required later, it shall be introduced explicitly through guarded transitions.
 
 ### 13.5 Rejected Access and Lockout
 
@@ -1306,15 +1364,26 @@ the next rejected authentication is still the third consecutive failure.
 
 ### 13.6 Cancellation or Entry Timeout
 
-Both of these events return an active entry phase to `LOCKED`:
+Cancellation and entry timeout are interpreted according to the active product flow and, for registration, the boot policy.
 
-- `LCS_EVENT_CREDENTIAL_CANCELLED`
-- `LCS_EVENT_ENTRY_TIMEOUT`
+For normal credential entry:
 
-For normal credential entry, cancellation returns `LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION` and timeout returns
-`LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT`; both clear the pending purpose. In registration first entry and confirmation entry,
-cancellation and timeout return their phase-specific end action, reset the mismatch counter and require App Core to erase all transient
-registration data.
+- `LCS_EVENT_CREDENTIAL_CANCELLED` returns `LCS_ACTION_END_CREDENTIAL_ENTRY_SESSION`.
+- `LCS_EVENT_ENTRY_TIMEOUT` returns `LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT`.
+- Both clear the pending authentication purpose and return the FSM to `LOCKED`.
+
+For credential registration during normal boot:
+
+- Cancellation from first entry or confirmation returns the corresponding phase-specific end action.
+- Entry timeout from either entry phase follows the same normal-abort policy.
+- The registration-mismatch counter is reset and the FSM returns to `LOCKED`.
+
+For mandatory first-boot registration:
+
+- Cancellation does not escape enrollment. It refreshes the currently active first-entry or confirmation phase.
+- Entry timeout currently has no authorized first-boot transition and is therefore ignored without changing LCS runtime state.
+
+This distinction guarantees that user cancellation cannot place an unprovisioned first-boot product into normal locked operation.
 
 ### 13.7 Ignored Events
 
@@ -1381,8 +1450,8 @@ The transition table separates the stable processing mechanism from evolving pro
 
 ### Sparse Linear Representation
 
-Only valid transitions consume storage. The current table has **37 records**, while a dense matrix for **15 runtime states** and
-**26 dispatchable event identifiers** would reserve many unused cells.
+Only valid transitions consume storage. The current table has **40 records**, while a dense matrix for **15 runtime states** and
+**25 dispatchable semantic event identifiers** would reserve many unused cells.
 
 ### Private State Representation
 
@@ -1433,8 +1502,16 @@ three, preventing wraparound and preventing a confirmation mistake from changing
 ### Explicit Boot Gate
 
 The singleton begins in a safe inactive state. Normal events are ignored until startup validation dispatches
-`LCS_EVENT_INIT_OK` or `LCS_EVENT_CREDENTIAL_NOT_REGISTERED`. The latter activates the FSM directly in registration first entry;
-`LCS_EVENT_INIT_FAIL` remains admitted only to enter the fault path.
+`LCS_EVENT_INIT_OK` or `LCS_EVENT_CREDENTIAL_NOT_REGISTERED`. The latter activates the FSM directly in registration first entry and
+marks mandatory first-boot enrollment; `LCS_EVENT_INIT_FAIL` remains admitted only to enter the fault path.
+
+### Mandatory First-Boot Enrollment
+
+Initial enrollment and authorized credential replacement intentionally reuse the same registration states. Their policy differences are expressed through the private `first_boot` runtime flag and complementary `FIRST_BOOT` / `NORMAL_BOOT` guards rather than by duplicating the entire registration FSM.
+
+This keeps the registration topology compact while allowing first boot to enforce a stronger invariant: a product with no persisted credential cannot escape mandatory enrollment through cancellation.
+
+Successful first-boot registration requests a controlled reset rather than continuing directly as a normal runtime registration. This causes the newly persisted credential to be rediscovered through the ordinary startup path and avoids maintaining two different post-provisioning activation paths.
 
 ---
 
@@ -1447,6 +1524,8 @@ The service uses safe default behavior at its input and policy boundaries:
 - Unknown internal effects perform no private mutation.
 - The failed-attempt counter saturates instead of wrapping.
 - The registration-mismatch counter saturates independently instead of wrapping.
+- The third registration mismatch restarts enrollment from first entry instead of silently accepting or persisting an inconsistent candidate.
+- First-boot cancellation cannot escape mandatory enrollment to normal locked idle.
 - Access denial and lockout preserve the semantic safe-lock requirement.
 - Door-control events received out of sequence cannot bypass the relock handshake.
 - Final relock is selected only from `LCS_STATE_READY_TO_LOCK` after `LCS_EVENT_READY_TO_LOCK`.
@@ -1500,7 +1579,9 @@ An ISR should normally publish a semantic fact to the application event mechanis
 - Authentication success cannot select a destination without a pending purpose established by an accepted LCS transition.
 - Registration authorization uses the same failed-attempt and lockout policy as unlock authorization.
 - Registration confirmation mismatches do not increment or reset authentication failures.
-- The third confirmation mismatch aborts registration and clears transient mismatch history.
+- The third confirmation mismatch clears mismatch history and forces registration to restart from first entry.
+- Mandatory first-boot enrollment cannot return to normal locked operation through user cancellation.
+- Successful first-boot enrollment completes through a controlled reset so the persisted credential is consumed by the normal startup path.
 - Persistent storage failure cannot produce registration-success feedback or return normal operation directly.
 - Pending operation context contains no credential bytes and is cleared on terminal paths.
 - The wake key does not become an implicit credential digit.
@@ -1516,14 +1597,20 @@ The in-memory failure counter is not persistent. Resetting or power-cycling the 
 
 ## 19. Testing and Acceptance Criteria
 
-The dedicated [host test suite](../../../Tests/README.md) compiles the production `Lock_Control_Service.c` directly and validates
-the public `LCS_Process()` contract without accessing private state. Its scenarios cover:
+The dedicated [host test suite](../../../Tests/README.md) compiles the production `Lock_Control_Service.c` directly and validates the public `LCS_Process()` contract without accessing private state.
 
-- Every transition record.
+Following the first-boot enrollment policy update, the suite shall cover:
+
+- Every transition record in the current 40-record table.
 - Sentinel, out-of-range, and representative state-invalid events with explicit state-preservation checks.
-- Guard boundary conditions.
-- Counter-reset behavior after success and lockout.
-- Registration mismatch retry, third-mismatch abortion, and counter cleanup.
+- Normal-boot and first-boot guard selection for shared cancellation and registration-completion events.
+- Guard boundary conditions for authentication failures and registration mismatches.
+- Counter-reset behavior after authentication success and lockout.
+- Registration mismatch retry, restart from first entry at the third mismatch, and counter cleanup.
+- First-boot cancellation containment in both first-entry and confirmation-entry phases.
+- First-boot `ENTRY_TIMEOUT` rejection with state preservation under the current policy.
+- First-boot successful-registration completion through `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`.
+- Normal runtime registration completion through `LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION`.
 - Pending unlock selection after normal entry.
 - Pending registration selection after active entry is reclassified.
 - Pending preservation through incomplete entry and the move to `AUTHENTICATING`.
@@ -1532,22 +1619,13 @@ the public `LCS_Process()` contract without accessing private state. Its scenari
 - Request-to-exit unlock through the same shared relock sequence.
 - Preservation of authentication-failure history across request-to-exit access.
 - Invalid-event state preservation in `ACCESS_UNLOCKED`, `DOOR_SENSOR_CONFIRMATION`, and `READY_TO_LOCK`.
-- Registration first-entry and confirmation cancellation, incomplete-entry, and timeout paths.
 - Storage success, storage failure, and success-feedback completion paths.
 - Rejection of `AUTH_SUCCESS` when no request is pending.
-- The first-boot registration route and its activation effect.
 - Startup-failure behavior in an isolated process.
-- Sentinel, out-of-range and state-invalid events without runtime mutation.
 
-Because the service has a private singleton and no public reset API, CTest runs each scenario in a separate host process. Every
-scenario therefore starts from the statically initialized `BOOT` state without adding a production reset hook.
+Because the service has a private singleton and no public reset API, CTest runs each scenario in a separate host process. Every scenario therefore starts from the statically initialized `BOOT` state without adding a production reset hook.
 
-The host-test README is the authoritative execution and maintenance guide. Its [scenario catalog](../../../Tests/README.md#7-lcs-scenario-catalog)
-documents the objective and observable acceptance result of every test, while its [extension procedure](../../../Tests/README.md#12-extending-the-suite-when-lcs-changes)
-defines the coverage that shall accompany new states, events, guards, effects, actions, or transitions.
-
-Future critical-fault precedence and application action-execution feedback will require additional tests when those contracts are
-defined.
+The host-test README remains the authoritative execution and maintenance guide. Its [scenario catalog](../../../Tests/README.md#7-lcs-scenario-catalog) shall be updated to match the new boot-policy transitions, and its [extension procedure](../../../Tests/README.md#12-extending-the-suite-when-lcs-changes) defines the coverage expected when states, events, guards, effects, actions, or transitions change.
 
 ---
 
@@ -1564,20 +1642,19 @@ Current limitations include:
 - Linear lookup cost grows with the number of transition records.
 - The failure limit is a private compile-time policy constant.
 - The failure counter is not persistent across resets.
-- `FAULT` is entered only from startup failure or credential-storage failure; no global critical runtime-fault event or precedence policy is modeled.
+- `FAULT` is currently entered from startup failure, credential-storage failure, or the explicit unlock-recovery critical-fault path; no global critical-fault precedence policy is modeled.
 - No transition exists out of `LCS_STATE_FAULT`.
 - `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` is reserved but currently selected by no transition.
-- Initial registration and authorized replacement share the same registration states, so cancellation during first boot returns to
-  `LOCKED` even though no credential exists.
+- First-boot registration currently defines no dedicated `ENTRY_TIMEOUT` transition. The timeout event is ignored while mandatory enrollment remains active; dedicated first-boot timeout feedback or refresh policy would require explicit guarded transitions.
 - Validation and persistence states accept no cancellation event because they represent synchronous result boundaries.
-- No explicit feedback event reports that an application action failed to execute.
+- No generic action-execution failure event exists; only explicit unlock-failure and critical-fault feedback paths are currently modeled.
 - No automatic static validation currently checks table reachability, duplicate unconditional records, or guard overlap.
 
 Possible future improvements include:
 
 - Generate transition-coverage cases directly from the table.
 - Add compile-time or host-side table validation.
-- Add explicit critical-fault and action-failure events after defining product precedence.
+- Extend explicit action-failure and critical-fault coverage if additional product operations require semantic recovery paths.
 - Add optional diagnostic snapshots without exposing mutable state.
 - Parameterize policy constants through immutable configuration.
 - Add persistent lockout policy if the threat model requires it.

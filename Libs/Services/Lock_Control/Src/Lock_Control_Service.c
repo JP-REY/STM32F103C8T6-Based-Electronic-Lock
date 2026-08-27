@@ -39,10 +39,12 @@
 #define LCS_FAILURE_ATTEMPTS_LIMIT  (3U)
 
 /**
- * @brief   Maximum number of confirmation mismatches accepted during one credential-register session.
+ * @brief   Maximum number of confirmation mismatches accepted before restarting credential entry.
  *
- * @details The first two mismatches return to confirmation entry. The third mismatch aborts the registration session and restores
- *          the locked state. This policy is independent from LCS_FAILURE_ATTEMPTS_LIMIT.
+ * @details The first two mismatches return to confirmation entry. The third mismatch discards the current registration attempt,
+ *          resets the mismatch counter and returns the flow to first credential entry.
+ *
+ * @note    This policy is independent from LCS_FAILURE_ATTEMPTS_LIMIT.
  */
 #define LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT  (3U)
 
@@ -114,15 +116,19 @@ typedef enum
  */
 typedef enum
 {
-    LCS_GUARD_ALWAYS,                       /*< Unconditional transition.                                         */
+    LCS_GUARD_ALWAYS,                   /*< Unconditional transition.                                         */
 
-    LCS_GUARD_UNDER_ATTEMPT_LIMIT,          /*< True while consecutive failures remain below the lockout limit.   */
+    LCS_GUARD_FIRST_BOOT,               /*< True while mandatory first-boot credential enrollment is active.  */
 
-    LCS_GUARD_ATTEMPT_COUNT_LIMIT,          /*< True once consecutive failures reach the lockout limit.           */
+    LCS_GUARD_NORMAL_BOOT,              /*< True while operating with an already provisioned credential.      */
 
-    LCS_GUARD_REGISTER_RETRY_AVAILABLE,     /*< True when the current mismatch still leaves a confirmation retry. */
+    LCS_GUARD_UNDER_ATTEMPT_LIMIT,      /*< True while consecutive failures remain below the lockout limit.   */
 
-    LCS_GUARD_REGISTER_ATTEMPT_LIMIT        /*< True when the current mismatch consumes the final allowed try.    */
+    LCS_GUARD_ATTEMPT_COUNT_LIMIT,      /*< True once consecutive failures reach the lockout limit.           */
+
+    LCS_GUARD_REGISTER_RETRY_AVAILABLE, /*< True when the current mismatch still leaves a confirmation retry. */
+
+    LCS_GUARD_REGISTER_ATTEMPT_LIMIT,   /*< True when the current mismatch consumes the final allowed try.    */
 
 }LCS_Guard_t;
 
@@ -137,27 +143,29 @@ typedef enum
  */
 typedef enum
 {
-    LCS_INTERNAL_EFFECT_NONE = 0U,                                  /*< Preserve all runtime fields other than the target state.      */
+    LCS_INTERNAL_EFFECT_NONE = 0U,                                 /*< Preserve all runtime fields other than the target state.                 */
 
-    LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE,                         /*< Mark successful boot activation in the singleton context.     */
+    LCS_INTERNAL_EFFECT_SET_FIRST_BOOT_FLAG,                       /*< Activate the service and mark mandatory first-boot enrollment as active. */
 
-    LCS_INTERNAL_EFFECT_SET_PENDING_REGISTER_SESSION,               /*< Route successful authentication to registration.              */
+    LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE,                        /*< Mark successful boot activation in the singleton context.                */
 
-    LCS_INTERNAL_EFFECT_SET_PENDING_UNLOCK,                         /*< Route successful authentication to bounded unlock.            */
+    LCS_INTERNAL_EFFECT_SET_PENDING_REGISTER_SESSION,              /*< Route successful authentication to registration.                         */
 
-    LCS_INTERNAL_EFFECT_CLEAR_PENDING,                              /*< Restore the no-pending-request invariant.                     */
+    LCS_INTERNAL_EFFECT_SET_PENDING_UNLOCK,                        /*< Route successful authentication to bounded unlock.                       */
 
-    LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT,                    /*< Saturating increment of consecutive authentication failures.  */
+    LCS_INTERNAL_EFFECT_CLEAR_PENDING,                             /*< Restore the no-pending-request invariant.                                */
 
-    LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT,                        /*< Clear the consecutive authentication-failure counter.         */
+    LCS_INTERNAL_EFFECT_INCREMENT_ATTEMPT_COUNT,                   /*< Saturating increment of consecutive authentication failures.             */
 
-    LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_INCREMENT_ATTEMPT_COUNT,  /*< Clear intent and record one rejected authentication.          */
+    LCS_INTERNAL_EFFECT_RESET_ATTEMPT_COUNT,                       /*< Clear the consecutive authentication-failure counter.                    */
 
-    LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_RESET_ATTEMPT_COUNT,      /*< Clear intent and consecutive authentication failures.         */
+    LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_INCREMENT_ATTEMPT_COUNT, /*< Clear intent and record one rejected authentication.                     */
 
-    LCS_INTERNAL_EFFECT_INCREMENT_REGISTER_MISMATCH_COUNT,          /*< Record one mismatched registration confirmation.              */
+    LCS_INTERNAL_EFFECT_CLEAR_PENDING_AND_RESET_ATTEMPT_COUNT,     /*< Clear intent and consecutive authentication failures.                    */
 
-    LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,              /*< Clear registration-confirmation mismatch history.             */
+    LCS_INTERNAL_EFFECT_INCREMENT_REGISTER_MISMATCH_COUNT,         /*< Record one mismatched registration confirmation.                         */
+
+    LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,             /*< Clear registration-confirmation mismatch history.                        */
 
 }LCS_InternalEffect_t;
 
@@ -216,6 +224,7 @@ typedef struct
     uint8_t       failed_attempt_count;                /*< Saturating count of consecutive authentication failures.    */
     uint8_t       credential_register_mismatch_count;  /*< Prior confirmation mismatches in the active register flow.  */
     LCS_Pending_t pending_request;                     /*< Product operation selected after successful authentication. */
+    bool          first_boot;                          /*< Indicates that mandatory credential enrollment was entered. */
     bool          initialized;                         /*< Indicates whether successful boot activation has occurred.  */
 
 }LCS_Handle_t;
@@ -228,17 +237,23 @@ typedef struct
  *
  * @details Stores only declared transitions rather than allocating a dense state-by-event matrix. LCS_FindTransition() scans the
  *          table from the first record to the last and returns the first record whose source state and event match the dispatch
- *          context, whose guard evaluates true and, for authentication success, whose pending-operation value matches the
+ *          context, whose guard evaluates true and, for authentication success, whose pending-operation discriminator matches the
  *          singleton request.
  *
- *          The two authentication-success records intentionally share a source/event/guard tuple. Their mutually exclusive
- *          pending-operation values select either credential registration or bounded unlock. The two access-denied timeout
- *          records share a source/event pair and use mutually exclusive attempt-count guards to select return-to-locked or
- *          lockout behavior. The two validation-failure records likewise use complementary registration guards to select another
- *          confirmation attempt or session abortion on the third mismatch.
+ *          Authentication-success records use the pending-operation discriminator to route either credential registration or
+ *          bounded unlock. Access-denied timeout records use complementary attempt-count guards to select return-to-locked or
+ *          lockout behavior.
  *
- * @note    Because selection is first-match, future records with the same source/event pair shall use mutually exclusive guards
- *          or be ordered deliberately and documented as priority rules.
+ *          Credential-registration transitions additionally distinguish mandatory first-boot enrollment from normal runtime
+ *          registration. During first boot, cancellation cannot escape the enrollment flow, while normal boot may return to the
+ *          locked state. Confirmation mismatches allow bounded retries and restart the registration flow from first entry when the
+ *          configured mismatch limit is reached.
+ *
+ *          Registration completion is also boot-policy dependent: normal registration returns to locked idle, while successful
+ *          first-boot enrollment requests a controlled reset so the persisted credential is consumed through the normal boot path.
+ *
+ * @note    Because selection is first-match, records sharing the same source/event pair shall use mutually exclusive guards or be
+ *          deliberately ordered and documented as priority rules.
  */
 static const LCS_Transition_t LCS_Transitions[] =
 {
@@ -268,7 +283,7 @@ static const LCS_Transition_t LCS_Transitions[] =
         .guard           = LCS_GUARD_ALWAYS,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
-        .internal_effect = LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE,
+        .internal_effect = LCS_INTERNAL_EFFECT_SET_FIRST_BOOT_FLAG,
         .action          = LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION
     },
 
@@ -479,18 +494,28 @@ static const LCS_Transition_t LCS_Transitions[] =
         .guard           = LCS_GUARD_ALWAYS,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
-        .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
         .action          = LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION
     },
 
     {
         .source_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
         .event           = LCS_EVENT_CREDENTIAL_CANCELLED,
-        .guard           = LCS_GUARD_ALWAYS,
+        .guard           = LCS_GUARD_NORMAL_BOOT,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
         .action          = LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
+        .event           = LCS_EVENT_CREDENTIAL_CANCELLED,
+        .guard           = LCS_GUARD_FIRST_BOOT,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION
     },
 
     {
@@ -506,7 +531,7 @@ static const LCS_Transition_t LCS_Transitions[] =
     {
         .source_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
         .event           = LCS_EVENT_ENTRY_TIMEOUT,
-        .guard           = LCS_GUARD_ALWAYS,
+        .guard           = LCS_GUARD_NORMAL_BOOT,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
@@ -526,11 +551,21 @@ static const LCS_Transition_t LCS_Transitions[] =
     {
         .source_state    = LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
         .event           = LCS_EVENT_CREDENTIAL_CANCELLED,
-        .guard           = LCS_GUARD_ALWAYS,
+        .guard           = LCS_GUARD_NORMAL_BOOT,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
         .action          = LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
+        .event           = LCS_EVENT_CREDENTIAL_CANCELLED,
+        .guard           = LCS_GUARD_FIRST_BOOT,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
+        .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
+        .action          = LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION
     },
 
     {
@@ -546,7 +581,7 @@ static const LCS_Transition_t LCS_Transitions[] =
     {
         .source_state    = LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,
         .event           = LCS_EVENT_ENTRY_TIMEOUT,
-        .guard           = LCS_GUARD_ALWAYS,
+        .guard           = LCS_GUARD_NORMAL_BOOT,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
@@ -578,9 +613,9 @@ static const LCS_Transition_t LCS_Transitions[] =
         .event           = LCS_EVENT_STAGING_VALIDATION_FAILURE,
         .guard           = LCS_GUARD_REGISTER_ATTEMPT_LIMIT,
         .pending_op      = LCS_PENDING_NONE,
-        .target_state    = LCS_STATE_LOCKED,
+        .target_state    = LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
-        .action          = LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION
+        .action          = LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION
     },
 
     {
@@ -606,7 +641,17 @@ static const LCS_Transition_t LCS_Transitions[] =
     {
         .source_state    = LCS_STATE_CREDENTIAL_REGISTER_SUCCESS_FEEDBACK,
         .event           = LCS_EVENT_CREDENTIAL_REGISTER_DONE,
-        .guard           = LCS_GUARD_ALWAYS,
+        .guard           = LCS_GUARD_FIRST_BOOT,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
+        .action          = LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT
+    },
+
+    {
+        .source_state    = LCS_STATE_CREDENTIAL_REGISTER_SUCCESS_FEEDBACK,
+        .event           = LCS_EVENT_CREDENTIAL_REGISTER_DONE,
+        .guard           = LCS_GUARD_NORMAL_BOOT,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_RESET_REGISTER_MISMATCH_COUNT,
@@ -621,10 +666,10 @@ static const LCS_Transition_t LCS_Transitions[] =
 /**
  * @brief   Singleton runtime instance of the Lock Control Service.
  *
- * @details Starts in LCS_STATE_BOOT with no authentication failures, no registration mismatches, no pending operation and normal
- *          operation inactive. LCS_EVENT_INIT_OK activates the instance and commits the locked state, while
- *          LCS_EVENT_CREDENTIAL_NOT_REGISTERED activates it directly in the first-registration state.
- *          LCS_EVENT_INIT_FAIL commits the fault state without activating normal operation.
+ * @details Starts in LCS_STATE_BOOT with no authentication failures, no registration mismatches, no pending operation, first-boot
+ *          enrollment disabled and normal operation inactive. LCS_EVENT_INIT_OK activates normal operation, while
+ *          LCS_EVENT_CREDENTIAL_NOT_REGISTERED activates the service and marks mandatory first-boot credential enrollment before
+ *          entering the first registration stage.
  *
  * @note    Static initialization guarantees a deterministic safe context before the first call to LCS_Process().
  */
@@ -634,6 +679,7 @@ static LCS_Handle_t LCS_RuntimeInstance =
     .failed_attempt_count               = 0U,
     .credential_register_mismatch_count = 0U,
     .pending_request                    = LCS_PENDING_NONE,
+    .first_boot                         = false,
     .initialized                        = false
 };
 
@@ -666,19 +712,27 @@ static inline bool LCS_IsActive(void)
 /**
  * @brief   Applies one private transition effect to the singleton runtime.
  *
- * @details Activates the service after successful boot; establishes, clears or resolves the pending operation; updates the
- *          consecutive authentication-failure counter with saturation at LCS_FAILURE_ATTEMPTS_LIMIT; and updates the independent
- *          registration-mismatch counter with saturation at LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT.
+ * @details Activates the service, establishes or clears the mandatory first-boot enrollment marker, establishes or resolves pending
+ *          operations, updates the consecutive authentication-failure counter with saturation at LCS_FAILURE_ATTEMPTS_LIMIT and
+ *          updates the independent credential-registration mismatch counter with saturation at
+ *          LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT.
  *
  * @param   Effect - Private mutation selected by the accepted transition.
  *
- * @note    LCS_INTERNAL_EFFECT_NONE and unknown values preserve the runtime fields. Target-state assignment is performed
- *          separately by LCS_Process() after this function returns.
+ * @note    LCS_INTERNAL_EFFECT_NONE and unknown values preserve the runtime fields. Target-state assignment is performed separately
+ *          by LCS_Process() after this function returns.
  */
 static void LCS_ApplyInternalEffect(LCS_InternalEffect_t Effect)
 {
     switch(Effect)
     {
+        case LCS_INTERNAL_EFFECT_SET_FIRST_BOOT_FLAG:
+
+            LCS_RuntimeInstance.initialized = true;
+            LCS_RuntimeInstance.first_boot = true;
+
+        break;        
+
         case LCS_INTERNAL_EFFECT_SET_SERVICE_ACTIVE:
 
             LCS_RuntimeInstance.initialized = true;
@@ -759,8 +813,9 @@ static void LCS_ApplyInternalEffect(LCS_InternalEffect_t Effect)
 /**
  * @brief   Evaluates one private guard against the current singleton context.
  *
- * @details Resolves unconditional selection, the two complementary authentication-failure conditions used after access-denied
- *          feedback and the two complementary registration-mismatch conditions used after staging validation fails.
+ * @details Resolves unconditional selection, mutually exclusive first-boot and normal-boot policy conditions, the complementary
+ *          authentication-failure conditions used after access-denied feedback and the complementary registration-mismatch
+ *          conditions used after staging validation failure.
  *
  * @param   Guard - Guard identifier stored in a candidate transition record.
  *
@@ -776,6 +831,18 @@ static bool LCS_EvaluateGuard(LCS_Guard_t Guard)
 
             return true;
 
+        case LCS_GUARD_FIRST_BOOT:
+
+            return (LCS_RuntimeInstance.first_boot) ? true : false;
+
+        break;
+
+        case LCS_GUARD_NORMAL_BOOT:
+
+            return (!LCS_RuntimeInstance.first_boot) ? true : false;
+
+        break;
+
         case LCS_GUARD_ATTEMPT_COUNT_LIMIT:
 
             return (LCS_RuntimeInstance.failed_attempt_count >= LCS_FAILURE_ATTEMPTS_LIMIT);
@@ -786,13 +853,13 @@ static bool LCS_EvaluateGuard(LCS_Guard_t Guard)
 
         case LCS_GUARD_REGISTER_RETRY_AVAILABLE:
 
-            return ((uint32_t)LCS_RuntimeInstance.credential_register_mismatch_count + 1U) <
-                   LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT;
+            return (((uint32_t)LCS_RuntimeInstance.credential_register_mismatch_count + 1U) 
+                                                        < (LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT));
 
         case LCS_GUARD_REGISTER_ATTEMPT_LIMIT:
 
-            return ((uint32_t)LCS_RuntimeInstance.credential_register_mismatch_count + 1U) >=
-                   LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT;
+            return ((uint32_t)(LCS_RuntimeInstance.credential_register_mismatch_count +1U) 
+                                                                >= (LCS_CREDENTIAL_REGISTER_MISMATCH_LIMIT)); 
 
         default:
             return false;

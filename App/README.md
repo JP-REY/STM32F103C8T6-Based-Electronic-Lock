@@ -71,13 +71,14 @@ The application layer owns:
   commands;
 - application-level timeout lifecycle;
 - serialization of LCS events, actions and immediate follow-up events;
-- coordination of credential entry, authentication, replacement and storage;
+- coordination of credential entry, authentication, mandatory first-boot enrollment, replacement and storage;
+- execution of the first-boot registration completion reset selected by LCS;
 - execution of normal lock, force-lock and unlock requests through DCS;
 - synchronous door-status confirmation and negative-confirmation recovery during the post-unlock relock flow;
 - display, LED-indication and sound side effects;
 - periodic display, Door Control, indication and sound-service updates;
 - explicit erasure of application-owned credential buffers;
-- the controlled-reset endpoint used by action-execution faults.
+- the controlled-reset endpoint used by critical faults and deliberate first-boot enrollment completion.
 
 The application layer does not own:
 
@@ -303,7 +304,13 @@ CubeMX `MX_*_Init()` functions.
 3. attaches those components and their event outputs to DCS;
 4. initializes display, keyboard, sound and indication dependencies;
 5. validates startup credential availability;
-6. selects the first-registration or normal locked startup route.
+6. selects mandatory first-boot enrollment or the normal locked startup route.
+
+When no usable credential is available, App Core dispatches
+`LCS_EVENT_CREDENTIAL_NOT_REGISTERED`. LCS activates directly in
+`CREDENTIAL_REGISTER_FIRST_ENTRY` and marks the flow as mandatory first-boot
+enrollment. When a credential is already provisioned, App Core dispatches
+`LCS_EVENT_INIT_OK` and normal locked operation begins.
 
 Initialization is fail-fast. A failed dependency sends `LCS_EVENT_INIT_FAIL`
 through the Lock Control fault path.
@@ -431,7 +438,32 @@ mutable because they contain normal runtime state.
 
 No App-layer object is dynamically allocated or freed.
 
-### 6.3 Interrupt startup behavior
+### 6.3 First-boot enrollment policy
+
+The application does not decide whether a registration cancellation may leave
+the enrollment flow. That policy belongs to LCS.
+
+During mandatory first-boot enrollment:
+
+- cancellation is translated normally from CES, but LCS refreshes the active
+  registration-entry phase instead of returning to `LOCKED`;
+- the first two confirmation mismatches return to confirmation entry;
+- the third confirmation mismatch returns to first entry and restarts the
+  registration attempt;
+- successful persistence still uses the normal bounded credential-save feedback;
+- when that feedback expires, `LCS_EVENT_CREDENTIAL_REGISTER_DONE` selects
+  `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`;
+- App Executor handles that action by entering the common controlled-reset
+  endpoint so the next startup reloads the newly persisted credential through
+  the normal boot path.
+
+`LCS_EVENT_ENTRY_TIMEOUT` currently has no first-boot registration transition.
+App Core still emits the timeout event and cancels the elapsed timeout runtime,
+but LCS ignores the event and preserves the mandatory enrollment state. A
+dedicated first-boot timeout refresh/feedback policy remains an explicit future
+integration decision.
+
+### 6.4 Interrupt startup behavior
 
 CubeMX configures the Door Sensor and Exit Button as EXTI-backed inputs before
 normal App runtime begins. The callback bridge can therefore observe an edge
@@ -655,6 +687,13 @@ Current timeout mapping:
 | Access-denied feedback | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
 | Lockout | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` |
 | Credential-save feedback | 1,500 ms | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` |
+
+Credential-entry inactivity is shared by normal entry and registration entry at
+the App timeout layer, but the resulting LCS policy is state/guard dependent.
+Normal registration entry timeout can return to `LOCKED`. During mandatory
+first-boot enrollment, `LCS_EVENT_ENTRY_TIMEOUT` currently has no authorized
+first-boot transition; LCS ignores the event, the enrollment state is preserved,
+and App Core has already consumed/cancelled the elapsed timeout runtime.
 
 There is **no fixed authorized-unlock timeout** in the current design.
 
@@ -926,8 +965,9 @@ It is responsible for:
 - loading the installed credential lazily from CSS;
 - invoking Authentication Service;
 - staging and validating credential replacement through CRS;
-- persisting a validated replacement through CSS;
+- persisting a validated replacement or first-boot credential through CSS;
 - updating the retained runtime credential after successful persistence;
+- routing completed first-boot enrollment through the controlled-reset endpoint;
 - starting and cancelling App Core timeouts;
 - performing normal lock/unlock requests through DCS;
 - preserving the three-way `DCS_RequestLockStatus_t` result where relock
@@ -971,9 +1011,11 @@ Representative Executor actions that can produce immediate LCS events include:
 | `LCS_ACTION_ENTER_LOCKOUT` | Can return lockout-timeout event immediately if timeout activation fails |
 | `LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION` | `ACTIVE` returns `LCS_EVENT_READY_TO_LOCK`; `IDLE` returns `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`; query failure or `UNKNOWN` enters controlled reset |
 | `LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` | Final lock `DENIED` returns `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`; `FAILED` enters controlled reset; `APPROVED` completes normally |
+| `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` | Produces no follow-up event; App Executor enters the controlled-reset endpoint immediately |
 
 These results are returned to App Core rather than recursively dispatched by the
-Executor.
+Executor. The first-boot completion action is terminal for the current runtime:
+it deliberately requests reset instead of producing another LCS event.
 
 ### 12.2 Door-mechanism actions
 
@@ -986,7 +1028,23 @@ Executor.
 | `LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` | Requests normal DCS relock; `APPROVED` emits locking feedback and restores locked-idle presentation, `DENIED` returns `DOOR_POSITION_NOT_CONFIRMED`, and `FAILED` enters controlled reset |
 | `LCS_ACTION_REQUEST_CONTROLLED_RESET` | Enters the common cleanup/reset path |
 
-### 12.3 Lock-request result preservation
+### 12.3 Credential-registration completion
+
+Normal credential replacement and mandatory first-boot enrollment share the
+same registration, persistence and success-feedback execution until
+`LCS_EVENT_CREDENTIAL_REGISTER_DONE`.
+
+At that point LCS selects one of two semantic completion actions:
+
+| LCS action | Executor behavior |
+|---|---|
+| `LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` | Cancels registration timing/feedback state and restores normal locked-idle presentation for an already provisioned product |
+| `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` | Calls `App_RequestControlledReset()` so the newly persisted credential is rediscovered by the normal startup path |
+
+The Executor does not inspect an LCS first-boot flag or duplicate that policy.
+It simply executes the action selected by LCS.
+
+### 12.4 Lock-request result preservation
 
 `App_RequestLock()` returns `DCS_RequestLockStatus_t` directly:
 
@@ -1162,6 +1220,13 @@ The controlled-reset cleanup currently:
 The dispatch-depth overflow path also routes through
 `LCS_ACTION_REQUEST_CONTROLLED_RESET`, so it converges on this same cleanup
 endpoint.
+
+Successful mandatory first-boot enrollment deliberately reuses this cleanup
+endpoint through
+`LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`. In that case
+the reset is not a fault response: it is a lifecycle boundary that causes the
+newly persisted credential to be consumed by the ordinary startup path on the
+next boot.
 
 > [!WARNING]
 > The reset cleanup currently uses normal `DCS_RequestLock()` through
@@ -1438,6 +1503,10 @@ The following constraints describe the current source as implemented.
 - No battery measurement source currently drives the low-battery indication.
 - CSS credential availability is Boolean, so startup cannot distinguish every
   possible unavailable or invalid-storage cause.
+- Mandatory first-boot cancellation is specialized and cannot escape to
+  `LOCKED`, but first-boot `LCS_EVENT_ENTRY_TIMEOUT` currently has no dedicated
+  guarded transition. The elapsed timeout is consumed by App Core, LCS ignores
+  the event, and enrollment remains active without an automatic timeout refresh.
 - The installed credential remains in RAM between authentications by design.
 - Runtime initialization state is not checked at every public call; callers must
   obey the lifecycle contract.
