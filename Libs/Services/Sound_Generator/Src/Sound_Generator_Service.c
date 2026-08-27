@@ -120,7 +120,7 @@ typedef struct
  * @note    This pattern uses SGS_PRIORITY_KEYPRESS and may be ignored while
  *          higher-priority feedback remains active.
  */
-static const SGS_Phase_t SGS_Keypressphases[] =
+static const SGS_Phase_t SGS_KeypressPhases[] =
 {
     { .frequency_hz = 2600U, .duration_ms =  40U, .output_enabled = true }
 };
@@ -133,7 +133,7 @@ static const SGS_Phase_t SGS_Keypressphases[] =
  *
  * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
  */
-static const SGS_Phase_t SGS_EntryIncompletephases[] =
+static const SGS_Phase_t SGS_EntryIncompletePhases[] =
 {
     { .frequency_hz = 4600U, .duration_ms =  40U, .output_enabled = true }
 };
@@ -147,7 +147,7 @@ static const SGS_Phase_t SGS_EntryIncompletephases[] =
  *
  * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
  */
-static const SGS_Phase_t SGS_EntryTimeoutphases[] =
+static const SGS_Phase_t SGS_EntryTimeoutPhases[] =
 {
     { .frequency_hz = 5000U, .duration_ms =  80U, .output_enabled = true  },
     { .frequency_hz =    0U, .duration_ms =  60U, .output_enabled = false },
@@ -164,11 +164,43 @@ static const SGS_Phase_t SGS_EntryTimeoutphases[] =
  *
  * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
  */
-static const SGS_Phase_t SGS_AccessGrantedphases[] =
+static const SGS_Phase_t SGS_AccessGrantedPhases[] =
 {
     { .frequency_hz = 2000U, .duration_ms =  80U, .output_enabled = true  },
     { .frequency_hz =    0U, .duration_ms =  40U, .output_enabled = false },
     { .frequency_hz = 3000U, .duration_ms = 140U, .output_enabled = true  }
+};
+
+/**
+ * @brief   Descending chime emitted when the lock mechanism is locking.
+ *
+ * @details Defines a short 2200 Hz tone, 40 ms of silence and a longer
+ *          1100 Hz tone, producing a definitive closing acknowledgement.
+ *
+ * @note    This pattern represents completion of the mechanical locking
+ *          operation.
+ */
+static const SGS_Phase_t SGS_LockingPhases[] =
+{
+    { .frequency_hz = 2200U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  40U, .output_enabled = false },
+    { .frequency_hz = 1100U, .duration_ms = 180U, .output_enabled = true  }
+};
+
+/**
+ * @brief   Rising chime emitted while the lock mechanism is unlocking.
+ *
+ * @details Defines a short 1400 Hz tone, 40 ms of silence and a longer
+ *          2200 Hz tone, producing a distinct opening acknowledgement.
+ *
+ * @note    This pattern represents mechanical unlocking rather than
+ *          authentication success.
+ */
+static const SGS_Phase_t SGS_UnlockingPhases[] =
+{
+    { .frequency_hz = 1400U, .duration_ms =  90U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  40U, .output_enabled = false },
+    { .frequency_hz = 2200U, .duration_ms = 180U, .output_enabled = true  }
 };
 
 /**
@@ -179,7 +211,7 @@ static const SGS_Phase_t SGS_AccessGrantedphases[] =
  *
  * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
  */
-static const SGS_Phase_t SGS_Errorphases[] =
+static const SGS_Phase_t SGS_ErrorPhases[] =
 {
     { .frequency_hz = 2600U, .duration_ms = 120U, .output_enabled = true  },
     { .frequency_hz =    0U, .duration_ms =  50U, .output_enabled = false },
@@ -195,7 +227,7 @@ static const SGS_Phase_t SGS_Errorphases[] =
  *
  * @note    The complete pattern lasts 1540 milliseconds.
  */
-static const SGS_Phase_t SGS_Lockoutphases[] =
+static const SGS_Phase_t SGS_LockoutPhases[] =
 {
     { .frequency_hz = 1200U, .duration_ms = 120U, .output_enabled = true  },
     { .frequency_hz =    0U, .duration_ms =  70U, .output_enabled = false },
@@ -224,43 +256,58 @@ static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
 {
     [SGS_RINGTONE_KEYPRESS] =
     {
-        .phases      = SGS_Keypressphases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_Keypressphases),
+        .phases      = SGS_KeypressPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_KeypressPhases),
         .priority    = SGS_PRIORITY_KEYPRESS
     },
 
     [SGS_RINGTONE_ENTRY_INCOMPLETE] =
     {
-        .phases      = SGS_EntryIncompletephases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryIncompletephases),
+        .phases      = SGS_EntryIncompletePhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryIncompletePhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     },
 
     [SGS_RINGTONE_ENTRY_TIMEOUT] =
     {
-        .phases      = SGS_EntryTimeoutphases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryTimeoutphases),
+        .phases      = SGS_EntryTimeoutPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EntryTimeoutPhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     },
 
     [SGS_RINGTONE_ACCESS_GRANTED] =
     {
-        .phases      = SGS_AccessGrantedphases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_AccessGrantedphases),
+        .phases      = SGS_AccessGrantedPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_AccessGrantedPhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     },
 
+    [SGS_RINGTONE_LOCKING] =
+    {
+        .phases      = SGS_LockingPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_LockingPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_UNLOCKING] =
+    {
+        .phases      = SGS_UnlockingPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_UnlockingPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+
     [SGS_RINGTONE_ERROR] =
     {
-        .phases      = SGS_Errorphases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_Errorphases),
+        .phases      = SGS_ErrorPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_ErrorPhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     },
 
     [SGS_RINGTONE_LOCKOUT] =
     {
-        .phases      = SGS_Lockoutphases,
-        .phase_count = SGS_ARRAY_LENGTH(SGS_Lockoutphases),
+        .phases      = SGS_LockoutPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_LockoutPhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     }
 };

@@ -6,12 +6,12 @@
  *          six normalized digit bytes, one format marker and one CRC-8 byte.
  *          The marker and CRC distinguish erased or corrupted Flash from a
  *          valid registered credential. The record is programmed as two
- *          32-bit words so normal 3.3 V operation does not require external
- *          Vpp for STM32F4 double-word programming.
+ *          32-bit words so an interrupted first word cannot create a complete
+ *          marker-and-CRC-bearing record.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-21
+ * @version 2.0.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
@@ -25,12 +25,15 @@
  Private Macros
  **********************************************************************************************************************************/
 /**
- * @brief   Start of STM32F411 sector 7, reserved by the linker for CSS.
+ * @brief   Start of the final STM32F103C8T6 page reserved by the linker.
  *
- * @details Both active linker scripts limit executable Flash to the preceding
- *          384 KiB and expose sector 7 as the exclusive credential region.
+ * @details The active linker script limits executable Flash to the first
+ *          63 KiB and exposes the final 1 KiB page as the exclusive credential
+ *          region. Using the linker symbol keeps the runtime address coupled to
+ *          the enforced memory partition instead of duplicating a numeric
+ *          address in this service.
  */
-#define CSS_FLASH_BASE_ADDRESS       (0x08060000U)
+#define CSS_FLASH_BASE_ADDRESS       ((uint32_t)(uintptr_t)__credential_flash_start__)
 
 /** @brief Eight-byte value read from a completely erased record location. */
 #define CSS_FLASH_ERASED_RECORD      (UINT64_MAX)
@@ -65,6 +68,9 @@
 /**********************************************************************************************************************************
  Private Data
  **********************************************************************************************************************************/
+/** @brief Linker-owned start symbol for the exclusive credential page. */
+extern const uint8_t __credential_flash_start__[];
+
 /**********************************************************************************************************************************
  Private Function Prototypes
  **********************************************************************************************************************************/
@@ -155,11 +161,14 @@ static uint64_t CSS_EncodeRecord(const uint8_t Credential[CSS_CREDENTIAL_LENGTH]
     for(size_t index = 0U; index < CSS_CREDENTIAL_LENGTH; index++)
     {
         record |= (uint64_t)Credential[index] << (index * CSS_BITS_PER_BYTE);
+
         crc = CSS_UpdateCrc(crc, Credential[index]);
     }
 
     record |= (uint64_t)CSS_RECORD_MARKER << (CSS_RECORD_MARKER_BYTE_INDEX * CSS_BITS_PER_BYTE);
+
     crc = CSS_UpdateCrc(crc, CSS_RECORD_MARKER);
+    
     record |= (uint64_t)crc << (CSS_RECORD_CRC_BYTE_INDEX * CSS_BITS_PER_BYTE);
 
     return record;
@@ -261,7 +270,7 @@ static void CSS_ClearCredential(uint8_t Credential[CSS_CREDENTIAL_LENGTH])
  * @details  Validates and encodes the six digits, then reads the current record.
  *           An identical valid record returns success without changing Flash.
  *           Otherwise the function unlocks the programming interface, erases
- *           the dedicated sector when the record location is not already
+ *           the dedicated page when the record location is not already
  *           erased, programs two 32-bit words, locks the interface and verifies
  *           the complete record by readback and decoding.
  *
@@ -274,12 +283,12 @@ static void CSS_ClearCredential(uint8_t Credential[CSS_CREDENTIAL_LENGTH])
  * 
  * @note     The supplied buffer is borrowed only for this synchronous call.
  * 
- * @note     Sector erase and word programming block until STM32 HAL reports
+ * @note     Page erase and word programming block until STM32 HAL reports
  *           completion or failure.
  * @note     After a successful unlock, PFLASH_Lock() is attempted whether the
  *           erase/program sequence succeeds or fails.
  *
- * @warning  Replacing an existing credential requires a sector erase. A power
+ * @warning  Replacing an existing credential requires a page erase. A power
  *           loss between erase and verified programming leaves no registered
  *           credential; the first-boot registration path shall then run again.
  *
@@ -317,7 +326,7 @@ CSS_OpStatus_t CSS_SaveCredential(const uint8_t Credential[CSS_CREDENTIAL_LENGTH
 
     if(current_record != CSS_FLASH_ERASED_RECORD)
     {
-        write_status = PFLASH_EraseSectorAt(CSS_FLASH_BASE_ADDRESS);
+        write_status = PFLASH_ErasePageAt(CSS_FLASH_BASE_ADDRESS);
     }
 
     if(write_status == FLASH_OPERATION_OK)

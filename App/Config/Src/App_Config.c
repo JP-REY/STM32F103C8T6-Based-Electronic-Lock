@@ -4,7 +4,8 @@
  *
  * @details Defines the immutable keyboard policy and owns every Platform descriptor, adapter context, component handle,
  *          instance-based service runtime and credential buffer composed by the App layer. A single immutable registry exposes
- *          borrowed pointers to App_Core.c and App_Executor.c while preserving static lifetime and centralized ownership.
+ *          borrowed pointers to App_Core.c, App_Executor.c and the HAL callback bridge while preserving static lifetime and
+ *          centralized ownership.
  *
  *          This module performs no hardware initialization and executes no business workflow. App_Init() binds and initializes the
  *          object graph; App_ExecuteAction() operates on it in response to semantic Lock Control actions.
@@ -12,8 +13,8 @@
  * @note    No dynamic allocation is used. All referenced storage remains valid for the complete firmware lifetime.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-23
+ * @version 1.1.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -221,12 +222,100 @@ static SIS_Handle_t App_LockStatusIndication = {0};
 /**
  * @brief   Platform GPIO descriptor controlling the physical lock actuator.
  *
- * @details Is bound to the CubeMX LOCKER_PIN output and temporarily realizes the actuator boundary until a dedicated Lock Actuator
- *          Driver is introduced. GPIO reset is the safe locked state; GPIO set requests physical unlock.
+ * @details App Core binds this descriptor to the CubeMX LOCK_ACTUATOR output before passing it to App_LockActuator. PB8 LOW is the
+ *          current product safe locked request; PB8 HIGH requests physical unlock. App Executor still uses the same descriptor
+ *          through the Door Control Service after initialization.
  *
  * @note    Only serialized application action paths access this descriptor after initialization.
  */
 static GPIO_Handle_t App_LockActuatorGpio = {0};
+
+/**
+ * @brief   Lock Actuator Driver instance for the product's physical locking output.
+ *
+ * @details Borrows App_LockActuatorGpio after App Core initializes both objects. The handle normalizes the active-low locked command
+ *          but does not establish an unlock timeout or confirm mechanical bolt position.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static LockActuator_Handle_t App_LockActuator;
+
+/**********************************************************************************************************************************
+ Door Sensor Platform Object
+ **********************************************************************************************************************************/
+/**
+ * @brief   Platform GPIO descriptor connected to the physical door-contact sensor.
+ *
+ * @details App Core binds this descriptor to the CubeMX DOOR_SENSOR input on PA11 and passes it to App_DoorSensor. CubeMX configures
+ *          the pin as a pull-up rising-and-falling EXTI input; the driver interprets LOW as the active contact state.
+ *
+ * @note    The Door Control Service consumes debounced events and assigns product meaning to the active contact.
+ */
+static GPIO_Handle_t App_DoorSensorGpio = {0};
+
+/**
+ * @brief   Door Sensor Driver instance for the product's physical door contact.
+ *
+ * @details Retains the active-low interpretation, debounce policy and interrupt handoff state. The HAL callback notifies this
+ *          instance and the Door Control Service processes pending edges in application context.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static DoorSensor_Handle_t App_DoorSensor;
+
+/**
+ * @brief   Application-owned output slot for the latest debounced door-sensor transition.
+ *
+ * @details DoorSensor_Update() overwrites this slot on every Door Control Service update. Events are consumed synchronously by App
+ *          Core and are not retained in a queue.
+ */
+static DoorSensor_Event_t App_DoorSensorEvent;
+
+/**
+ * @brief   Application-owned output slot for synchronous door-sensor status acquisition.
+ *
+ * @details Receives the instantaneous normalized door-contact status returned by
+ *          DCS_GetSensorStatus() during Door Control confirmation processing.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed
+ *          through App_Instances.
+ */
+static DCS_SensorStatus_t App_DoorSensorStatus;
+
+/**********************************************************************************************************************************
+ Exit Button Platform Object
+ **********************************************************************************************************************************/
+/**
+ * @brief   Platform GPIO descriptor connected to the physical request-to-exit button.
+ *
+ * @details App Core binds this descriptor to the CubeMX EXIT_BUTTON input on PA0 and passes it to App_ExitButton. CubeMX configures
+ *          the pin with a pull-up and rising/falling EXTI so press and release edges reach the HAL callback bridge.
+ *
+ * @note    The interrupt callback publishes edge timestamps only; debounced runtime processing belongs to the Door Control Service.
+ */
+static GPIO_Handle_t App_ExitButtonGpio = {0};
+
+/**
+ * @brief   Exit Button Driver instance for the product's request-to-exit input.
+ *
+ * @details Retains the active-low interpretation, 20 ms debounce policy and interrupt handoff state. The HAL callback notifies this
+ *          instance; the Door Control Service calls ExitButton_Update() and interprets validated events.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed through App_Instances.
+ */
+static ExitButton_Handle_t App_ExitButton;
+
+/**
+ * @brief   Runtime event produced by the Exit Button Driver.
+ *
+ * @details Stores the latest debounced event reported by App_ExitButton during
+ *          runtime processing. The Door Control Service uses this event to
+ *          determine whether a validated request-to-exit action occurred.
+ *
+ * @note    Owned by App Config for the complete firmware lifetime and borrowed
+ *          through App_Instances.
+ */
+static ExitButton_Event_t App_ExitButtonEvent;
 
 /**********************************************************************************************************************************
  Credential and Timeout Runtime Objects
@@ -283,6 +372,14 @@ const App_RuntimeInstances_t App_Instances =
     .Lock_Status_Led                = &App_LockStatusLed,
     .Lock_Status_Indication         = &App_LockStatusIndication,
     .Lock_Actuator_Gpio             = &App_LockActuatorGpio,
+    .Lock_Actuator                  = &App_LockActuator,
+    .Door_Sensor_Gpio               = &App_DoorSensorGpio,
+    .Door_Sensor                    = &App_DoorSensor,
+    .Door_Sensor_Event              = &App_DoorSensorEvent,
+    .Door_Sensor_Status             = &App_DoorSensorStatus,
+    .Exit_Button_Gpio               = &App_ExitButtonGpio,
+    .Exit_Button                    = &App_ExitButton,
+    .Exit_Button_Event              = &App_ExitButtonEvent,
     .Runtime_Candidate              = &App_RuntimeCandidate,
     .Runtime_Credential             = App_RuntimeCredential,
 };

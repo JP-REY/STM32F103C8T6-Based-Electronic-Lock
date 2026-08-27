@@ -1,6 +1,6 @@
-# STM32F411 Electronic Lock
+# STM32F103C8T6 Electronic Lock
 
-Layered firmware for an STM32F411CEU6 electronic lock with a 4x4 matrix
+Layered firmware for an STM32F103C8T6 electronic lock with a 4x4 matrix
 keyboard, 16x2 LCD, status LEDs, passive buzzer and GPIO-controlled actuator.
 
 ## Contents
@@ -38,23 +38,21 @@ The firmware:
 > The implemented execution model is synchronous and cooperative. App Core
 > creates no FreeRTOS tasks, queues, mutexes or software timers.
 
-> [!WARNING]
-> App Core is implemented, but generated [main.c](Core/Src/main.c) does not yet
-> call `App_Init()`, `App_ReadInput()` or `App_Dispatch()`. Product
-> behavior is not active on target until that integration is added in CubeMX
-> user-code regions.
+> [!IMPORTANT]
+> Generated [main.c](Core/Src/main.c) initializes App Core once and then calls
+> `App_ReadInput()` and `App_Dispatch()` cooperatively from the main loop.
 
 ### Current status
 
 | Area | Current state |
 | --- | --- |
-| Target and CubeMX project | STM32F411CEU6 configuration present |
+| Target and CubeMX project | STM32F103C8T6 configuration present |
 | Platform layer | GPIO, I2C, PWM and Time implemented |
-| Component layer | Keyboard, LCD, PCF8574, LED and buzzer implemented |
+| Component layer | Keyboard, LCD, PCF8574, LED, buzzer, lock actuator, door sensor and exit button implemented |
 | Service layer | Domain and presentation services implemented |
 | Application Core | Implemented as a serialized cooperative orchestrator |
-| Main-loop integration | Pending |
-| Actuator abstraction | Direct Platform GPIO; dedicated driver pending |
+| Main-loop integration | Active through `App_Init()`, `App_ReadInput()` and `App_Dispatch()` |
+| Door-mechanism preparation | Lock actuator, door sensor and exit button composed and initialized; Door Control Service pending |
 | Low-battery path | LED path exists; sensing and policy pending |
 | Verification | Module and target coverage still requires expansion |
 
@@ -62,10 +60,10 @@ The prototype does not provide persistent users, credential updates, access
 logs, connectivity, tamper protection, mechanical position feedback or
 certified access-control guarantees.
 
-LCS now models the complete product-level credential-register flow: first
-entry, confirmation, validation, persistence result and success feedback. App
-Core does not yet execute the required staging, CSS and presentation actions,
-so credential updates remain unavailable in the current product integration.
+LCS and App Executor implement the local credential-register flow: first entry,
+confirmation, staging validation, Flash persistence result and success
+feedback. This remains a single-device prototype rather than a multi-user
+credential-management system.
 
 ---
 
@@ -79,6 +77,7 @@ so credential updates remain unavailable in the current product integration.
 | Consecutive failure limit | 3 | Lock Control |
 | Credential-confirmation mismatch limit | 3 | Lock Control |
 | Keyboard debounce | 40 ms | Matrix Keyboard configuration |
+| Exit-button debounce | 20 ms | Exit Button configuration |
 | Credential-entry inactivity | 5,000 ms | App Core timeout table |
 | Authorized unlock | 3,000 ms | App Core timeout table |
 | Access-denied feedback | 1,500 ms | App Core timeout table |
@@ -131,25 +130,28 @@ Detailed behavior:
 
 ## Hardware Baseline
 
-- MCU: STM32F411CEU6, Arm Cortex-M4F, UFQFPN48;
-- system clock: 100 MHz from HSI through PLL;
-- APB1: 50 MHz, with 100 MHz timer clock;
-- APB2: 100 MHz;
+- MCU: STM32F103C8T6, Arm Cortex-M3;
+- system clock: 72 MHz from HSI through PLL;
+- APB1 Peripherals: 36 MHz, with 72 MHz timer clock;
+- APB1 Timers: 72 MHz, with 72 MHz timer clock;
+- APB2: 72 MHz;
 - HAL millisecond time: SysTick;
 - configuration source: [Electronic-Lock.ioc](Electronic-Lock.ioc).
 
 | Resource | Assignment |
 | --- | --- |
-| PA3, PA2, PA1, PA0 | Keyboard rows 0 through 3; pull-up/falling EXTI configuration |
-| PA7, PA6, PA5, PA4 | Keyboard columns 0 through 3 |
-| PA15 | Active-low lock-status LED |
-| PA12 | Active-low low-battery LED |
-| PB8 | Lock actuator; low safe, high unlock request |
-| PB6/PB7 | I2C1 SCL/SDA at 100 kHz |
+| PB15, PB14, PB13, PB12 | Keyboard rows 0 through 3; pull-up/rising-and-falling EXTI configuration |
+| PA6, PA5, PA4, PA3 | Keyboard columns 0 through 3 |
+| PB10 | Active-low lock-status LED |
+| PB11 | Active-low low-battery LED |
+| PA8 | Lock actuator; low safe, high unlock request |
+| PA11 | Door sensor; pull-up input, low active |
+| PA0 | Exit button; pull-up, active low, rising/falling EXTI |
+| PB8/PB9 | I2C1 SCL/SDA at 100 kHz |
 | PB4 | TIM3 channel 1 buzzer PWM |
-| PB9 | TIM4 channel 4 LCD-backlight PWM |
+| PB6 | TIM4 channel 1 LCD-backlight PWM |
 | TIM2 | Raw time counter; microsecond resolution/wrap contract requires validation |
-| PC13 | On-board diagnostic LED |
+| PC12 | On-board diagnostic LED |
 
 CubeMX-generated GPIO initialization requests PB8 low before `App_Init()`. App
 Core then binds the Platform descriptor; its redundant explicit safe-state write
@@ -157,6 +159,13 @@ is currently disabled and tracked as application safety debt. Firmware state
 describes the commanded output, not confirmed mechanical lock position. The
 external actuator stage remains responsible for load current, inductive
 protection and electrical safety.
+
+App Core also binds PA11 to the Door Sensor Driver and PA0 to the Exit Button
+Driver. `App_ConfigHalCallbacks.c` forwards PA0 EXTI activity to
+`ExitButton_NotifyInterrupt()` using the application millisecond time base. The
+planned Door Control Service will own `DoorSensor_GetState()`,
+`ExitButton_Update()` and coordinated lock policy; those runtime operations are
+intentionally not performed by App Core yet.
 
 Hardware and Platform details:
 
@@ -244,6 +253,9 @@ display, two indication instances and sound once. See the
 | PCF8574 | I2C I/O-expander access and port shadow | [README](Libs/Components/PCF8574/README.md) |
 | LED | Active-level-independent digital LED control | [README](Libs/Components/Led/README.md) |
 | Buzzer | Passive-buzzer PWM control | [README](Libs/Components/Buzzer/README.md) |
+| Lock Actuator | Polarity-independent digital lock and unlock commands | [README](Libs/Components/LockActuator/README.md) |
+| Door Sensor | Polarity-independent digital door-contact state | [README](Libs/Components/DoorSensor/README.md) |
+| Exit Button | Interrupt-oriented, non-blocking debounced exit-button events | [README](Libs/Components/ExitButton/README.md) |
 
 ---
 
@@ -327,6 +339,8 @@ Before product use, verify at minimum:
 
 - PB8 safe startup and safe return on every failure path;
 - complete keyboard map, wake-key consumption and 40 ms debounce;
+- PB0 active-low door-contact mapping and electrical open/closed behavior;
+- PB10 press/release EXTI delivery and 20 ms exit-button debounce;
 - six masked digits, incomplete refresh and clear/cancel behavior;
 - exact 5 s, 3 s, 1.5 s and 10 s intervals plus measured dispatch latency;
 - failure-count reset and lockout entry after the third denial feedback;
@@ -344,8 +358,15 @@ and each module README for unit-, integration- and hardware-specific cases.
 
 - Main-loop cadence and maximum timeout-observation latency are not yet
   measured.
-- PB8 is controlled directly through Platform GPIO; no dedicated actuator
-  driver or redundant local energization deadline exists.
+- PB8 is still commanded directly through Platform GPIO by App Executor; the
+  dedicated driver is initialized but command ownership has not moved to the
+  planned Door Control Service, and no redundant local energization deadline
+  exists.
+- The door-sensor driver is bound to PB0 and initialized, but runtime reads and
+  open/closed policy await the planned Door Control Service.
+- The exit-button driver is bound to PB10, initialized and notified from EXTI,
+  but debounced event consumption and request-to-exit policy await the planned
+  Door Control Service.
 - `App_InitLockActuator()` currently relies on the CubeMX PB8 startup level
   because its explicit safe-state write is disabled.
 - Presentation-service failures are mostly treated as degraded feedback rather

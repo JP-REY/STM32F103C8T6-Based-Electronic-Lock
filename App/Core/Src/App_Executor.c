@@ -43,10 +43,13 @@ static void App_ClearRuntime_Candidate(void);
  Lock Actuator Control
  ---------------------------------------------------------------------------------------------------------------------------------*/
 /** @brief Forces the lock-actuator GPIO into its safe locked state. */
-static bool App_ForceLock(void);
+static DCS_RequestLockStatus_t App_RequestLock(void);
 
 /** @brief Requests actuator unlock after a finite unlock timeout has been established. */
 static bool App_RequestUnlock(void);
+
+/** @brief */
+static bool App_ForceLock(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Presentation Coordination
@@ -142,29 +145,70 @@ static LCS_Event_t App_ProcessAuthentication(void)
 }
 
 /**
- * @brief   Forces the lock-actuator output to its safe locked state.
+ * @brief   Requests a normal door-position-aware lock operation through the Door Control Service.
  *
- * @details Drives the application-owned actuator GPIO low through the Platform interface. The operation is intentionally available
- *          independently from presentation services so display, LED or sound failures cannot prevent the safe output request.
+ * @details Delegates the relock request to DCS_RequestLock(), which samples the current normalized Door Sensor state before commanding
+ *          the Lock Actuator Driver. Only the configured lock-permissive sensor condition allows the actuator command; an idle or
+ *          unknown sensor state denies the request without commanding the lock.
  *
- * @return  true when the safe GPIO write succeeds; otherwise false.
+ *          This function is intended for the normal relock path after Lock Control and App Core have completed the required
+ *          door-position confirmation sequence. It does not bypass the Door Control safety interlock.
+ *
+ * @return  true  - When Door Control approves the request and the actuator accepts the lock command.
+ * @return  false - When the door-sensor condition denies locking or the delegated actuator operation fails.
  */
-static bool App_ForceLock(void)
+static DCS_RequestLockStatus_t App_RequestLock(void)
 {
-    return (PGPIO_Reset(App_Instance->Lock_Actuator_Gpio) == GPIO_OPERATION_OK);
+    return DCS_RequestLock();
 }
 
 /**
- * @brief   Requests physical unlock through the temporary actuator GPIO boundary.
+ * @brief   Forces the lock actuator to the configured locked command through the Door Control Service.
  *
- * @details Drives the actuator GPIO high only after the action dispatcher has established a finite unlock timeout. A future Lock
- *          Actuator Driver will replace this direct operation and enforce its own redundant maximum-energization deadline.
+ * @details Delegates directly to DCS_ForceLock(), intentionally bypassing the normal door-sensor interlock. This operation exists for
+ *          explicit fail-safe paths in which the application must request the configured safe actuator output independently from the
+ *          current Door Sensor condition.
  *
- * @return  true when the unlock GPIO write succeeds; otherwise false.
+ *          The function does not perform Door Sensor validation, retry the command or confirm the resulting mechanical lock position.
+ *
+ * @warning This function shall not replace App_RequestLock() in normal relock flow because it intentionally bypasses the door-position
+ *          safety policy enforced by DCS_RequestLock().
+ *
+ * @return  true  - When the Door Control Service successfully commands the actuator to the locked state.
+ * @return  false - When the delegated force-lock operation fails.
+ */
+static bool App_ForceLock(void)
+{
+    if(DCS_ForceLock() != DCS_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief   Requests an already-authorized physical unlock through the Door Control Service.
+ *
+ * @details Delegates the actuator command to DCS_RequestUnlock(). Authorization is established before this function is called by the
+ *          Lock Control and application orchestration flow, whether through successful credential authentication or an accepted
+ *          request-to-exit condition.
+ *
+ *          This function performs no authentication, request-to-exit validation, Door Sensor policy decision or relock timing. After
+ *          unlock, door-position observation and the subsequent relock sequence remain coordinated separately by App Core, Door Control
+ *          and Lock Control.
+ *
+ * @return  true  - When the Door Control Service successfully commands the actuator to the unlocked state.
+ * @return  false - When the delegated actuator operation fails.
  */
 static bool App_RequestUnlock(void)
 {
-    return (PGPIO_Set(App_Instance->Lock_Actuator_Gpio) == GPIO_OPERATION_OK);
+    if(DCS_RequestUnlock() != DCS_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -314,10 +358,11 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
 
             (void)CRS_ClearStaging();
+
             App_ClearRuntime_Candidate();
 
             if(CES_BeginSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 (void)CES_EndSession();
                 (void)CRS_ClearStaging();
@@ -334,7 +379,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION:
 
             if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 App_CancelTimeout();
 
@@ -356,7 +401,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             App_ClearRuntime_Candidate();
 
-            (void)App_ForceLock();
+            (void)App_RequestLock();
 
             App_SetLockedPresentation();
 
@@ -365,6 +410,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION:
         {
             App_CancelTimeout();
+
             App_ClearRuntime_Candidate();
 
             if(CES_GetCandidate(App_Instance->Runtime_Candidate) != CES_OPERATION_OK)
@@ -382,7 +428,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             }
 
             if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 (void)CES_EndSession();
                 (void)CRS_ClearStaging();
@@ -399,7 +445,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION:
 
             if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 App_CancelTimeout();
 
@@ -421,7 +467,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             App_ClearRuntime_Candidate();
 
-            (void)App_ForceLock();
+            (void)App_RequestLock();
 
             (void)SGS_Ring(SGS_RINGTONE_ERROR, current_time_ms);
 
@@ -444,7 +490,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             App_ClearRuntime_Candidate();
 
-            (void)App_ForceLock();
+            (void)App_RequestLock();
 
             (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_LOCKED);
 
@@ -462,7 +508,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_TO_REGISTER_SESSION:
 
             if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 (void)CES_EndSession();
 
@@ -478,7 +524,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION:
 
             if(CES_BeginSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 (void)CES_EndSession();
 
@@ -494,7 +540,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REFRESH_CREDENTIAL_ENTRY_SESSION:
 
             if(CES_RefreshSession() != CES_OPERATION_OK ||
-               !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
+              !App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY))
             {
                 App_CancelTimeout();
 
@@ -512,7 +558,8 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             App_CancelTimeout();
 
             (void)CES_EndSession();
-            (void)App_ForceLock();
+            (void)App_RequestLock();
+
             (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_LOCKED);
 
             App_SetLockedPresentation();
@@ -538,6 +585,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION:
         {
             App_CancelTimeout();
+
             App_ClearRuntime_Candidate();
 
             if(CES_GetCandidate(App_Instance->Runtime_Candidate) != CES_OPERATION_OK)
@@ -566,6 +614,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         case LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STORAGE:
         {
             uint8_t temporary_credential[CRS_CREDENTIAL_LENGTH] = {0U};
+
             LCS_Event_t storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE;
 
             App_CancelTimeout();
@@ -579,6 +628,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
                 }
 
                 runtime_credential_valid = true;
+
                 storage_event = LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS;
             }
 
@@ -594,21 +644,11 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             return storage_event;
         }
 
-        case LCS_ACTION_GRANT_ACCESS_UNLOCK:
-
-            if(!App_StartTimeout(APP_TIMEOUT_UNLOCK))
-            {
-                (void)App_ForceLock();
-
-                return LCS_EVENT_UNLOCK_TIMEOUT;
-            }
+        case LCS_ACTION_REQUEST_UNLOCK:
 
             if(!App_RequestUnlock())
             {
-                App_CancelTimeout();
                 (void)App_ForceLock();
-
-                return LCS_EVENT_UNLOCK_TIMEOUT;
             }
 
             (void)LCD_BacklightOn(App_Instance->Lcd);
@@ -619,9 +659,20 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         break;
 
+        case LCS_ACTION_EXIT_REQUEST_UNLOCK:
+
+            if(!App_RequestUnlock())
+            {
+                (void)App_ForceLock();
+            }
+
+            (void)SGS_Ring(SGS_RINGTONE_UNLOCKING, current_time_ms);
+
+        break;
+
         case LCS_ACTION_DENY_ACCESS:
 
-            (void)App_ForceLock();
+            (void)App_RequestLock();
 
             if(!App_StartTimeout(APP_TIMEOUT_ACCESS_DENIED))
             {
@@ -638,7 +689,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         case LCS_ACTION_ENTER_LOCKOUT:
 
-            (void)App_ForceLock();
+            (void)App_RequestLock();
 
             if(!App_StartTimeout(APP_TIMEOUT_LOCKOUT))
             {
@@ -658,7 +709,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             App_CancelTimeout();
 
             (void)CES_EndSession();
-            (void)App_ForceLock();
+            (void)App_RequestLock();
             (void)SGS_Ring(SGS_RINGTONE_ENTRY_TIMEOUT, current_time_ms);
 
             App_SetLockedPresentation();
@@ -670,7 +721,54 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             App_CancelTimeout();
 
             (void)CES_EndSession();
-            (void)App_ForceLock();
+            (void)App_RequestLock();
+
+            App_SetLockedPresentation();
+
+        break;
+
+        case LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION:
+
+            (void)App_StartTimeout(APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT);
+
+        break;
+
+        case LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION:
+
+            if(DCS_GetSensorStatus(App_Instance->Door_Sensor_Status) != DCS_OPERATION_OK)
+            {
+                goto controlled_reset;
+            }
+
+            if(*(App_Instance->Door_Sensor_Status) == DCS_SENSOR_STATUS_ACTIVE)
+            {
+                return LCS_EVENT_READY_TO_LOCK;
+            }
+
+            if(*(App_Instance->Door_Sensor_Status) == DCS_SENSOR_STATUS_IDLE)
+            {
+                return LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED;
+            }
+
+            goto controlled_reset;
+
+        case LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS:
+
+            (void)CES_EndSession();
+
+            DCS_RequestLockStatus_t lock_status = App_RequestLock();
+
+            if(lock_status == DCS_LOCK_REQUEST_DENIED)
+            {
+                return LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED;
+            }
+
+            if(lock_status == DCS_LOCK_REQUEST_FAILED)
+            {
+                goto controlled_reset;
+            }
+
+            (void)SGS_Ring(SGS_RINGTONE_LOCKING, current_time_ms);
 
             App_SetLockedPresentation();
 
@@ -682,8 +780,10 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             (void)CES_EndSession();
             (void)CRS_ClearStaging();
+
             App_ClearRuntime_Candidate();
-            (void)App_ForceLock();
+
+            (void)App_RequestLock();
 
             App_SetLockedPresentation();
 
@@ -710,6 +810,7 @@ controlled_reset:
 
     (void)CES_EndSession();
     (void)CRS_ClearStaging();
+    
     App_ClearRuntime_Candidate();
 
     volatile uint8_t* runtime_credential_bytes = (volatile uint8_t*)App_Instance->Runtime_Credential;

@@ -3,8 +3,9 @@
  * @brief   Electronic-lock application initialization and event-orchestration core.
  *
  * @details Initializes the electronic-lock object graph supplied by App Config, binds it to CubeMX-generated peripheral resources
- *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. App Config owns the
- *          static runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
+ *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. It also composes the
+ *          lock actuator, door sensor and exit button required by the Door Control Service. App Config owns the static
+ *          runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
  *
  *          Initialization is fail-fast: each private initializer validates every stage and immediately reports failure to
  *          App_Init(). Stateless services and services that own an internal singleton runtime do not require an additional
@@ -18,8 +19,8 @@
  *          service instances live in App_Config.c and are borrowed through App_Instance.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    Aug 22, 2026
+ * @version 1.2.0
+ * @date    Aug 25, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -54,10 +55,10 @@ static const App_TimeoutDefinition_t App_TimeoutDefinitions[APP_TIMEOUT_COUNT] =
         .ElapsedEvent = LCS_EVENT_ENTRY_TIMEOUT
     },
 
-    [APP_TIMEOUT_UNLOCK] =
+    [APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT] =
     {
-        .DurationMs   = APP_UNLOCK_TIMEOUT_MS,
-        .ElapsedEvent = LCS_EVENT_UNLOCK_TIMEOUT
+        .DurationMs   = APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT_MS,
+        .ElapsedEvent = LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT
     },
 
     [APP_TIMEOUT_ACCESS_DENIED] =
@@ -128,8 +129,17 @@ static bool App_InitLockStatusIndication(void);
 /** @brief Initializes the low-battery LED and its Status Indication Service instance. */
 static bool App_InitLowBatteryStatusIndication(void);
 
-/** @brief Initializes the temporary GPIO-based lock actuator and immediately forces its safe state. */
+/** @brief Initializes the lock-actuator Platform descriptor and component instance. */
 static bool App_InitLockActuator(void);
+
+/** @brief Initializes the door-sensor Platform descriptor and component instance. */
+static bool App_InitDoorSensor(void);
+
+/** @brief Initializes the exit-button Platform descriptor and component instance. */
+static bool App_InitExitButton(void);
+
+/** @brief Initalizes the door control service by attaching the components context */
+static bool App_InitDoorControlService(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Keyboard Acquisition and Translation
@@ -470,17 +480,17 @@ static bool App_InitLowBatteryStatusIndication(void)
 }
 
 /**
- * @brief   Initializes the temporary GPIO-based lock-actuator descriptor.
+ * @brief   Initializes the lock-actuator Platform descriptor and driver instance.
  *
- * @details Binds the configured lock-actuator GPIO descriptor to the CubeMX-configured LOCK_ACTUATOR pin. CubeMX-generated GPIO
- *          initialization has already driven that output low, which is the product's current safe locked request. The explicit
- *          Platform safe-state write in this initializer is currently disabled.
+ * @details Binds the application-owned GPIO descriptor to PB8 and injects it into the Lock Actuator Driver with an active-low locked
+ *          command. CubeMX-generated GPIO initialization has already driven the output LOW, which is the product's current safe
+ *          locked request. Driver initialization deliberately does not change the output level.
  *
- * @note    A dedicated Lock Actuator Driver shall eventually replace this direct Platform binding while preserving the same
- *          force-safe behavior and bounded-unlock contract.
+ * @note    App Executor continues to command the shared GPIO descriptor directly. Runtime command ownership will move to the planned
+ *          Door Control Service without changing this composition step.
  *
- * @return  true  - When the GPIO descriptor is initialized successfully.
- * @return  false - When GPIO descriptor initialization fails.
+ * @return  true  - When both the GPIO descriptor and Lock Actuator Driver initialize successfully.
+ * @return  false - When either initialization step fails.
  */
 static bool App_InitLockActuator(void)
 {
@@ -492,7 +502,121 @@ static bool App_InitLockActuator(void)
         return false;
     }
 
-    // return App_ForceLock();
+    if(LockActuator_Init(App_Instance->Lock_Actuator,
+                         App_Instance->Lock_Actuator_Gpio,
+                         APP_LOCK_ACTUATOR_ACTIVE_LEVEL)
+                         != LOCK_ACTUATOR_OPERATION_OK)
+    {
+        return false;
+    }
+
+    // return App_RequestLock();
+    return true;
+}
+
+/**
+ * @brief   Initializes the door-sensor Platform descriptor and driver instance.
+ *
+ * @details Binds the application-owned GPIO descriptor to the CubeMX-configured PA11 door-contact input and injects it into the Door
+ *          Sensor Driver with active-low polarity and the configured debounce interval. Initialization resets the driver's interrupt
+ *          handoff state without reading the GPIO or generating an event.
+ *
+ * @note    HAL_GPIO_EXTI_Callback() records edges through DoorSensor_NotifyInterrupt(). Debounced processing through
+ *          DoorSensor_Update() belongs to the Door Control Service.
+ *
+ * @return  true  - When both the GPIO descriptor and Door Sensor Driver initialize successfully.
+ * @return  false - When either initialization step fails.
+ */
+static bool App_InitDoorSensor(void)
+{
+    if(PGPIO_Init(App_Instance->Door_Sensor_Gpio,
+                  APP_DOOR_SENSOR_GPIO_PORT,
+                  APP_DOOR_SENSOR_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if(DoorSensor_Init(App_Instance->Door_Sensor,
+                       App_Instance->Door_Sensor_Gpio,
+                       APP_DOOR_SENSOR_ACTIVE_LEVEL,
+                       APP_DOOR_SENSOR_DEBOUNCE_TIME_MS)
+                       != DOOR_SENSOR_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief   Initializes the exit-button Platform descriptor and driver instance.
+ *
+ * @details Binds the application-owned GPIO descriptor to the CubeMX-configured PA0 request-to-exit input and injects it into the
+ *          Exit Button Driver with active-low polarity and the configured debounce interval. Initialization resets the driver's
+ *          interrupt handoff state without reading the GPIO or generating an event.
+ *
+ * @note    HAL_GPIO_EXTI_Callback() records edges through ExitButton_NotifyInterrupt(). Debounced processing through
+ *          ExitButton_Update() belongs to the Door Control Service.
+ *
+ * @return  true  - When both the GPIO descriptor and Exit Button Driver initialize successfully.
+ * @return  false - When either initialization step fails.
+ */
+static bool App_InitExitButton(void)
+{
+    if(PGPIO_Init(App_Instance->Exit_Button_Gpio,
+                  APP_EXIT_BUTTON_GPIO_PORT,
+                  APP_EXIT_BUTTON_PIN_NUMBER)
+                  != GPIO_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if(ExitButton_Init(App_Instance->Exit_Button,
+                       App_Instance->Exit_Button_Gpio,
+                       APP_EXIT_BUTTON_ACTIVE_LEVEL,
+                       APP_EXIT_BUTTON_DEBOUNCE_TIME_MS)
+                       != EXIT_BUTTON_OPERATION_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief   Attaches the application-owned door-mechanism components and event outputs to the Door Control Service.
+ *
+ * @details Binds the initialized Lock Actuator, Door Sensor and Exit Button Driver instances to the Door Control Service singleton,
+ *          then attaches the application-owned Exit Button and Door Sensor event slots used by DCS_Update() during periodic runtime
+ *          processing. The service only borrows these objects; ownership and storage remain with App Config.
+ *
+ *          This function performs composition only. It does not command the actuator, read the door sensor, process pending interrupts
+ *          or generate Lock Control events.
+ *
+ * @note    App_InitLockActuator(), App_InitDoorSensor() and App_InitExitButton() shall complete successfully before this function is
+ *          called. All attached handles and event slots must remain valid for the complete firmware lifetime.
+ *
+ * @return  true  - When both component attachment and event-context attachment complete successfully.
+ * @return  false - When either Door Control Service attachment operation fails.
+ */
+static bool App_InitDoorControlService(void)
+{
+    if(DCS_AttachComponents(App_Instance->Lock_Actuator,
+                            App_Instance->Door_Sensor,
+                            App_Instance->Exit_Button)
+                            != DCS_OPERATION_OK)
+    {
+        return false;
+    }
+
+    if(DCS_AttachContext(App_Instance->Exit_Button_Event,
+                         App_Instance->Door_Sensor_Event)
+                         != DCS_OPERATION_OK)
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -911,10 +1035,21 @@ static void App_UpdateServices(void)
 
     uint32_t current_time_ms = Platform_GetMillis();
 
+    (void)DCS_Update();
     (void)DRS_Update();
     (void)SIS_Update(App_Instance->Lock_Status_Indication);
     (void)SIS_Update(App_Instance->LowBattery_Status_Indication);
     (void)SGS_Update(current_time_ms);
+
+    if(*(App_Instance->Exit_Button_Event) == EXIT_BUTTON_EVENT_PRESS)
+    {
+        App_DispatchLcsEvent(LCS_EVENT_EXIT_REQUEST);
+    }
+
+    if(*(App_Instance->Door_Sensor_Event) == DOOR_SENSOR_EVENT_ACTIVE)
+    {
+        App_DispatchLcsEvent(LCS_EVENT_DOOR_POSITION_CONFIRMED);
+    }
 }
 
 /**
@@ -941,9 +1076,10 @@ static void App_HandleInputFault(void)
 /**
  * @brief   Initializes the complete electronic-lock application object graph.
  *
- * @details Initializes the actuator descriptor first, followed by the LCD/render path, keyboard, buzzer/sound path and both
- *          indication instances. After every dependency succeeds, CSS availability selects either the first-registration route
- *          through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through LCS_EVENT_INIT_OK and locked-idle presentation.
+ * @details Initializes the lock-actuator, door-sensor and exit-button Platform/driver pairs first, followed by the LCD/render path,
+ *          keyboard, buzzer/sound path and both indication instances. After every dependency succeeds, CSS availability selects
+ *          either the first-registration route through LCS_EVENT_CREDENTIAL_NOT_REGISTERED or normal activation through
+ *          LCS_EVENT_INIT_OK and locked-idle presentation.
  *
  * @note    CSS_HasCredential() provides only availability. The installed credential is copied into the configured runtime buffer lazily
  *          when the first authentication action executes.
@@ -960,6 +1096,9 @@ App_InitStatus_t App_Init(void)
     App_Instance = App_GetRuntimeInstances();
 
     bool initialized = App_InitLockActuator()               &&
+                       App_InitDoorSensor()                 &&
+                       App_InitExitButton()                 &&
+                       App_InitDoorControlService()         &&
                        App_InitLcd()                        &&
                        App_InitKeyboard()                   &&
                        App_InitBuzzer()                     &&
@@ -968,7 +1107,7 @@ App_InitStatus_t App_Init(void)
 
     if(!initialized)
     {
-        // (void)App_ForceLock();
+        // (void)App_RequestLock();
 
         LCS_Action_t failure_action = LCS_Process(LCS_EVENT_INIT_FAIL);
 

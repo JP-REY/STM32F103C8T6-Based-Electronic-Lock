@@ -5,53 +5,35 @@
  * @details Implements the hardware-dependent Flash operations required by
  *          upper software layers using the STM32 HAL Flash driver.
  *
- *          The module provides Flash locking, unlocking, sector erase,
+ *          The module provides Flash locking, unlocking, page erase,
  *          programming, reading and readout-protection operations while
  *          keeping persistent record layout and storage policies outside the
  *          platform layer.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-20
+ * @version 2.0.0
+ * @date    2026-08-25
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
  Includes
  **********************************************************************************************************************************/
 #include "FLASH_Platform_Interface.h"
-#include "stm32f4xx_hal.h"
+#include "stm32f1xx_hal.h"
 #include "stdbool.h"
 #include "stddef.h"
 
 /**********************************************************************************************************************************
  Private Macros
  **********************************************************************************************************************************/
-/** @brief First byte address of STM32F411CEU6 internal Flash. */
+/** @brief First byte address of STM32F103C8T6 internal Flash. */
 #define PFLASH_START_ADDRESS    (0x08000000U)
 
-/** @brief Last byte address of STM32F411CEU6 internal Flash.  */
-#define PFLASH_END_ADDRESS      (0x0807FFFFU)
+/** @brief Last byte address of the official 64 KiB C8 Flash. */
+#define PFLASH_END_ADDRESS      (0x0800FFFFU)
 
-/** @brief First byte address of 16 KiB Flash sector 1.        */
-#define PFLASH_SECTOR_1_ADDRESS (0x08004000U)
-
-/** @brief First byte address of 16 KiB Flash sector 2.        */
-#define PFLASH_SECTOR_2_ADDRESS (0x08008000U)
-
-/** @brief First byte address of 16 KiB Flash sector 3.        */
-#define PFLASH_SECTOR_3_ADDRESS (0x0800C000U)
-
-/** @brief First byte address of 64 KiB Flash sector 4.        */
-#define PFLASH_SECTOR_4_ADDRESS (0x08010000U)
-
-/** @brief First byte address of 128 KiB Flash sector 5.       */
-#define PFLASH_SECTOR_5_ADDRESS (0x08020000U)
-
-/** @brief First byte address of 128 KiB Flash sector 6.       */
-#define PFLASH_SECTOR_6_ADDRESS (0x08040000U)
-
-/** @brief First byte address of 128 KiB Flash sector 7.       */
-#define PFLASH_SECTOR_7_ADDRESS (0x08060000U)
+/** @brief STM32F103 medium-density physical erase-page size. */
+#define PFLASH_PAGE_SIZE_BYTES  (0x00000400U)
 
 /**********************************************************************************************************************************
  Private Types
@@ -68,7 +50,7 @@
 static bool     PFLASH_IsRangeValid       (uint32_t Address, uint32_t Length);
 static bool     PFLASH_IsAddressAligned   (uint32_t Address, uint32_t Alignment);
 static bool     PFLASH_GetProgrammingType (FLASH_ProgramType_t ProgramType, uint32_t* HalProgramType, uint32_t* ProgramLength);
-static uint32_t PFLASH_GetSector          (uint32_t Address);
+static uint32_t PFLASH_GetPageStart       (uint32_t Address);
 
 /**********************************************************************************************************************************
  Private Functions
@@ -76,7 +58,7 @@ static uint32_t PFLASH_GetSector          (uint32_t Address);
 /**
  * @brief   Checks whether a byte range is contained in internal Flash.
  *
- * @details Rejects a zero length, a start address outside the STM32F411CEU6
+ * @details Rejects a zero length, a start address outside the STM32F103C8T6
  *          internal-Flash interval and any range whose final byte would exceed
  *          PFLASH_END_ADDRESS. The subtraction form avoids address-addition
  *          overflow while checking the upper boundary.
@@ -101,7 +83,7 @@ static bool PFLASH_IsRangeValid(uint32_t Address, uint32_t Length)
  * @brief   Checks whether an address begins on the required byte boundary.
  *
  * @param   Address   - Address to validate.
- * @param   Alignment - Required boundary in bytes: 1, 2, 4 or 8.
+ * @param   Alignment - Required boundary in bytes: 2, 4 or 8.
  *
  * @return  true  - Address is an exact multiple of Alignment;
  *          false - Alignment is zero or Address is not properly aligned.
@@ -135,11 +117,6 @@ static bool PFLASH_GetProgrammingType(FLASH_ProgramType_t ProgramType, uint32_t*
 
     switch(ProgramType)
     {
-        case FLASH_PROGRAM_BYTE:
-            *HalProgramType = FLASH_TYPEPROGRAM_BYTE;
-            *ProgramLength  = 1U;
-            break;
-
         case FLASH_PROGRAM_HALFWORD:
             *HalProgramType = FLASH_TYPEPROGRAM_HALFWORD;
             *ProgramLength  = 2U;
@@ -163,57 +140,21 @@ static bool PFLASH_GetProgrammingType(FLASH_ProgramType_t ProgramType, uint32_t*
 }
 
 /**
- * @brief   Resolves the STM32F411 Flash sector containing an address.
+ * @brief   Resolves the STM32F103 Flash page containing an address.
  *
- * @details Compares Address with each sector start boundary and returns the
- *          corresponding STM32 HAL FLASH_SECTOR_x identifier. The mapping
- *          reflects four 16 KiB sectors, one 64 KiB sector and three 128 KiB
- *          sectors in the 512 KiB STM32F411CEU6 device.
+ * @details Rounds Address down to the start of its containing 1 KiB page. The
+ *          subtraction is relative to the internal-Flash base so the page
+ *          calculation remains explicit even if the memory base changes.
  *
- * @param   Address - Internal-Flash address whose sector is required.
+ * @param   Address - Internal-Flash address whose page start is required.
  *
  * @pre     PFLASH_IsRangeValid(Address, 1U) shall have returned true.
  *
- * @return  FLASH_SECTOR_0 through FLASH_SECTOR_7 for the containing sector.
+ * @return  First byte address of the containing erase page.
  */
-static uint32_t PFLASH_GetSector(uint32_t Address)
+static uint32_t PFLASH_GetPageStart(uint32_t Address)
 {
-    if(Address < PFLASH_SECTOR_1_ADDRESS)
-    {
-        return FLASH_SECTOR_0;
-    }
-
-    if(Address < PFLASH_SECTOR_2_ADDRESS)
-    {
-        return FLASH_SECTOR_1;
-    }
-
-    if(Address < PFLASH_SECTOR_3_ADDRESS)
-    {
-        return FLASH_SECTOR_2;
-    }
-
-    if(Address < PFLASH_SECTOR_4_ADDRESS)
-    {
-        return FLASH_SECTOR_3;
-    }
-
-    if(Address < PFLASH_SECTOR_5_ADDRESS)
-    {
-        return FLASH_SECTOR_4;
-    }
-
-    if(Address < PFLASH_SECTOR_6_ADDRESS)
-    {
-        return FLASH_SECTOR_5;
-    }
-
-    if(Address < PFLASH_SECTOR_7_ADDRESS)
-    {
-        return FLASH_SECTOR_6;
-    }
-
-    return FLASH_SECTOR_7;
+    return Address - ((Address - PFLASH_START_ADDRESS) % PFLASH_PAGE_SIZE_BYTES);
 }
 /**********************************************************************************************************************************
  Functions
@@ -325,13 +266,10 @@ FLASH_OpStatus_t PFLASH_SetProtection(FLASH_ProtectionLevel_t ProtectionLevel)
      * A successful Option Byte reload causes a system reset.
      * Therefore normal execution should not continue beyond this call.
      */
-    if(HAL_FLASH_OB_Launch() != HAL_OK)
-    {
-        (void)HAL_FLASH_OB_Lock();
-        (void)HAL_FLASH_Lock();
+    (void)HAL_FLASH_OB_Launch();
 
-        return FLASH_OPERATION_FAIL;
-    }
+    (void)HAL_FLASH_OB_Lock();
+    (void)HAL_FLASH_Lock();
 
     /*
      * Defensive return. This point should not normally be reached after
@@ -341,24 +279,23 @@ FLASH_OpStatus_t PFLASH_SetProtection(FLASH_ProtectionLevel_t ProtectionLevel)
 }
 
 /**
- * @brief    Erases the internal Flash sector containing the supplied address.
+ * @brief    Erases the internal Flash page containing the supplied address.
  *
- * @details Resolves the STM32F411 sector from Address and requests one
- *          sector erase using the voltage range associated with a 3.3 V
- *          supply.
+ * @details Resolves the containing STM32F103C8T6 1 KiB page and requests one
+ *          page erase through the STM32F1 HAL.
  *
- * @param    Address - Any address contained in the sector to erase.
+ * @param    Address - Any address contained in the page to erase.
  *
  * @note     The Flash interface shall be unlocked before this call.
  *
- * @warning  Erasing a sector destroys every byte in that sector. Persistent
+ * @warning  Erasing a page destroys every byte in that page. Persistent
  *           storage regions shall be reserved by the linker and exclusively
  *           owned by their upper-layer storage policy.
  *
- * @return   FLASH_OPERATION_OK   - Sector erase completed successfully.
+ * @return   FLASH_OPERATION_OK   - Page erase completed successfully.
  * @return   FLASH_OPERATION_FAIL - Address is invalid or the HAL erase failed.
  */
-FLASH_OpStatus_t PFLASH_EraseSectorAt(uint32_t Address)
+FLASH_OpStatus_t PFLASH_ErasePageAt(uint32_t Address)
 {
     if(!PFLASH_IsRangeValid(Address, 1U))
     {
@@ -367,17 +304,16 @@ FLASH_OpStatus_t PFLASH_EraseSectorAt(uint32_t Address)
 
     FLASH_EraseInitTypeDef erase_config =
     {
-        .TypeErase    = FLASH_TYPEERASE_SECTORS,
-        .Banks        = FLASH_BANK_1,
-        .Sector       = PFLASH_GetSector(Address),
-        .NbSectors    = 1U,
-        .VoltageRange = FLASH_VOLTAGE_RANGE_3
+        .TypeErase   = FLASH_TYPEERASE_PAGES,
+        .Banks       = FLASH_BANK_1,
+        .PageAddress = PFLASH_GetPageStart(Address),
+        .NbPages     = 1U
     };
 
-    uint32_t sector_error = UINT32_MAX;
+    uint32_t page_error = UINT32_MAX;
 
-    if(HAL_FLASHEx_Erase(&erase_config, &sector_error) != HAL_OK ||
-       sector_error != UINT32_MAX)
+    if(HAL_FLASHEx_Erase(&erase_config, &page_error) != HAL_OK ||
+       page_error != UINT32_MAX)
     {
         return FLASH_OPERATION_FAIL;
     }
@@ -445,7 +381,15 @@ FLASH_OpStatus_t PFLASH_ReadDoubleWord(uint32_t Address, uint64_t* Data)
         return FLASH_OPERATION_FAIL;
     }
 
-    *Data = *(const volatile uint64_t*)(uintptr_t)Address;
+    const volatile uint32_t* words = (const volatile uint32_t*)(uintptr_t)Address;
+
+    *Data = (uint64_t)words[0] | ((uint64_t)words[1] << 32U);
 
     return FLASH_OPERATION_OK;
 }
+
+_Static_assert(PFLASH_PAGE_SIZE_BYTES == FLASH_PAGE_SIZE,
+               "Platform page size shall match the STM32F1 HAL geometry");
+_Static_assert((PFLASH_END_ADDRESS - PFLASH_START_ADDRESS + 1U) ==
+               (64U * PFLASH_PAGE_SIZE_BYTES),
+               "STM32F103C8T6 Flash range shall contain exactly 64 pages");
