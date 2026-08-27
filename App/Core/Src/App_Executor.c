@@ -780,6 +780,12 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         break;
 
+        case LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT:
+
+            App_RequestControlledReset();
+
+        break;
+
         case LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION:
 
             App_CancelTimeout();
