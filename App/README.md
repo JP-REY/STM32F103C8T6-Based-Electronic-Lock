@@ -1067,9 +1067,14 @@ Authentication, CRS, CSS and DRS to remain compatible.
 The current product configuration interprets the Lock Actuator's active-low
 command as the locked request.
 
-CubeMX is expected to establish the configured safe startup output before
-`App_Init()` binds the Platform descriptor. Lock Actuator Driver initialization
-does not itself establish a new output command.
+CubeMX establishes the configured safe output level before `App_Init()` binds
+the Platform descriptor, providing an electrical locked baseline during early
+startup.
+
+During application initialization, the Lock Actuator is then explicitly
+commanded to the locked state after successful driver initialization. Failure
+to establish this initial locked state causes application initialization to
+fail.
 
 ### 14.2 Runtime actuator policy
 

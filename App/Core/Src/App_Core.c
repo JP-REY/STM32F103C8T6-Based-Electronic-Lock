@@ -510,7 +510,12 @@ static bool App_InitLockActuator(void)
         return false;
     }
 
-    // return App_RequestLock();
+    if(LockActuator_Lock(App_Instance->Lock_Actuator)
+                         != LOCK_ACTUATOR_OPERATION_OK)
+    {
+        return false;
+    }
+    
     return true;
 }
 
