@@ -378,7 +378,7 @@ static const LCS_Transition_t LCS_Transitions[] =
         .guard           = LCS_GUARD_ALWAYS,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_READY_TO_LOCK,
-        .internal_effect = LCS_INTERNAL_EFFECT_CLEAR_PENDING,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
         .action          = LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION
     },
 
@@ -388,8 +388,28 @@ static const LCS_Transition_t LCS_Transitions[] =
         .guard           = LCS_GUARD_ALWAYS,
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_LOCKED,
-        .internal_effect = LCS_INTERNAL_EFFECT_CLEAR_PENDING,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
         .action          = LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS
+    },
+
+    {
+        .source_state    = LCS_STATE_READY_TO_LOCK,
+        .event           = LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_NONE
+    },
+
+    {
+        .source_state    = LCS_STATE_LOCKED,
+        .event           = LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_NONE
     },
 
     {

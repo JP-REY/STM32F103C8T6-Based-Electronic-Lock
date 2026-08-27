@@ -149,6 +149,8 @@ typedef enum
 
     LCS_EVENT_DOOR_POSITION_CONFIRMED,              /*< The required door-position condition was confirmed and relock timing may begin.     */
 
+    LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,          /*< The door condition required to complete relocking is no longer confirmed.           */
+
     LCS_EVENT_READY_TO_LOCK,                        /*< Door-control conditions are satisfied and the lock mechanism may return to locked.  */
 
     /**

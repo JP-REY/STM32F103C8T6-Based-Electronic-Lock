@@ -402,6 +402,7 @@ its result and is the only integration boundary that calls `LCS_Process()`.
 | `LCS_EVENT_CANDIDATE_INCOMPLETE` | Credential Entry Service | Confirmation was requested before the active candidate reached the required length. |
 | `LCS_EVENT_EXIT_REQUEST` | Door Control Service | A validated request-to-exit condition requests unlock from locked idle. |
 | `LCS_EVENT_DOOR_POSITION_CONFIRMED` | Door Control Service | The required door-position condition was confirmed and relock timing may begin. |
+| `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` | Door Control Service | The previously confirmed door position is no longer valid for relock completion. |
 | `LCS_EVENT_READY_TO_LOCK` | Door Control Service | Door-control conditions are satisfied and the lock mechanism may return to locked. |
 | `LCS_EVENT_ENTRY_TIMEOUT` | Timeout Validation Service | The bounded credential-entry interval elapsed. |
 | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Timeout Validation Service | The bounded delay after door-position confirmation elapsed. |
@@ -504,17 +505,26 @@ flowchart TB
 
     AUTH -->|T10| FIRST
     AUTH -->|T11| ACCESS["ACCESS<br/>UNLOCKED"]
+
     LOCKED -->|T12| ACCESS
 
     ACCESS -->|T13| CONFIRM["DOOR SENSOR<br/>CONFIRMATION"]
     CONFIRM -->|T14| READY["READY TO LOCK<br/>wait"]
+
     READY -->|T15| RETURN["LOCKED<br/>return rail"]
 
-    AUTH -->|T16| DENIED["ACCESS DENIED<br/>FEEDBACK"]
+    READY -->|T16| ACCESS
+    LOCKED -->|T17| ACCESS
+
+    AUTH -->|T18| DENIED["ACCESS DENIED<br/>FEEDBACK"]
+
     ENTRY -->|"T05 / T07"| RETURN
-    DENIED -->|T17| RETURN
-    DENIED -->|T18| LOCKOUT["LOCKOUT"]
-    LOCKOUT -->|T19| RETURN
+
+    DENIED -->|T19| RETURN
+    DENIED -->|T20| LOCKOUT["LOCKOUT"]
+    LOCKOUT -->|T21| RETURN
+
+    RETURN --> LOCKED
 
     classDef initial fill:#f4f6f7,stroke:#667681,color:#263642
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
@@ -533,17 +543,25 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    FIRST["FIRST ENTRY<br/>T22 ↺"] -->|T20| CONFIRM["CONFIRM ENTRY<br/>T26 ↺"]
-    CONFIRM -->|T24| VALIDATE["VALIDATING"]
-    VALIDATE -->|T28| PERSIST["PERSISTING"]
-    PERSIST -->|T31| FEEDBACK["SUCCESS<br/>FEEDBACK"]
-    FEEDBACK -->|T33| LOCKED["LOCKED"]
+    FIRST["FIRST ENTRY<br/>T24 ↺"] -->|T22| CONFIRM["CONFIRM ENTRY<br/>T28 ↺"]
 
-    VALIDATE -->|T29| CONFIRM
-    FIRST -->|"T21 / T23"| LOCKED
-    CONFIRM -->|"T25 / T27"| LOCKED
-    VALIDATE -->|T30| LOCKED
-    PERSIST -->|T32| FAULT["FAULT"]
+    CONFIRM -->|T26| VALIDATE["VALIDATING"]
+
+    VALIDATE -->|T30| PERSIST["PERSISTING"]
+
+    PERSIST -->|T33| FEEDBACK["SUCCESS<br/>FEEDBACK"]
+
+    FEEDBACK -->|T35| LOCKED["LOCKED"]
+
+    VALIDATE -->|T31| CONFIRM
+
+    FIRST -->|"T23 / T25"| LOCKED
+
+    CONFIRM -->|"T27 / T29"| LOCKED
+
+    VALIDATE -->|T32| LOCKED
+
+    PERSIST -->|T34| FAULT["FAULT"]
 
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
     classDef active fill:#eaf4fb,stroke:#3478a8,color:#17324d
@@ -739,26 +757,28 @@ The current table contains **33 declared transition records**:
 | `T11` | `AUTHENTICATING` | `AUTH_SUCCESS` | Always | Unlock | `ACCESS_UNLOCKED` | Clear pending and reset failures | `REQUEST_UNLOCK` |
 | `T12` | `LOCKED` | `EXIT_REQUEST` | Always | None | `ACCESS_UNLOCKED` | Clear pending | `EXIT_REQUEST_UNLOCK` |
 | `T13` | `ACCESS_UNLOCKED` | `DOOR_POSITION_CONFIRMED` | Always | None | `DOOR_SENSOR_CONFIRMATION` | None | `BEGIN_DOOR_SENSOR_CONFIRMATION` |
-| `T14` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | Clear pending | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
-| `T15` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
-| `T16` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
-| `T17` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
-| `T18` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
-| `T19` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
-| `T20` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
-| `T21` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T22` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T23` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T24` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
-| `T25` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T26` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T27` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T28` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
-| `T29` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T30` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T31` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
-| `T32` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
-| `T33` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Always | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
+| `T14` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | None | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
+| `T15` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
+| `T16` | `READY_TO_LOCK` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
+| `T17` | `LOCKED` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
+| `T18` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
+| `T19` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
+| `T20` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
+| `T21` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
+| `T22` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
+| `T23` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T24` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T25` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T26` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
+| `T27` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T28` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T29` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Always | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T30` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
+| `T31` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T32` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T33` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
+| `T34` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
+| `T35` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Always | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
 
 `T11` and `T12` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the
 failure counter. `T12` is request-to-exit and preserves that history. `T13` through `T15` form the shared post-unlock relock sequence.
