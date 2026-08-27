@@ -510,7 +510,12 @@ static bool App_InitLockActuator(void)
         return false;
     }
 
-    // return App_RequestLock();
+    if(LockActuator_Lock(App_Instance->Lock_Actuator)
+                         != LOCK_ACTUATOR_OPERATION_OK)
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -1035,7 +1040,8 @@ static void App_UpdateServices(void)
 
     uint32_t current_time_ms = Platform_GetMillis();
 
-    (void)DCS_Update();
+    DCS_Update();
+
     (void)DRS_Update();
     (void)SIS_Update(App_Instance->Lock_Status_Indication);
     (void)SIS_Update(App_Instance->LowBattery_Status_Indication);
@@ -1107,8 +1113,6 @@ App_InitStatus_t App_Init(void)
 
     if(!initialized)
     {
-        // (void)App_RequestLock();
-
         LCS_Action_t failure_action = LCS_Process(LCS_EVENT_INIT_FAIL);
 
         (void)App_ExecuteAction(failure_action);

@@ -648,7 +648,12 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             if(!App_RequestUnlock())
             {
-                (void)App_ForceLock();
+                if(!App_ForceLock())
+                {
+                    return LCS_EVENT_CRITICAL_FAULT;
+                }
+
+                return LCS_EVENT_UNLOCK_REQUEST_FAILED;
             }
 
             (void)LCD_BacklightOn(App_Instance->Lcd);
@@ -663,7 +668,12 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             if(!App_RequestUnlock())
             {
-                (void)App_ForceLock();
+                if(!App_ForceLock())
+                {
+                    return LCS_EVENT_CRITICAL_FAULT;
+                }
+
+                return LCS_EVENT_UNLOCK_REQUEST_FAILED;
             }
 
             (void)SGS_Ring(SGS_RINGTONE_UNLOCKING, current_time_ms);
@@ -671,8 +681,6 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         break;
 
         case LCS_ACTION_DENY_ACCESS:
-
-            (void)App_RequestLock();
 
             if(!App_StartTimeout(APP_TIMEOUT_ACCESS_DENIED))
             {
@@ -688,8 +696,6 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
         break;
 
         case LCS_ACTION_ENTER_LOCKOUT:
-
-            (void)App_RequestLock();
 
             if(!App_StartTimeout(APP_TIMEOUT_LOCKOUT))
             {
@@ -793,10 +799,7 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
             goto controlled_reset;
 
-        case LCS_ACTION_NONE:
-        default:
-
-        break;
+        default: case LCS_ACTION_NONE: break;
     }
 
     return LCS_EVENT_NONE;

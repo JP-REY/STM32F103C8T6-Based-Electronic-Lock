@@ -855,6 +855,12 @@ static bool LCS_test_invalid_events_preserve_state(void)
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_READY_TO_LOCK,
                            LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS);
 
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_UNLOCK_REQUEST_FAILED,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CRITICAL_FAULT,
+                           LCS_ACTION_NONE);
+
     /* A valid entry request proves that the ready-to-lock transition actually restored locked idle. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
                            LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
@@ -962,6 +968,71 @@ static bool LCS_test_exit_request_preserves_auth_failure_counter(void)
     return true;
 }
 
+/**
+ * @brief   Validates semantic recovery after an unlock request fails but safe lock recovery succeeds.
+ *
+ * @details Drives normal authenticated access until LCS commits to ACCESS_UNLOCKED and requests the physical unlock. A subsequent
+ *          LCS_EVENT_UNLOCK_REQUEST_FAILED represents successful fail-safe recovery of the actuator to the locked command and shall
+ *          reconcile the FSM back to locked idle. Acceptance of a new credential-entry request proves the resulting private state.
+ *
+ * @return  true  - Unlock failure selected locked-state reconciliation and normal locked operation resumed;
+ * @return  false - At least one returned action or required fixture failed.
+ */
+static bool LCS_test_unlock_request_failure_recovery(void)
+{
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    LCS_TEST_REQUIRE(LCS_test_reach_authentication_from_locked(false));
+
+    /* Authentication commits the FSM to ACCESS_UNLOCKED before App Executor performs the physical request. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_AUTH_SUCCESS,
+                           LCS_ACTION_REQUEST_UNLOCK);
+
+    /* Successful force-lock recovery shall reconcile the semantic state back to LOCKED. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_UNLOCK_REQUEST_FAILED,
+                           LCS_ACTION_RETURN_TO_LOCKED);
+
+    /* A new entry request proves that recovery restored normal locked idle. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
+
+    return true;
+}
+
+/**
+ * @brief   Validates critical-fault escalation when unlock failure cannot be recovered to the safe locked command.
+ *
+ * @details Drives normal authenticated access until LCS commits to ACCESS_UNLOCKED. LCS_EVENT_CRITICAL_FAULT represents failure of
+ *          the application fail-safe lock recovery and shall move the FSM to FAULT while requesting a controlled reset. Subsequent
+ *          operational events are ignored, proving that FAULT remains terminal for the current runtime instance.
+ *
+ * @return  true  - Critical unlock-recovery failure selected controlled reset and preserved the terminal fault state;
+ * @return  false - At least one returned action or required fixture failed.
+ */
+static bool LCS_test_unlock_recovery_critical_fault(void)
+{
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    LCS_TEST_REQUIRE(LCS_test_reach_authentication_from_locked(false));
+
+    /* Authentication commits the FSM to ACCESS_UNLOCKED before physical unlock execution. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_AUTH_SUCCESS,
+                           LCS_ACTION_REQUEST_UNLOCK);
+
+    /* Failure to recover the safe locked command is critical and shall enter FAULT. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CRITICAL_FAULT,
+                           LCS_ACTION_REQUEST_CONTROLLED_RESET);
+
+    /* FAULT is terminal for the current runtime instance. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_NONE);
+
+    return true;
+}
+
 /**********************************************************************************************************************************
  Private Constants
  **********************************************************************************************************************************/
@@ -980,6 +1051,8 @@ static const LCS_TestCase_t LCS_TestCases[] =
     {"normal_access",                          LCS_test_normal_access},
     {"normal_exit_paths",                      LCS_test_normal_exit_paths},
     {"authentication_lockout",                 LCS_test_authentication_lockout},
+    {"unlock_request_failure_recovery",        LCS_test_unlock_request_failure_recovery},
+    {"unlock_recovery_critical_fault",         LCS_test_unlock_recovery_critical_fault},
     {"authentication_success_resets_counter",  LCS_test_authentication_success_resets_counter},
     {"registration_authorization_failure",     LCS_test_registration_authorization_failure},
     {"first_boot_registration_success",        LCS_test_first_boot_registration_success},
