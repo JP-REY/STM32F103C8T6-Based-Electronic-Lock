@@ -19,7 +19,7 @@
  *          synchronized.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
+ * @version 1.2.0
  * @date    Aug 27, 2026
  **********************************************************************************************************************************/
 
@@ -572,12 +572,13 @@ static bool LCS_test_registration_authorization_failure(void)
 }
 
 /**
- * @brief   Validates successful initial credential registration when storage contains no credential.
+ * @brief   Validates successful mandatory first-boot credential enrollment.
  *
- * @details LCS_EVENT_CREDENTIAL_NOT_REGISTERED shall bypass authentication and start first entry. Matching stages are persisted,
- *          success feedback completes, and a subsequent entry request proves the FSM reached normal locked idle.
+ * @details LCS_EVENT_CREDENTIAL_NOT_REGISTERED shall bypass authentication and start first entry under first-boot policy. Matching
+ *          stages are persisted and bounded success feedback completes through the dedicated first-boot action that asks the
+ *          application to enter its controlled-reset endpoint.
  *
- * @return  true  - The complete first-boot registration route matched the contract;
+ * @return  true  - The complete first-boot enrollment route and dedicated completion action matched the contract;
  * @return  false - At least one returned action differed.
  */
 static bool LCS_test_first_boot_registration_success(void)
@@ -592,12 +593,12 @@ static bool LCS_test_first_boot_registration_success(void)
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS,
                            LCS_ACTION_END_CREDENTIAL_REGISTER_SAVING_SESSION);
 
+    /*
+     * First-boot completion is intentionally different from normal credential replacement.
+     * App Executor shall consume this action by requesting controlled reset.
+     */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_REGISTER_DONE,
-                           LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION);
-
-    /* Acceptance of normal entry proves feedback completion restored locked idle. */
-    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
-                           LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
+                           LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT);
 
     return true;
 }
@@ -633,20 +634,22 @@ static bool LCS_test_authorized_registration_success(void)
 }
 
 /**
- * @brief   Validates confirmation retries, third-mismatch abortion and mismatch-counter reset.
+ * @brief   Validates confirmation retries, restart-on-limit behavior and mismatch-counter reset.
  *
- * @details The first two staging mismatches restart only confirmation entry while retaining the staged first candidate. The third
- *          mismatch aborts registration. A new authorized session then receives another first-mismatch retry, proving independent
- *          mismatch history was reset by the terminal path.
+ * @details Authorized runtime registration is used so the scenario also proves the regression fixed by the current policy: the
+ *          first two staging mismatches restart only confirmation entry, while the third resets mismatch history and restarts the
+ *          registration flow from first entry instead of returning directly to locked idle. Cancellation from that restarted first
+ *          entry then follows normal-boot policy. A new authorized registration receives a fresh first-mismatch retry, proving that
+ *          the limit transition reset the independent mismatch counter.
  *
- * @return  true  - Retry-limit guards and terminal cleanup behaved as specified;
+ * @return  true  - Retry guards, third-mismatch restart, normal-boot cancellation and counter reset behaved as specified;
  * @return  false - At least one returned action differed.
  */
 static bool LCS_test_registration_mismatch_limit(void)
 {
-    /* First boot provides the shortest deterministic route into registration. */
-    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_NOT_REGISTERED,
-                           LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    LCS_TEST_REQUIRE(LCS_test_reach_first_entry_from_locked());
 
     LCS_TEST_REQUIRE(LCS_test_reach_validation_from_first_entry());
 
@@ -660,21 +663,26 @@ static bool LCS_test_registration_mismatch_limit(void)
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_READY,
                            LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION);
 
-    /* Second mismatch consumes the final retry but still returns to confirmation entry. */
+    /* Second mismatch still returns to confirmation entry. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_STAGING_VALIDATION_FAILURE,
                            LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION);
 
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_READY,
                            LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION);
 
-    /* Third mismatch aborts registration and restores locked idle. */
+    /* Third mismatch restarts registration from first entry instead of returning to LOCKED. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_STAGING_VALIDATION_FAILURE,
-                           LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION);
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
 
-    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_REGISTER_DONE, 
-                           LCS_ACTION_NONE);
+    /* First-entry behavior proves that the target state was actually committed. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_INCOMPLETE,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
 
-    /* A new session shall receive a fresh first-mismatch retry. */
+    /* Normal boot may still cancel the restarted registration and return to locked idle. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_CANCELLED,
+                           LCS_ACTION_END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
+
+    /* A new authorized session shall receive a fresh first-mismatch retry. */
     LCS_TEST_REQUIRE(LCS_test_reach_first_entry_from_locked());
 
     LCS_TEST_REQUIRE(LCS_test_reach_validation_from_first_entry());
@@ -749,6 +757,49 @@ static bool LCS_test_registration_confirm_entry_exit_paths(void)
 
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_ENTRY_TIMEOUT,
                            LCS_ACTION_END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION);
+
+    return true;
+}
+
+/**
+ * @brief   Validates mandatory first-boot cancellation containment and current timeout behavior.
+ *
+ * @details First-boot registration cancellation shall refresh the active first-entry or confirmation-entry phase instead of
+ *          escaping to locked idle. Registration entry timeout currently has no first-boot transition, so it shall return
+ *          LCS_ACTION_NONE and preserve the active enrollment phase. Observable refresh actions after each ignored timeout prove
+ *          that the expected private state remained active without inspecting the singleton context directly.
+ *
+ * @return  true  - First-boot cancellation and timeout behavior preserved mandatory enrollment as specified;
+ * @return  false - At least one returned action differed.
+ */
+static bool LCS_test_first_boot_registration_exit_policy(void)
+{
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_NOT_REGISTERED,
+                           LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
+
+    /* Cancellation cannot escape mandatory first entry. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_CANCELLED,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
+
+    /* First-boot timeout currently has no transition and shall preserve first entry. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_ENTRY_TIMEOUT,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_INCOMPLETE,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION);
+
+    /* Move into confirmation and verify the equivalent first-boot policy there. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_READY,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_CANCELLED,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_ENTRY_TIMEOUT,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_INCOMPLETE,
+                           LCS_ACTION_REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION);
 
     return true;
 }
@@ -1056,6 +1107,7 @@ static const LCS_TestCase_t LCS_TestCases[] =
     {"authentication_success_resets_counter",  LCS_test_authentication_success_resets_counter},
     {"registration_authorization_failure",     LCS_test_registration_authorization_failure},
     {"first_boot_registration_success",        LCS_test_first_boot_registration_success},
+    {"first_boot_registration_exit_policy",    LCS_test_first_boot_registration_exit_policy},
     {"authorized_registration_success",        LCS_test_authorized_registration_success},
     {"registration_mismatch_limit",            LCS_test_registration_mismatch_limit},
     {"registration_first_entry_exit_paths",    LCS_test_registration_first_entry_exit_paths},

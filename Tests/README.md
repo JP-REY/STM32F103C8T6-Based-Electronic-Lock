@@ -76,16 +76,18 @@ The LCS suite shall verify that:
 * Normal credential entry routes successful authentication through unlock, door-position confirmation, explicit ready-to-lock authorization and restoration of locked idle.
 * Credential-register requests reuse authentication while selecting the registration destination deterministically.
 * First-boot registration bypasses authentication only when no credential is installed.
+* Mandatory first-boot enrollment cannot escape to normal locked idle through cancellation.
+* First-boot registration completion returns the dedicated action used by App Executor to request controlled reset.
 * Request-to-exit grants unlock from locked idle without credential authentication and then reuses the shared post-unlock relock path.
 * Registration first entry, confirmation, comparison, persistence and success feedback occur in the required order.
-* Cancellation, incomplete-candidate and timeout events select the action appropriate to the active entry phase.
+* Cancellation, incomplete-candidate and timeout events select the action appropriate to the active entry phase and boot policy.
 * Authentication failures and registration mismatches use independent bounded counters.
 * Request-to-exit access does not reset authentication-failure history.
 * Both authenticated access and request-to-exit require the documented post-unlock door-confirmation and ready-to-lock sequence before locked idle is restored.
 * Loss of door-position confirmation from `READY_TO_LOCK` returns to unlocked access and permits a fresh confirmation cycle.
 * Final relock denial reported immediately after the logical locked transition also recovers to unlocked access through `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`.
-* Guard boundaries select the correct retry, lockout or abortion transition.
-* Terminal transitions clear private pending purposes and counters where required.
+* Guard boundaries select the correct retry, lockout, first-boot/normal-boot or registration-restart transition.
+* Terminal transitions and restart boundaries clear private pending purposes and counters where required.
 * Invalid, sentinel, out-of-range and out-of-context events preserve the runtime context.
 * Every accepted event returns the public semantic action declared by the LCS contract.
 
@@ -146,7 +148,9 @@ Private state, pending purpose and counters are not inspected. When an internal 
 * After `LCS_EVENT_INIT_OK` returns `LCS_ACTION_NONE`, acceptance of a credential-entry request proves locked idle was reached.
 * After authentication success, later failures prove the consecutive-failure counter was reset.
 * After lockout timeout, a new first failure proves the counter returned to zero.
-* After registration abortion, a fresh first mismatch proves the mismatch counter was reset.
+* After the third registration mismatch restarts first entry, normal-boot cancellation followed by a new authorized session and fresh first mismatch proves the mismatch counter was reset.
+* During first boot, cancellation followed by a phase-specific refresh proves mandatory enrollment remained active.
+* During first boot, `LCS_EVENT_ENTRY_TIMEOUT` returning `LCS_ACTION_NONE` followed by a valid phase-specific refresh proves the current enrollment state was preserved.
 * After rejected registration authorization, a new authentication success selecting unlock proves the pending registration purpose was cleared.
 * After two authentication failures, a complete request-to-exit unlock/relock cycle followed by a third failure entering lockout proves request-to-exit did not reset authentication-failure history.
 * After `LCS_EVENT_READY_TO_LOCK` returns the granted-access relock action, acceptance of a new credential-entry request proves locked idle was restored.
@@ -226,7 +230,7 @@ The firmware's root `Debug` and `Release` presets are not used because they inte
 
 ## 7. LCS Scenario Catalog
 
-The following 17 scenarios are independently executable. Every scenario starts with a fresh process and therefore a fresh boot-state singleton.
+The following 20 scenarios are independently executable. Every scenario starts with a fresh process and therefore a fresh boot-state singleton.
 
 | CTest name | Objective | Principal observable acceptance |
 |---|---|---|
@@ -237,9 +241,10 @@ The following 17 scenarios are independently executable. Every scenario starts w
 | `lcs.authentication_lockout` | Verify the three-failure authentication limit, lockout gate and counter reset after lockout timeout. | The first two rejected authentications return to locked idle; the third returns `ENTER_LOCKOUT`; credential entry is ignored during lockout; after `LOCKOUT_TIMEOUT`, one new failure remains below the limit. |
 | `lcs.authentication_success_resets_counter` | Verify that successful authentication clears previously accumulated authentication failures. | Two rejected attempts followed by successful authentication and complete relock reset the failure history; two subsequent failures still return normally instead of entering lockout. |
 | `lcs.registration_authorization_failure` | Verify rejected credential-registration authorization and cleanup of the pending registration purpose. | Registration authorization failure produces `DENY_ACCESS` and returns locked after denial feedback; the next normal authentication success returns `REQUEST_UNLOCK` rather than entering registration. |
-| `lcs.first_boot_registration_success` | Verify successful initial credential registration when no credential is installed. | `CREDENTIAL_NOT_REGISTERED` directly starts first entry; matching stages request storage; storage success returns `END_CREDENTIAL_REGISTER_SAVING_SESSION`; registration completion returns `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION`; normal credential entry is then accepted. |
-| `lcs.authorized_registration_success` | Verify credential replacement after authenticating the currently installed credential. | Successful authorization starts first registration entry; matching stages request storage; storage success ends the saving session; completion returns to locked operation. |
-| `lcs.registration_mismatch_limit` | Verify confirmation retries, abortion on the third mismatch and mismatch-counter reset between sessions. | The first two staging-validation failures return `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; the third returns `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; a new registration session receives a fresh first-mismatch retry. |
+| `lcs.first_boot_registration_success` | Verify successful mandatory first-boot credential enrollment when no credential is installed. | `CREDENTIAL_NOT_REGISTERED` directly starts first entry; matching stages request storage; storage success returns `END_CREDENTIAL_REGISTER_SAVING_SESSION`; registration completion returns `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`. |
+| `lcs.first_boot_registration_exit_policy` | Verify mandatory first-boot cancellation containment and current timeout behavior in first-entry and confirmation-entry phases. | Cancellation refreshes the active registration phase instead of returning to `LOCKED`; first-boot `ENTRY_TIMEOUT` returns `LCS_ACTION_NONE`, and a later phase-specific event proves the enrollment state was preserved. |
+| `lcs.authorized_registration_success` | Verify credential replacement after authenticating the currently installed credential. | Successful authorization starts first registration entry; matching stages request storage; storage success ends the saving session; normal-boot completion returns `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION`. |
+| `lcs.registration_mismatch_limit` | Verify confirmation retries, restart on the third mismatch and mismatch-counter reset between authorized sessions. | The first two staging-validation failures return `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; the third returns `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION`; first-entry behavior proves the restart target, normal-boot cancellation returns to `LOCKED`, and a new authorized registration receives a fresh first-mismatch retry. |
 | `lcs.registration_first_entry_exit_paths` | Verify incomplete-entry refresh, cancellation and inactivity timeout while collecting the first new credential. | Incomplete input returns `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION`; both cancellation and timeout return `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION`. |
 | `lcs.registration_confirm_entry_exit_paths` | Verify cancellation, incomplete-entry refresh and inactivity timeout during registration confirmation. | Cancellation returns `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; incomplete input returns `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; timeout also terminates confirmation with `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`. |
 | `lcs.registration_storage_failure` | Verify fail-safe behavior when persistent credential storage fails. | Storage failure returns `REQUEST_CONTROLLED_RESET`; subsequent registration-feedback and credential-entry events return `LCS_ACTION_NONE`, proving the fault path is absorbing. |
@@ -258,7 +263,7 @@ The catalog is a behavioral specification. If an intentional LCS change modifies
 
 ### 8.1 FSM Behavior
 
-The current 17-scenario catalog exercises the accepted event paths needed to validate:
+The current 20-scenario catalog exercises the accepted event paths needed to validate:
 
 * Normal boot, first-registration boot and initialization failure.
 * Normal credential entry, incomplete-entry refresh, cancellation and inactivity timeout.
@@ -269,7 +274,9 @@ The current 17-scenario catalog exercises the accepted event paths needed to val
 * Request-to-exit unlock without credential authentication, followed by the same shared post-unlock relock path.
 * Preservation of authentication-failure history across request-to-exit access.
 * Credential-register authorization, first entry, confirmation entry, comparison, persistence and success feedback.
-* Registration cancellation, incomplete-candidate refresh, timeout handling and mismatch retry limits.
+* Mandatory first-boot enrollment activation, cancellation containment, current ignored-timeout behavior and dedicated completion action.
+* Normal-boot registration cancellation and timeout exits.
+* Registration mismatch retry limits, third-mismatch restart to first entry and mismatch-counter reset.
 * Successful and failed persistent-storage outcomes.
 * Invalid, sentinel, out-of-range and valid-but-out-of-context event rejection with later proof of state preservation.
 * Fault-state preservation after critical initialization or persistence failures.
@@ -292,9 +299,12 @@ The following private policy is validated indirectly:
 | Shared relock sequencing | Both authenticated access and request-to-exit require door confirmation and `LCS_EVENT_READY_TO_LOCK` before returning to locked idle. |
 | Relock confirmation recovery | `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` from `READY_TO_LOCK` silently restores `ACCESS_UNLOCKED`; a later accepted door confirmation proves the target state. |
 | Final relock reconciliation | After `LCS_EVENT_READY_TO_LOCK` has selected the granted-access relock action and moved LCS to `LOCKED`, an immediate `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` silently restores `ACCESS_UNLOCKED`. |
-| Registration mismatch count | Mismatches one and two retry; mismatch three aborts. |
-| Mismatch reset | A new registration session receives the full retry budget. |
-| Service activation | Only the accepted startup transition enables operational behavior. |
+| Registration mismatch count | Mismatches one and two retry confirmation; mismatch three restarts registration from first entry. |
+| Mismatch reset | The third-mismatch restart clears history; a later authorized registration receives the full retry budget. |
+| First-boot policy | `CREDENTIAL_NOT_REGISTERED` enables mandatory enrollment; first-boot cancellation refreshes the active registration phase instead of returning to `LOCKED`. |
+| First-boot timeout preservation | `ENTRY_TIMEOUT` currently has no first-boot registration transition; `ACTION_NONE` plus a later phase-specific action proves the enrollment state is preserved. |
+| First-boot completion | Successful first-boot registration ends with `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` instead of the normal return-to-locked action. |
+| Service activation | Only an accepted startup route enables operational behavior. |
 | Fault absorption | Initialization or persistent-storage failure selects controlled reset and later ordinary events cannot restore operation. |
 
 `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` is not expected by any current host scenario. If production begins returning that action, add an explicit observable path and update this catalog in the same change.
@@ -360,14 +370,14 @@ ctest --test-dir build/host-tests -C Debug --output-on-failure
 With the current scenario registry, a successful run ends with:
 
 ```text
-100% tests passed, 0 tests failed out of 17
+100% tests passed, 0 tests failed out of 20
 ```
 
 The exact duration, generator messages, compiler identification and test numbering may vary by host. The required reproducibility criteria are:
 
 * Configuration succeeds with a native compiler.
 * Both targets compile with warnings treated as errors.
-* CTest discovers 17 scenarios.
+* CTest discovers 20 scenarios.
 * Every scenario returns a successful process status.
 
 ---
@@ -563,6 +573,7 @@ The current suite:
 * Does not invoke Credential Entry, Authentication, Credential Register, Credential Storage, Timeout Validation or hardware-facing services.
 * Does not validate real-time durations; it dispatches already interpreted timeout events.
 * Does not inspect display, sound, LED or lock-actuator side effects.
+* Verifies that first-boot completion returns `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT`, but does not verify that App Executor actually performs the controlled reset; that belongs to application integration testing.
 * Does not validate the physical request-to-exit button, door sensor or their GPIO/interrupt/debounce behavior; it dispatches already interpreted LCS events.
 * Does not prove that App Executor emits `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` only from synchronous relock validation; this suite validates only the LCS response once that semantic event is supplied.
 * Does not perform concurrency or reentrancy testing because the LCS contract requires serialized calls.
@@ -584,7 +595,7 @@ The native LCS suite is accepted when:
 * Each scenario starts in an independent process.
 * All current transition paths, guard boundaries and terminal cleanup policies remain covered.
 * Invalid events demonstrably preserve state.
-* All 17 current scenarios pass.
+* All 20 current scenarios pass.
 * Any future LCS contract change updates code, tests, scenario registry and documentation together.
 
 ---
