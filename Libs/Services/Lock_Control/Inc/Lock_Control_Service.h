@@ -266,6 +266,8 @@ typedef enum
 
     LCS_ACTION_RETURN_TO_LOCKED_FROM_ENTRY_TIMEOUT,                         /*< Restore locked idle and request credential-entry timeout feedback.             */
 
+    LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT,          /*< Complete mandatory first-boot registration by requesting a controlled reset.   */
+
     LCS_ACTION_RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION,           /*< Restore locked idle after registration completion feedback.                    */
 
     LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION,                              /*< Begin the bounded interval following confirmation of the required door state.  */
