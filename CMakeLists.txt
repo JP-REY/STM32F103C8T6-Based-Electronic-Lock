@@ -78,6 +78,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Libs/Services/Credential_Register/Src/Credential_Register_Service.c
     Libs/Services/Credential_Storage/Src/Credential_Storage_Service.c
     Libs/Services/Display_Render/Src/Display_Render_Service.c
+    Libs/Services/Door_Control/Src/Door_Control_Service.c
     Libs/Services/Lock_Control/Src/Lock_Control_Service.c
     Libs/Services/Sound_Generator/Src/Sound_Generator_Service.c
     Libs/Services/Status_Indication/Src/Status_Indication_Service.c
@@ -111,6 +112,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Libs/Services/Credential_Register/Inc
     Libs/Services/Credential_Storage/Inc
     Libs/Services/Display_Render/Inc
+    Libs/Services/Door_Control/Inc
     Libs/Services/Lock_Control/Inc
     Libs/Services/Sound_Generator/Inc
     Libs/Services/Status_Indication/Inc
