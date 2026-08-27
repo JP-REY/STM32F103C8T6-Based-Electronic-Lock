@@ -616,7 +616,6 @@ The current design detects incomplete/corrupted writes; it does not preserve the
 The following limitations describe the current implementation and are intentionally kept visible rather than hidden behind the prototype label.
 
 - **Main-loop timing is not yet characterized.** Maximum loop latency, input-response latency and timeout-observation error still need measured worst-case values.
-- **Some DCS update failures are not promoted.** The current periodic application path ignores `DCS_Update()` return status rather than mapping every component-update failure to an explicit App/LCS fault.
 - **Presentation failures are mainly degraded-feedback faults.** Not every LCD/LED/sound failure is promoted to global operational failure.
 - **Low-battery sensing is not implemented.** The low-battery LED and indication runtime exist, but no measurement source or product threshold policy drives them.
 - **Keyboard EXTI is configured but normal key acquisition is polling.** Its final wake-only or unused interrupt policy remains open.
