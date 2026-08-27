@@ -353,6 +353,26 @@ static const LCS_Transition_t LCS_Transitions[] =
     },
 
     {
+        .source_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .event           = LCS_EVENT_CRITICAL_FAULT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_UNLOCK,
+        .target_state    = LCS_STATE_FAULT,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REQUEST_CONTROLLED_RESET
+    },
+
+    {
+        .source_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .event           = LCS_EVENT_UNLOCK_REQUEST_FAILED,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_UNLOCK,
+        .target_state    = LCS_STATE_LOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_RETURN_TO_LOCKED
+    },
+
+    {
         .source_state    = LCS_STATE_LOCKED,
         .event           = LCS_EVENT_EXIT_REQUEST,
         .guard           = LCS_GUARD_ALWAYS,

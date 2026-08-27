@@ -154,6 +154,14 @@ typedef enum
     LCS_EVENT_READY_TO_LOCK,                        /*< Door-control conditions are satisfied and the lock mechanism may return to locked.  */
 
     /**
+     * @brief Application action-execution results produced by App Executor and dispatched back to LCS.
+     */
+
+    LCS_EVENT_UNLOCK_REQUEST_FAILED,                /*< Unlock execution failed and the lock state must be reconciled safely.               */
+
+    LCS_EVENT_CRITICAL_FAULT,                       /*< Unrecoverable runtime fault requiring controlled recovery or reset.                 */
+
+    /**
      * @brief Elapsed-interval events dispatched by App Core after Timeout Validation Service evaluation.
      */
     LCS_EVENT_ENTRY_TIMEOUT,                        /*< The bounded credential-entry interval elapsed.                                      */

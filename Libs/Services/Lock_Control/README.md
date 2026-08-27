@@ -404,6 +404,8 @@ its result and is the only integration boundary that calls `LCS_Process()`.
 | `LCS_EVENT_DOOR_POSITION_CONFIRMED` | Door Control Service | The required door-position condition was confirmed and relock timing may begin. |
 | `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` | Door Control Service | The previously confirmed door position is no longer valid for relock completion. |
 | `LCS_EVENT_READY_TO_LOCK` | Door Control Service | Door-control conditions are satisfied and the lock mechanism may return to locked. |
+| `LCS_EVENT_UNLOCK_REQUEST_FAILED` | App Executor | The requested unlock operation failed, but the actuator was recovered to the locked state and LCS must reconcile back to locked operation. |
+| `LCS_EVENT_CRITICAL_FAULT` | App Executor | An unrecoverable runtime failure occurred and the controlled reset path is required. |
 | `LCS_EVENT_ENTRY_TIMEOUT` | Timeout Validation Service | The bounded credential-entry interval elapsed. |
 | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Timeout Validation Service | The bounded delay after door-position confirmation elapsed. |
 | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` | Timeout Validation Service | The bounded access-denied feedback interval elapsed. |
@@ -509,11 +511,14 @@ flowchart TB
     LOCKED -->|T12| ACCESS
 
     ACCESS -->|T13| CONFIRM["DOOR SENSOR<br/>CONFIRMATION"]
+    ACCESS -->|T36| FAULT
+    ACCESS -->|T37| RETURN["LOCKED<br/>return rail"]
+
     CONFIRM -->|T14| READY["READY TO LOCK<br/>wait"]
 
-    READY -->|T15| RETURN["LOCKED<br/>return rail"]
-
+    READY -->|T15| RETURN
     READY -->|T16| ACCESS
+
     LOCKED -->|T17| ACCESS
 
     AUTH -->|T18| DENIED["ACCESS DENIED<br/>FEEDBACK"]
@@ -779,6 +784,8 @@ The current table contains **33 declared transition records**:
 | `T33` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
 | `T34` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
 | `T35` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Always | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
+| `T36` | `ACCESS_UNLOCKED` | `CRITICAL_FAULT` | Always | Unlock | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
+| `T37` | `ACCESS_UNLOCKED` | `UNLOCK_REQUEST_FAILED` | Always | Unlock | `LOCKED` | None | `RETURN_TO_LOCKED` |
 
 `T11` and `T12` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the
 failure counter. `T12` is request-to-exit and preserves that history. `T13` through `T15` form the shared post-unlock relock sequence.
@@ -1374,8 +1381,8 @@ The transition table separates the stable processing mechanism from evolving pro
 
 ### Sparse Linear Representation
 
-Only valid transitions consume storage. The current table has **33 records**, while a dense matrix for **15 runtime states** and
-**22 dispatchable event identifiers** would reserve many unused cells.
+Only valid transitions consume storage. The current table has **37 records**, while a dense matrix for **15 runtime states** and
+**26 dispatchable event identifiers** would reserve many unused cells.
 
 ### Private State Representation
 
@@ -1445,14 +1452,16 @@ The service uses safe default behavior at its input and policy boundaries:
 - Final relock is selected only from `LCS_STATE_READY_TO_LOCK` after `LCS_EVENT_READY_TO_LOCK`.
 - Startup failure enters `FAULT` and requests a controlled reset.
 - Credential-storage failure enters `FAULT` and requests a controlled reset.
+- Unlock execution failure is explicitly reconciled with the LCS state machine.
+- Failure to recover the safe locked state after an unlock-execution failure is promoted to a critical fault and requests a controlled reset.
 
-`LCS_EVENT_INIT_FAIL` and `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE` are the two transitions into `LCS_STATE_FAULT`. Once
-fault is entered, the current table defines no outgoing transition. The application is expected to preserve safe outputs and
-perform the controlled-reset policy requested by `LCS_ACTION_REQUEST_CONTROLLED_RESET`.
+`LCS_EVENT_INIT_FAIL`, `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE`, and `LCS_EVENT_CRITICAL_FAULT` provide explicit fault paths into `LCS_STATE_FAULT` from the states where those failures are currently defined. Once `FAULT` is entered, the current transition table defines no outgoing transition. The application is expected to preserve safe outputs and execute the controlled-reset policy requested by `LCS_ACTION_REQUEST_CONTROLLED_RESET`.
 
-The current implementation does not yet define a global critical runtime-fault event with precedence over all operational states. If that requirement is added, its priority and recovery policy shall be explicitly represented and tested rather than inferred from the existing boot-failure path.
+If execution of an unlock request fails while LCS has already committed to `LCS_STATE_ACCESS_UNLOCKED`, App Executor first attempts to restore the actuator to the safe locked state. Successful recovery produces `LCS_EVENT_UNLOCK_REQUEST_FAILED`, allowing LCS to reconcile its semantic state back to `LCS_STATE_LOCKED`. If that recovery also fails, App Executor produces `LCS_EVENT_CRITICAL_FAULT`, causing LCS to enter `LCS_STATE_FAULT` and request a controlled reset.
 
-Failure to execute a returned action is outside the current LCS contract. A future integration that can detect actuator, display, timer, or service-execution failures should map them to explicit semantic events and transitions, with safe actuator behavior taking precedence over presentation effects.
+`LCS_EVENT_CRITICAL_FAULT` is currently defined for this explicit unlock-recovery failure path; it is not a global fault event with precedence over every operational state.
+
+Failures from other action-execution paths, such as presentation, timer, or component-update operations, are not universally promoted to LCS semantic events. Where such failures become operationally significant, they should be mapped to explicit events and transitions, with safe actuator behavior taking precedence over presentation effects.
 
 ---
 
