@@ -72,6 +72,8 @@ set(LCS_FSM_TEST_SCENARIOS
     registration_confirm_entry_exit_paths
     registration_storage_failure
     invalid_events_preserve_state
+    exit_request_access                  
+    exit_request_preserves_failure_counter
 )
 
 # Register each scenario as an independently selectable CTest test. Labels
