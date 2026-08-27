@@ -74,6 +74,7 @@ set(LCS_FSM_TEST_SCENARIOS
     invalid_events_preserve_state
     exit_request_access                  
     exit_request_preserves_failure_counter
+    relock_not_confirmed_recovery
 )
 
 # Register each scenario as an independently selectable CTest test. Labels

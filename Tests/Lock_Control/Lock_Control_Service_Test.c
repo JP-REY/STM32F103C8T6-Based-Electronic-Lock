@@ -19,8 +19,8 @@
  *          synchronized.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 21, 2026
+ * @version 1.1.0
+ * @date    Aug 27, 2026
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
@@ -283,13 +283,35 @@ static bool LCS_test_reject_one_authentication(LCS_Action_t TimeoutAction)
 }
 
 /**
+ * @brief   Drives unlocked access through door confirmation into the ready-to-lock state.
+ *
+ * @details Reports a confirmed door position and then the bounded confirmation timeout. The resulting action requests one
+ *          synchronous Door Control confirmation before LCS may authorize the final relock transition.
+ *
+ * @return  true  - Door confirmation and timeout selected the expected actions;
+ * @return  false - At least one returned action differed.
+ *
+ * @pre     The FSM shall be in the unlocked-access phase.
+ * @post    The FSM is awaiting either LCS_EVENT_READY_TO_LOCK or LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED.
+ */
+static bool LCS_test_reach_ready_to_lock_from_unlocked_access(void)
+{
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_CONFIRMED,
+                           LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT,
+                           LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION);
+
+    return true;
+}
+
+/**
  * @brief   Completes the common unlocked-access path and restores locked idle.
  *
- * @details Reports door-position confirmation, advances through the bounded confirmation timeout into the ready-to-lock state and
- *          finally reports that relocking may proceed. The helper validates the complete shared post-unlock sequence used by both
- *          authenticated access and request-to-exit flows.
+ * @details Reuses the shared door-confirmation path and reports that the synchronous Door Control confirmation permits relocking.
+ *          The helper validates the successful post-unlock sequence used by both authenticated access and request-to-exit flows.
  *
- * @return  true  - Every action in the shared relock path matched the contract;
+ * @return  true  - Every action in the shared successful relock path matched the contract;
  * @return  false - At least one returned action differed.
  *
  * @pre     The FSM shall be in the unlocked-access phase.
@@ -297,11 +319,7 @@ static bool LCS_test_reject_one_authentication(LCS_Action_t TimeoutAction)
  */
 static bool LCS_test_complete_unlocked_access(void)
 {
-    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_CONFIRMED,
-                           LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION);
-
-    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT,
-                           LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION);
+    LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
 
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_READY_TO_LOCK,
                            LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS);
@@ -803,6 +821,9 @@ static bool LCS_test_invalid_events_preserve_state(void)
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CANDIDATE_READY, 
                            LCS_ACTION_NONE);
 
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
+                           LCS_ACTION_NONE);
+
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_AUTH_SUCCESS, 
                            LCS_ACTION_REQUEST_UNLOCK);
 
@@ -835,6 +856,52 @@ static bool LCS_test_invalid_events_preserve_state(void)
                            LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS);
 
     /* A valid entry request proves that the ready-to-lock transition actually restored locked idle. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
+
+    return true;
+}
+
+/**
+ * @brief   Validates recovery when door position is not confirmed during either relock decision point.
+ *
+ * @details Enters unlocked access through request-to-exit, reaches ready-to-lock and reports that synchronous door confirmation was
+ *          lost. The silent recovery shall return to unlocked access, proven by acceptance of a new door-position confirmation.
+ *          The scenario then authorizes relocking, immediately reports final relock denial from the resulting locked state and proves
+ *          the second silent recovery also returns to unlocked access. A final successful relock restores normal locked idle.
+ *
+ * @return  true  - Both door-position-not-confirmed recovery transitions and the final successful relock matched the contract;
+ * @return  false - At least one returned action or required fixture failed.
+ */
+static bool LCS_test_relock_not_confirmed_recovery(void)
+{
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    /* Request-to-exit provides the shortest authenticated-independent route into unlocked access. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_EXIT_REQUEST_UNLOCK);
+
+    /* Loss of confirmation in READY_TO_LOCK shall silently return to unlocked access. */
+    LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
+                           LCS_ACTION_NONE);
+
+    /* A new door confirmation proves the first silent recovery reached ACCESS_UNLOCKED. */
+    LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
+
+    /* Positive readiness moves LCS to LOCKED before App Executor performs the final physical relock request. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_READY_TO_LOCK,
+                           LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS);
+
+    /* A final relock denial is reported synchronously from LOCKED and shall recover to unlocked access. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
+                           LCS_ACTION_NONE);
+
+    /* Completing the shared relock path proves the second silent recovery also reached ACCESS_UNLOCKED. */
+    LCS_TEST_REQUIRE(LCS_test_complete_unlocked_access());
+
+    /* Normal entry acceptance proves the final successful relock restored locked idle. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
                            LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
 
@@ -922,6 +989,7 @@ static const LCS_TestCase_t LCS_TestCases[] =
     {"registration_confirm_entry_exit_paths",  LCS_test_registration_confirm_entry_exit_paths},
     {"registration_storage_failure",           LCS_test_registration_storage_failure},
     {"invalid_events_preserve_state",          LCS_test_invalid_events_preserve_state},
+    {"relock_not_confirmed_recovery",          LCS_test_relock_not_confirmed_recovery},
     {"exit_request_access",                    LCS_test_exit_request_access},
     {"exit_request_preserves_failure_counter", LCS_test_exit_request_preserves_auth_failure_counter}
 };
