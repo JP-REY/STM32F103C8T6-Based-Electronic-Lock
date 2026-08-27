@@ -88,6 +88,7 @@ void Error_Handler(void);
 #define LOCK_ACTUATOR_GPIO_Port GPIOA
 #define DOOR_SENSOR_Pin GPIO_PIN_11
 #define DOOR_SENSOR_GPIO_Port GPIOA
+#define DOOR_SENSOR_EXTI_IRQn EXTI15_10_IRQn
 #define BUZZER_Pin GPIO_PIN_4
 #define BUZZER_GPIO_Port GPIOB
 #define LCD_BACKLIGHT_Pin GPIO_PIN_6
