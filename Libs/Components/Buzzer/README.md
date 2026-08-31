@@ -401,7 +401,7 @@ void BuzzerExample(void)
      /*
      * PWM instance previously created.
      */
-    PPWM_Create(&PwmHandle, &htim4, PWM_CHANNEL_4);
+    PPWM_Create(&PwmHandle, &htim3, PWM_CHANNEL_1);
 
     if (Buzzer_Init(
             &BuzzerHandle,

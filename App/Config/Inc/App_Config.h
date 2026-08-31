@@ -1,21 +1,27 @@
 /**********************************************************************************************************************************
  * @file    App_Config.h
- * @brief   Product configuration and application-owned runtime-object registry.
+ * @brief   Internal product configuration and runtime-object registry of the App layer.
  *
- * @details Centralizes the board bindings, product policy constants, timeout data model and statically allocated object graph used
- *          by the electronic-lock application. App_Config.c owns the concrete storage; App_Core.c initializes the objects and
- *          coordinates input and timing; App_Executor.c consumes the same registry while executing semantic Lock Control actions;
- *          App_ConfigHalCallbacks.c borrows the exit-button instance only to publish PB10 interrupt activity.
+ * @details Centralizes product-specific hardware bindings, compile-time policy constants, timeout definitions and the application-owned
+ *          runtime-object registry used by the electronic-lock firmware. App_Config.c owns the concrete static storage and immutable
+ *          registry bindings, while App Core initializes and coordinates the referenced Platform descriptors, components and services.
  *
- *          This header is internal to the App layer. It intentionally exposes component, service, Platform and CubeMX types to the
- *          application implementation modules, but none of those dependencies cross the public App_Core.h boundary.
+ *          App Executor borrows the same registry while executing semantic Lock Control actions. App_ConfigHalCallbacks.c uses the
+ *          application-owned Door Sensor and Exit Button instances only to forward their corresponding EXTI notifications from the
+ *          STM32 HAL callback boundary into the component interrupt-handoff paths.
  *
- * @note    App_GetRuntimeInstances() returns borrowed pointers with static storage duration. Callers must never free or replace
- *          the pointed-to objects.
+ *          This header is internal to the App layer. It intentionally exposes the Platform, component, service and CubeMX types required
+ *          by application composition, while preventing those dependencies from crossing the public App_Core.h boundary.
+ *
+ * @note    App_GetRuntimeInstances() returns a borrowed pointer to an immutable registry whose referenced objects have static storage
+ *          duration. Callers shall not free, replace or retain ownership of those objects.
+ *
+ * @note    App Config owns composition data and compile-time policy only. Runtime initialization, event orchestration, product-state
+ *          decisions and semantic-action execution remain owned by App Core, Lock Control and App Executor respectively.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    2026-08-25
+ * @version 1.2.0
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 
 #ifndef APP_CONFIG_H

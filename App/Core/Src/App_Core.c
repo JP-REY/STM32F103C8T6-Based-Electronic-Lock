@@ -2,25 +2,33 @@
  * @file    App_Core.c
  * @brief   Electronic-lock application initialization and event-orchestration core.
  *
- * @details Initializes the electronic-lock object graph supplied by App Config, binds it to CubeMX-generated peripheral resources
- *          and orchestrates keyboard input, application timeouts and bounded Lock Control event/action chains. It also composes the
- *          lock actuator, door sensor and exit button required by the Door Control Service. App Config owns the static
- *          runtime storage, while App Executor owns the concrete side effects selected by the Lock Control state machine.
+ * @details Initializes the electronic-lock object graph supplied by App Config and binds product-owned Platform descriptors,
+ *          components and services to the CubeMX-generated peripheral resources selected by the application composition.
  *
- *          Initialization is fail-fast: each private initializer validates every stage and immediately reports failure to
- *          App_Init(). Stateless services and services that own an internal singleton runtime do not require an additional
- *          application-side handle.
+ *          App Core owns application initialization, Matrix Keyboard acquisition and translation, application-timeout lifecycle,
+ *          periodic service coordination and bounded Lock Control event/action dispatch. It also composes the Lock Actuator,
+ *          Door Sensor and Exit Button paths required by the Door Control Service.
  *
- *          App_ReadInput() acquires and translates physical input, while App_Dispatch() evaluates application-owned timeouts and
- *          advances presentation services. Both paths may synchronously execute semantic Lock Control actions without exposing
- *          concrete hardware dependencies through App_Core.h.
+ *          Initialization is fail-fast: each private initializer validates every required stage and immediately reports failure to
+ *          App_Init(). Stateless services and services that own singleton runtime state do not require an additional application-side
+ *          handle.
  *
- * @note    The timeout runtime and registry pointer in this translation unit have static storage duration. Concrete component and
- *          service instances live in App_Config.c and are borrowed through App_Instance.
+ *          App_ReadInput() acquires and translates Matrix Keyboard input. App_Dispatch() polls application-owned timeouts, advances
+ *          Door Control and presentation services, and maps validated deferred Door Sensor and Exit Button events into semantic Lock
+ *          Control events. Both paths may synchronously execute bounded Lock Control action/event chains through App Executor without
+ *          exposing concrete hardware dependencies through App_Core.h.
+ *
+ *          App Config owns the statically allocated product object graph and runtime buffers. App Core borrows those objects through
+ *          App_Instance, while App Executor owns the concrete side effects selected by the Lock Control state machine.
+ *
+ * @note    The active-timeout runtime and App_Instance registry pointer have static storage duration in this translation unit.
+ *          Concrete Platform, component and service objects remain owned by App_Config.c for the complete firmware lifetime.
+ *
+ * @note    Public application entry points are serialized and require App_Init() to complete successfully before normal runtime use.
  *
  * @author  Joao Pedro Rey
  * @version 1.2.0
- * @date    Aug 25, 2026
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -114,73 +122,73 @@ const App_RuntimeInstances_t* App_Instance = NULL;
 /*---------------------------------------------------------------------------------------------------------------------------------
  Application Dependency Initialization
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Initializes the LCD hardware, adapters, backlight and Display Render Service path. */
+/** @brief Initializes the LCD hardware, adapters, backlight and Display Render Service path.                                     */
 static bool App_InitLcd(void);
 
-/** @brief Initializes the matrix-keyboard GPIO, scan adapter and driver path. */
+/** @brief Initializes the matrix-keyboard GPIO, scan adapter and driver path.                                                    */
 static bool App_InitKeyboard(void);
 
-/** @brief Initializes the PWM, Buzzer Driver and Sound Generator Service path. */
+/** @brief Initializes the PWM, Buzzer Driver and Sound Generator Service path.                                                   */
 static bool App_InitBuzzer(void);
 
-/** @brief Initializes the lock-status LED and its Status Indication Service instance. */
+/** @brief Initializes the lock-status LED and its Status Indication Service instance.                                            */
 static bool App_InitLockStatusIndication(void);
 
-/** @brief Initializes the low-battery LED and its Status Indication Service instance. */
+/** @brief Initializes the low-battery LED and its Status Indication Service instance.                                            */
 static bool App_InitLowBatteryStatusIndication(void);
 
-/** @brief Initializes the lock-actuator Platform descriptor and component instance. */
+/** @brief Initializes the lock-actuator path and establishes the configured safe locked request.                                 */
 static bool App_InitLockActuator(void);
 
-/** @brief Initializes the door-sensor Platform descriptor and component instance. */
+/** @brief Initializes the door-sensor Platform descriptor and component instance.                                                */
 static bool App_InitDoorSensor(void);
 
-/** @brief Initializes the exit-button Platform descriptor and component instance. */
+/** @brief Initializes the exit-button Platform descriptor and component instance.                                                */
 static bool App_InitExitButton(void);
 
-/** @brief Initalizes the door control service by attaching the components context */
+/** @brief Initializes the door control service by attaching the components context                                                */
 static bool App_InitDoorControlService(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Keyboard Acquisition and Translation
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Acquires one non-blocking output from the Matrix Keyboard Driver. */
+/** @brief Acquires one non-blocking output from the Matrix Keyboard Driver.                                                      */
 static MK_OpStatus_t App_ReadKeyboard(MK_Output_t* Output);
 
-/** @brief Translates a physical keyboard output into a semantic Credential Entry Service input. */
+/** @brief Translates a physical keyboard output into a semantic Credential Entry Service input.                                  */
 static CES_Input_t App_TranslateKeyToInputKind(const MK_Output_t* KeyboardOutput);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Credential Entry
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Processes one semantic input through the Credential Entry Service. */
+/** @brief Processes one semantic input through the Credential Entry Service.                                                     */
 static CES_Event_t App_ProcessCredentialInput(const CES_Input_t* Input);
 
-/** @brief Polls the active timeout and returns its semantic LCS event exactly once after expiration. */
+/** @brief Polls the active timeout and returns its semantic LCS event exactly once after expiration.                             */
 static LCS_Event_t App_PollTimeout(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Lock Control Event Orchestration
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Dispatches one LCS event and its bounded synchronous action/event follow-up chain. */
+/** @brief Dispatches one LCS event and its bounded synchronous action/event follow-up chain.                                     */
 static void App_DispatchLcsEvent(LCS_Event_t Event);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Input and Credential Event Handling
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Applies wake-key, registration-command and CES-routing policy to one keyboard event. */
+/** @brief Applies wake-key, registration-command and CES-routing policy to one keyboard event.                                   */
 static void App_HandleKeyboardEvent(const MK_Output_t* Event);
 
-/** @brief Maps a CES outcome into presentation, timeout management or a semantic LCS event. */
+/** @brief Maps a CES outcome into presentation, timeout management or a semantic LCS event.                                      */
 static void App_HandleCredentialEvent(CES_Event_t Event);
 
-/** @brief Safely abandons an untrustworthy keyboard-input sequence and requests error feedback. */
+/** @brief Safely abandons an untrustworthy keyboard-input sequence and requests error feedback.                                  */
 static void App_HandleInputFault(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
  Periodic Service Coordination
  ---------------------------------------------------------------------------------------------------------------------------------*/
-/** @brief Polls application timing and advances display, indication and sound services once. */
+/** @brief Polls application timing and advances display, indication and sound services once.                                     */
 static void App_UpdateServices(void);
 
 /**********************************************************************************************************************************
@@ -480,17 +488,17 @@ static bool App_InitLowBatteryStatusIndication(void)
 }
 
 /**
- * @brief   Initializes the lock-actuator Platform descriptor and driver instance.
+ * @brief   Initializes the lock-actuator Platform descriptor, driver and safe startup command.
  *
- * @details Binds the application-owned GPIO descriptor to PB8 and injects it into the Lock Actuator Driver with an active-low locked
- *          command. CubeMX-generated GPIO initialization has already driven the output LOW, which is the product's current safe
- *          locked request. Driver initialization deliberately does not change the output level.
+ * @details Binds the application-owned GPIO descriptor to the CubeMX-configured PA8 lock-actuator output and injects it into the
+ *          Lock Actuator Driver with the configured active-low locked command. After driver initialization, the application explicitly
+ *          requests the locked state so the application-level startup contract does not rely only on the CubeMX initial GPIO level.
  *
- * @note    App Executor continues to command the shared GPIO descriptor directly. Runtime command ownership will move to the planned
- *          Door Control Service without changing this composition step.
+ * @note    Runtime actuator operations are coordinated through the Door Control Service after App_InitDoorControlService() attaches
+ *          the Lock Actuator, Door Sensor and Exit Button components.
  *
- * @return  true  - When both the GPIO descriptor and Lock Actuator Driver initialize successfully.
- * @return  false - When either initialization step fails.
+ * @return  true  - When the GPIO descriptor and Lock Actuator initialize successfully and the explicit locked request is accepted.
+ * @return  false - When any required initialization or initial lock operation fails.
  */
 static bool App_InitLockActuator(void)
 {
@@ -854,17 +862,16 @@ static LCS_Event_t App_PollTimeout(void)
 /**
  * @brief   Serially dispatches one event and every bounded synchronous follow-up through Lock Control.
  *
- * @details Calls LCS_Process(), executes its returned action, and repeats while authentication, registration validation, storage or
- *          fail-safe execution produces a synchronous follow-up event. A small fixed bound prevents an accidental action cycle
- *          from monopolizing the caller. The current overflow fallback cancels timing, ends CES, stops sound and disables the LCD
- *          backlight.
+ * @details Calls LCS_Process(), executes the returned semantic action and continues with any immediate follow-up event produced by
+ *          synchronous action execution. APP_MAX_LCS_DISPATCH_DEPTH bounds the chain so an accidental action/event cycle cannot
+ *          monopolize the cooperative execution context.
+ *
+ *          If a valid follow-up remains after the configured bound, execution is treated as an abnormal application condition and
+ *          converges on the common controlled-reset cleanup path owned by App Executor.
  *
  * @param   Event - First semantic event to dispatch; sentinels and out-of-range values are ignored.
  *
- * @note    All event processing and synchronous follow-up actions complete in the serialized context that initiated dispatch,
- *          whether App_ReadInput() or App_Dispatch().
- * @warning Direct actuator-safe and controlled-reset calls are currently disabled in the overflow fallback. Until this path is
- *          consolidated with App Executor's controlled-reset cleanup, it does not provide the complete fail-safe behavior.
+ * @note    Processing is iterative rather than recursive and completes in the serialized context that initiated the dispatch.
  */
 static void App_DispatchLcsEvent(LCS_Event_t Event)
 {
@@ -1023,11 +1030,13 @@ static void App_HandleKeyboardEvent(const MK_Output_t* Event)
 }
 
 /**
- * @brief   Advances timeout, display, LED and sound state during one application-dispatch cycle.
+ * @brief   Advances periodic application services and deferred physical-input processing once.
  *
- * @details Polls the single application-owned timeout first and serially dispatches any elapsed event. It then advances every
- *          non-blocking presentation service. UI update failures remain observable through their return values during future fault
- *          integration but do not bypass the independent lock-actuator safe path.
+ * @details Polls the active application timeout and dispatches an elapsed semantic event when required. It then updates Door Control,
+ *          display rendering, both status-indication instances and Sound Generator. Finally, validated Exit Button and Door Sensor
+ *          events published by DCS are translated into their corresponding semantic LCS events.
+ *
+ * @note    Exit-button release and Door Sensor idle transitions currently have no asynchronous App-to-LCS mapping.
  */
 static void App_UpdateServices(void)
 {
@@ -1059,17 +1068,20 @@ static void App_UpdateServices(void)
 }
 
 /**
- * @brief   Abandons an untrustworthy credential-input sequence safely.
+ * @brief   Reports an untrustworthy keyboard-input sequence and requests error feedback.
  *
- * @details Dispatches credential cancellation so an active session is erased and returned to locked state. It then requests error
- *          feedback. If the FSM is in another state, the cancellation event is harmlessly ignored and its active timeout remains
- *          authoritative.
+ * @details Dispatches LCS_EVENT_CREDENTIAL_CANCELLED so Lock Control applies the cancellation policy associated with the current
+ *          product state. Normal credential-entry cancellation may terminate the session and return to locked operation, while
+ *          mandatory first-boot enrollment may refresh and preserve the registration flow.
+ *
+ *          Error presentation is then requested independently from the state-specific LCS decision.
  */
 static void App_HandleInputFault(void)
 {
     uint32_t current_time_ms = Platform_GetMillis();
 
     App_DispatchLcsEvent(LCS_EVENT_CREDENTIAL_CANCELLED);
+
     (void)LCD_BacklightOn(App_Instance->Lcd);
     (void)DRS_SetScreen(DRS_SCREEN_ACCESS_DENIED);
     (void)DRS_Update();
@@ -1089,10 +1101,12 @@ static void App_HandleInputFault(void)
  *
  * @note    CSS_HasCredential() provides only availability. The installed credential is copied into the configured runtime buffer lazily
  *          when the first authentication action executes.
+ * 
  * @note    This operation shall run after CubeMX peripheral initialization and before the first App_ReadInput() or App_Dispatch().
- * @note    A failure forces the actuator low when possible and reports LCS_EVENT_INIT_FAIL while the FSM remains in boot. The
- *          resulting controlled-reset action does not return on the STM32 target; APP_INIT_FAILED is retained as a defensive
- *          fallback contract. Already initialized static objects are not deinitialized before the reset request.
+ * 
+ * @note    Initialization failure is reported through LCS_EVENT_INIT_FAIL. Lock Control transitions from BOOT to FAULT and selects
+ *          LCS_ACTION_REQUEST_CONTROLLED_RESET, causing App Executor to run the common fail-safe cleanup before requesting system reset.
+ *          APP_INIT_FAILED remains a defensive fallback contract for environments where the reset request returns unexpectedly.
  *
  * @return  APP_INIT_SUCCESSFULLY - When every required application dependency is initialized.
  * @return  APP_INIT_FAILED       - When any Platform, adapter, component or service initialization fails.
@@ -1175,24 +1189,26 @@ void App_ReadInput(void)
 }
 
 /**
- * @brief   Executes one synchronous and non-blocking service-dispatch cycle.
+ * @brief   Executes one cooperative application-service dispatch cycle.
  *
- * @details Polls the active application-owned timeout and dispatches its
- *          semantic event to the Lock Control Service when the interval has
- *          elapsed. It then advances the display, status-indication and sound
- *          services exactly once.
+ * @details Polls the active application-owned timeout and dispatches its semantic event to the Lock Control Service when the interval
+ *          has elapsed. It then advances the Door Control Service, Display Render Service, both Status Indication Service instances
+ *          and the Sound Generator Service exactly once.
  *
- *          The function performs no deliberate delay and never waits for a
- *          timeout or presentation phase to complete.
+ *          Validated Exit Button and Door Sensor events published during Door Control processing are translated into their corresponding
+ *          semantic Lock Control events and synchronously dispatched through the bounded LCS action/event chain.
+ *
+ *          The function performs no application-level wait for timeout expiration, input stabilization or presentation-phase completion.
+ *          Lower-level services or components may still execute bounded synchronous peripheral operations according to their own
+ *          contracts.
  *
  * @note    App_Init() shall complete successfully before the first call.
- * 
- * @note    This function does not acquire or process keyboard input; input
- *          acquisition is performed separately by App_ReadInput().
- * 
- * @note    The execution owner shall call this function periodically with a
- *          cadence compatible with timeout-response and non-blocking
- *          presentation-progression requirements.
+ *
+ * @note    This function does not acquire or process Matrix Keyboard input; keyboard acquisition is performed separately by
+ *          App_ReadInput().
+ *
+ * @note    The execution owner shall call this function periodically with a cadence compatible with application timeout response,
+ *          Door Sensor and Exit Button debounce processing, and presentation-service progression requirements.
  */
 void App_Dispatch(void)
 {

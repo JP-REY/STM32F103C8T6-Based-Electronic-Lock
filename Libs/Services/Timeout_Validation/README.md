@@ -8,7 +8,7 @@
 </p>
 
 > [!IMPORTANT]
-> The Timeout Validation Service performs only elapsed and remaining-time calculations from explicit timestamps and durations. It does not read a time source, own timeout state, start or cancel timers, create RTOS objects, produce application events, or perform Lock Controller state transitions.
+> The Timeout Validation Service performs only elapsed and remaining-time calculations from explicit timestamps and durations. It does not read a time source, own timeout state, start or cancel timers, create RTOS objects, produce application events, or perform application state-machine transitions.
 
 ---
 
@@ -49,7 +49,7 @@
 * [11. Operation Flow](#11-operation-flow)
 
   * [11.1 Generic Timeout Evaluation](#111-generic-timeout-evaluation)
-  * [11.2 Lock Controller Integration](#112-lock-controller-integration)
+  * [11.2 App Core Integration](#112-app-core-integration)
   * [11.3 Credential-Entry Integration](#113-credential-entry-integration)
 * [12. Usage Example](#12-usage-example)
 * [13. Design Decisions](#13-design-decisions)
@@ -120,28 +120,28 @@ flowchart LR
     end
 
     subgraph APP["Application Layer"]
-        CTRL["Lock Controller<br/>timeout ownership<br/> and FSM policy"]
+        CORE["App Core<br/>single timeout runtime<br/> and event mapping"]
     end
 
     subgraph SERVICES["Domain Services"]
         TVS["Timeout Validation Service<br/>elapsed and remaining<br/> calculations"]
         CES["Credential Entry Service<br/>candidate session"]
-        LCS["Lock Control Service<br/>bounded actuator command"]
+        LCS["Lock Control Service<br/>semantic timeout policy"]
     end
 
-    TIME -->|"CurrentTimestampMs"| CTRL
-    CTRL -->|"Start, current and duration"| TVS
-    TVS -->|"Elapsed or remaining result"| CTRL
-    CTRL -->|"Session operation"| CES
-    CTRL -->|"Bounded lock command"| LCS
+    TIME -->|"CurrentTimestampMs"| CORE
+    CORE -->|"Start, current and duration"| TVS
+    TVS -->|"Elapsed or remaining result"| CORE
+    CORE -->|"Session operation"| CES
+    CORE -->|"Elapsed semantic event"| LCS
 ```
 
 The dependency direction preserves the following boundaries:
 
 - The Time Platform Interface provides a timestamp without knowing product policy.
-- The Lock Controller or another domain owner stores the start timestamp and configured duration.
+- App Core stores the active start timestamp and selects its configured duration.
 - TVS evaluates the supplied interval without storing it.
-- The owning module interprets the result and performs any required state transition.
+- App Core converts expiration into the semantic event associated with the active timeout; LCS decides the state transition.
 - Other services are not modified directly by TVS.
 
 ### 3.2 Application Integration
@@ -156,7 +156,7 @@ The application is responsible for orchestrating timeout behavior in the followi
 6. Perform any event production, cleanup or state transition outside TVS.
 7. Call `TVS_GetRemainingMs()` only when the remaining value is needed for feedback or diagnostics.
 
-The Timeout Validation Service never calls the Time Platform Interface, Lock Controller, Credential Entry Service, Lock Control Service, display, status-indication, or sound services directly.
+The Timeout Validation Service never calls the Time Platform Interface, App Core, Credential Entry Service, Lock Control Service, display, status-indication, or sound services directly.
 
 ---
 
@@ -212,10 +212,10 @@ The Timeout Validation Service is **not responsible** for:
 - Storing start timestamps, current timestamps, durations or deadlines.
 - Maintaining active or inactive timeout state.
 - Owning a singleton instance or public handle.
-- Defining credential-entry, denial, unlock or lockout durations.
+- Defining credential-entry, door-confirmation, denial, lockout or registration-feedback durations.
 - Deciding whether a domain permits a duration of `0U`.
-- Producing `EV_ENTRY_TIMEOUT`, `EV_UNLOCK_TIMEOUT` or any other application event.
-- Performing Lock Controller state transitions.
+- Producing `LCS_EVENT_ENTRY_TIMEOUT`, `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` or any other application event.
+- Performing App Core event dispatch or Lock Control state transitions.
 - Ending a Credential Entry Service session.
 - Erasing candidate credentials.
 - Counting failed authentication attempts.
@@ -246,7 +246,7 @@ The service has no dependency on:
 - FreeRTOS.
 - Platform GPIO, I2C, PWM, or time interfaces.
 - Application configuration values.
-- Lock Controller types or events.
+- App Core or Lock Control types and events.
 - Credential Entry, Authentication, Display Render, Status Indication, Sound Generator, or Lock Control services.
 - Any component driver or hardware adapter.
 
@@ -286,7 +286,7 @@ The type is used for:
 - Privately calculated elapsed durations.
 - Public remaining-duration results.
 
-Duration values are supplied by callers or application configuration. TVS does not define product values such as 15 seconds for credential entry, 3 seconds for unlock, or 30 seconds for lockout.
+Duration values are supplied by callers or application configuration. TVS does not define the current product values of 5 seconds for credential entry, 800 milliseconds for door confirmation, 1.5 seconds for access-denied feedback, 10 seconds for lockout, or 1.5 seconds for registration-success feedback.
 
 ---
 
@@ -304,19 +304,20 @@ One logical timeout interval consists of three values:
 
 TVS owns none of these values after a function returns.
 
-Several independent intervals can coexist because each owner stores its own values:
+Several independent intervals can be evaluated through TVS because each caller supplies its own values. The current application deliberately owns only one active runtime because its timed LCS states are mutually exclusive:
 
 ```text
-Lock Controller
-├── Credential-entry start timestamp
-├── Denial-feedback start timestamp
-└── Lockout start timestamp
+App_ActiveTimeout
+├── Id
+├── StartedAtMs
+└── Active
 
-Lock Control Service
-└── Unlock start timestamp
+App_TimeoutDefinitions[Id]
+├── DurationMs
+└── ElapsedEvent
 ```
 
-Every interval uses the same TVS functions without creating multiple service instances.
+Starting another timed phase replaces that runtime with a new identifier and start timestamp. Every definition uses the same TVS functions without creating a service instance.
 
 ### 8.2 Elapsed-Time Calculation
 
@@ -397,7 +398,7 @@ TVS_GetRemainingMs(StartTimestampMs, CurrentTimestampMs, 0U) == 0U
 
 TVS does not reject zero because zero is mathematically well-defined and may be useful to represent an immediately elapsed interval.
 
-A consuming domain remains responsible for rejecting zero when required. For example, the Lock Control Service shall reject an unlock request without a finite nonzero duration rather than changing TVS semantics.
+A consuming domain remains responsible for rejecting zero when required. In the current application, `App_StartTimeout()` rejects a timeout definition whose configured duration is `0U` rather than changing TVS semantics.
 
 ---
 
@@ -438,12 +439,13 @@ The caller shall therefore evaluate and act on an interval before one complete t
 
 All current V1 product durations are far below this limit:
 
-| Product Interval | Initial Duration |
+| Product Interval | Current Duration |
 |---|---:|
-| Credential-entry inactivity | 15 seconds |
-| Actuator unlock | 3 seconds |
-| Lockout | 30 seconds |
-| Application heartbeat | 10 milliseconds maximum |
+| Credential-entry inactivity | 5 seconds |
+| Door-position confirmation | 800 milliseconds |
+| Access-denied feedback | 1.5 seconds |
+| Lockout | 10 seconds |
+| Credential-register success feedback | 1.5 seconds |
 
 ### 9.3 Invalid Temporal Assumptions
 
@@ -555,41 +557,42 @@ flowchart TD
 
 TVS participates only in the calculation represented by `TVS_HasElapsed()`. Every other step belongs to the calling module or application execution boundary.
 
-### 11.2 Lock Controller Integration
+### 11.2 App Core Integration
 
-The Lock Controller can own independent timestamps for credential entry, denial feedback and lockout:
+App Core owns one active timeout runtime and an immutable definition table that maps each timed LCS phase to a duration and elapsed event:
 
 ```mermaid
 sequenceDiagram
-    participant APP as Application Task
-    participant CTRL as Lock Controller
+    participant EXEC as App Executor
+    participant CORE as App Core
     participant TVS as Timeout Validation Service
+    participant LCS as Lock Control Service
 
-    APP->>CTRL: CurrentTimestampMs
-    CTRL->>TVS: HasElapsed(Start, Current, Duration)
-    TVS-->>CTRL: false
-    CTRL-->>APP: Keep current state
+    EXEC->>CORE: App_StartTimeout(TimeoutId)
+    CORE->>CORE: Store Id, start timestamp and Active
+    CORE->>TVS: HasElapsed(Start, Current, Duration)
+    TVS-->>CORE: false
+    CORE->>CORE: Keep timeout active
 
-    APP->>CTRL: Later CurrentTimestampMs
-    CTRL->>TVS: HasElapsed(Start, Current, Duration)
-    TVS-->>CTRL: true
-    CTRL->>CTRL: Produce semantic timeout outcome
-    CTRL->>CTRL: Perform state transition and cleanup
+    CORE->>TVS: HasElapsed(Start, later Current, Duration)
+    TVS-->>CORE: true
+    CORE->>CORE: Cancel runtime before publication
+    CORE->>LCS: Dispatch definition ElapsedEvent
 ```
 
-TVS does not know which Lock Controller state is active and cannot determine which transition should follow expiration.
+TVS does not know which timeout identifier or LCS state is active and cannot determine which semantic event or transition should follow expiration.
 
 ### 11.3 Credential-Entry Integration
 
 For credential-entry inactivity:
 
-1. The Lock Controller captures a start timestamp when credential entry begins.
-2. A meaningful accepted input may replace that timestamp according to application policy.
-3. The Application Task supplies the current timestamp during its bounded heartbeat.
-4. The Lock Controller calls `TVS_HasElapsed()` with the credential-entry duration.
-5. When expiration is reported, the Lock Controller leaves credential entry.
-6. The Lock Controller calls `CES_EndSession()` to erase the candidate.
-7. The product returns to the appropriate locked state.
+1. App Executor calls `App_StartTimeout(APP_TIMEOUT_CREDENTIAL_ENTRY)` when an LCS action begins or refreshes entry.
+2. App Core restarts that same application-owned timeout after each accepted digit.
+3. `App_Dispatch()` calls `App_PollTimeout()` once per main-loop execution cycle.
+4. App Core supplies the stored start timestamp, current Platform timestamp and configured 5-second duration to `TVS_HasElapsed()`.
+5. When expiration is reported, App Core cancels the runtime and dispatches `LCS_EVENT_ENTRY_TIMEOUT` exactly once.
+6. LCS returns the state-specific cleanup action.
+7. App Executor calls `CES_EndSession()` and restores the appropriate locked or registration flow.
 
 TVS never calls `CES_EndSession()` and never erases credential data itself.
 
@@ -600,29 +603,22 @@ TVS never calls `CES_EndSession()` and never erases credential data itself.
 The following example illustrates a caller-owned credential-entry timeout:
 
 ```c
-typedef struct
+static TVS_TimestampMs_t App_EntryStartedAtMs;
+static const TVS_DurationMs_t APP_ENTRY_TIMEOUT_MS = 5000U;
+
+void App_StartCredentialEntryTimeout(void)
 {
-    TVS_TimestampMs_t entry_start_timestamp_ms;
-
-}LockController_Handle_t;
-
-static const TVS_DurationMs_t CREDENTIAL_ENTRY_TIMEOUT_MS = 15000U;
-
-void LockController_StartCredentialEntry(
-    LockController_Handle_t* Controller,
-    TVS_TimestampMs_t        CurrentTimestampMs)
-{
-    Controller->entry_start_timestamp_ms = CurrentTimestampMs;
+    App_EntryStartedAtMs = Platform_GetMillis();
 }
 
-bool LockController_EntryHasExpired(
-    const LockController_Handle_t* Controller,
-    TVS_TimestampMs_t              CurrentTimestampMs)
+bool App_EntryHasExpired(void)
 {
+    TVS_TimestampMs_t current_time_ms = Platform_GetMillis();
+
     return TVS_HasElapsed(
-        Controller->entry_start_timestamp_ms,
-        CurrentTimestampMs,
-        CREDENTIAL_ENTRY_TIMEOUT_MS
+        App_EntryStartedAtMs,
+        current_time_ms,
+        APP_ENTRY_TIMEOUT_MS
     );
 }
 ```
@@ -630,7 +626,7 @@ bool LockController_EntryHasExpired(
 Restarting the inactivity interval after meaningful activity requires only a caller-owned timestamp update:
 
 ```c
-Controller->entry_start_timestamp_ms = CurrentTimestampMs;
+App_EntryStartedAtMs = Platform_GetMillis();
 ```
 
 No TVS start or restart operation is required.
@@ -639,9 +635,9 @@ The remaining time may be requested independently:
 
 ```c
 TVS_DurationMs_t remaining_ms = TVS_GetRemainingMs(
-    Controller->entry_start_timestamp_ms,
-    CurrentTimestampMs,
-    CREDENTIAL_ENTRY_TIMEOUT_MS
+    App_EntryStartedAtMs,
+    Platform_GetMillis(),
+    APP_ENTRY_TIMEOUT_MS
 );
 ```
 
@@ -677,7 +673,7 @@ A handle would be justified only if TVS owned concepts such as:
 - Pause and resume state.
 - A callback or event destination.
 
-Those concepts belong to domain owners in the V1 architecture. Introducing them into TVS would turn a temporal calculation utility into a timer manager and would duplicate state already required by the Lock Controller or other services.
+Those concepts belong to domain owners in the current architecture. Introducing them into TVS would turn a temporal calculation utility into a timer manager and would duplicate state already owned by App Core or another caller.
 
 ### 13.3 Explicit Time Inputs
 
@@ -707,7 +703,7 @@ This prevents consumers from relying on a naïve absolute comparison that fails 
 
 All public TVS values use milliseconds and include `Ms` in their type and parameter names.
 
-The V1 product timeouts are human-scale intervals updated by an Application Task heartbeat measured in milliseconds. Adding generic units or microsecond variants would increase API ambiguity without serving a current requirement.
+The product timeouts are human-scale intervals polled by `App_Dispatch()` in the serialized main loop. Adding generic units or microsecond variants would increase API ambiguity without serving a current requirement.
 
 ### 13.6 Private Elapsed-Time Helper
 
@@ -737,7 +733,7 @@ The service handles temporal boundary conditions through defined return semantic
 
 TVS cannot report invalid caller assumptions such as mixed time sources, mixed units, a reset timebase, an unrelated start timestamp, or observation after a complete counter period. These are usage-contract violations rather than runtime service errors.
 
-The Lock Controller or consuming service remains responsible for classifying a missing or unreliable time source as a product fault when required by application safety policy.
+App Core or another consuming module remains responsible for classifying a missing or unreliable time source as a product fault when required by application safety policy.
 
 ---
 
@@ -757,9 +753,9 @@ The service does not:
 
 Because the implementation is stateless and uses only automatic local values, its calculations are reentrant and may be evaluated for independent intervals without internal serialization.
 
-The V1 application architecture nevertheless assigns product timeout ownership to the Application Task and the relevant domain owner. Reentrancy does not authorize an ISR or another task to perform Lock Controller transitions or access caller-owned timeout state concurrently.
+The current application architecture nevertheless assigns product-timeout ownership to serialized App Core and App Executor paths. Reentrancy does not authorize an ISR or another execution context to modify `App_ActiveTimeout` or dispatch Lock Control transitions concurrently.
 
-The Application Task shall evaluate product deadlines at least once every 10 milliseconds under nominal operation, as defined by the root architecture.
+`App_Dispatch()` shall run continuously at a cadence compatible with timeout-response and presentation-progression requirements. The current firmware defines no separate 10-millisecond application heartbeat.
 
 ---
 
@@ -814,12 +810,12 @@ The minimum host-side validation for the service includes:
 
 Target and integration acceptance additionally require:
 
-- The Application Task evaluates deadlines within its 10-millisecond heartbeat contract.
-- Credential-entry timeout causes candidate erasure through the Lock Controller.
-- Unlock expiration is not delayed by display, LED or buzzer behavior.
+- `App_Dispatch()` polls the active deadline continuously from the serialized main loop.
+- Credential-entry timeout dispatches `LCS_EVENT_ENTRY_TIMEOUT` and causes candidate erasure through the LCS-selected App Executor action.
+- Door-confirmation, denial, lockout and registration-feedback expirations are not delayed by display, LED or buzzer behavior.
 - Lockout expiration occurs at the configured interval.
 - Reset and low-power transitions preserve or explicitly invalidate caller-owned timing state according to product policy.
-- Time-source rollover tests cover entry, unlock, lockout and feedback intervals.
+- Time-source rollover tests cover entry, door confirmation, lockout and feedback intervals.
 
 ---
 
@@ -829,7 +825,7 @@ The current V1 architecture may use TVS for:
 
 - Credential-entry inactivity expiration.
 - Access-denied feedback duration.
-- Authorized unlock duration evaluation.
+- Door-position confirmation delay.
 - Lockout expiration.
 - Display message lifetime.
 - Status-indication pattern phases.

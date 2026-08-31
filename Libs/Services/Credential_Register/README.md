@@ -189,7 +189,7 @@ The registration path may temporarily contain several independent six-byte copie
 | App temporary candidate | App Core | One synchronous staging, comparison or persistence operation | Explicit application zeroization after final consumer |
 | First-entry staging | Credential Register Service | From successful staging until terminal `CRS_ClearStaging()` | `CRS_ClearStaging()` on every terminal path |
 | Persistent credential record | Credential Storage Service | Across resets until replacement | CSS persistent policy |
-| Installed runtime credential | App Core or future runtime owner | Active powered runtime | Replace only after CSS success; erase on reset/fault policy |
+| Installed runtime credential | App Config storage managed by App Executor | Active powered runtime | Replace only after CSS success; erase on reset/fault policy |
 
 CRS copies data; it never transfers ownership. Clearing CRS staging does not clear CES storage, App Core buffers, persistent Flash or the installed runtime credential.
 
@@ -308,7 +308,7 @@ invalid: {1U, 2U, 3U, 4U, 5U, 10U}
 
 ASCII character codes are not accepted as normalized digits. For example, ASCII `'1'` has value 49 and therefore falls outside the valid range.
 
-CES, AS, CRS and CSS currently declare their own fixed-length constants. App Core shall ensure their V1 credential-length contracts remain equal when transferring a buffer between service boundaries.
+CES, AS, CRS and CSS currently declare their own fixed-length constants. App Config uses `_Static_assert` declarations to keep their V1 credential-length contracts equal before transferring a buffer between service boundaries.
 
 ### 7.2 Operation Status
 
@@ -1045,7 +1045,7 @@ Current limitations include:
 * Separate length macros exist in CES, AS, CRS and CSS instead of one shared credential-domain type.
 * No public lifecycle query or diagnostic snapshot.
 * No dedicated host test target currently exists for CRS.
-* App Core CRS result/action integration remains to be completed.
+* App Executor contains the current CRS action/result integration, but no dedicated App-level integration test target covers that orchestration yet.
 * Ordinary zero writes are not a formally guaranteed secure-zeroization primitive.
 * Confirmation comparison is not constant time.
 * No cryptographic transformation or in-RAM confidentiality protection.
@@ -1059,7 +1059,7 @@ Potential future improvements:
 * Add a project-owned non-elidable secure-clear primitive.
 * Use full-length accumulated comparison if the threat model requires constant-time equality.
 * Add App Core integration tests for action/result mapping and sensitive-buffer cleanup.
-* Add compile-time assertions for credential-length compatibility until a shared type exists.
+* Replace the current App Config credential-length `_Static_assert` declarations with a shared credential-domain type if one is introduced.
 
 Future changes shall preserve the central boundary: CRS may evolve its transient representation, but it shall not absorb LCS product policy or CSS persistent-storage responsibility.
 

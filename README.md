@@ -1,6 +1,6 @@
 # STM32F103C8T6 Electronic Lock
 
-Layered embedded firmware for an STM32F103C8T6 electronic access-control prototype with a 4x4 matrix keyboard, 16x2 LCD, status LEDs, passive buzzer, door sensor, request-to-exit button and GPIO-controlled lock actuator.
+Layered embedded firmware for an STM32F103C8T6 electronic access-control prototype with a 4x4 matrix keyboard, 16x2 character LCD, status LEDs, passive buzzer, door sensor, request-to-exit button and GPIO-controlled lock actuator.
 
 **Target:** STM32F103C8T6 / Arm Cortex-M3  
 **Language:** C11  
@@ -9,19 +9,19 @@ Layered embedded firmware for an STM32F103C8T6 electronic access-control prototy
 **Architecture:** Application / Services / Components / Platform / STM32 HAL
 
 > [!NOTE]
-> This repository is an **engineering prototype**. Its goal is not only to operate an electronic lock, but to exercise production-oriented embedded-software practices such as explicit architectural boundaries, event-driven state machines, non-blocking runtime behavior, persistent-data integrity checks, fail-safe actuator policy and native-host verification.
+> This repository is an **engineering prototype**. Its purpose is not only to operate an electronic lock, but to exercise production-oriented embedded-software practices such as explicit dependency boundaries, event-driven state machines, fail-safe actuator policy, persistent-data integrity, hardware abstraction and native-host verification.
 
 ## Contents
 
 1. [Project Overview](#project-overview)
-2. [Product Contract](#product-contract)
-3. [Hardware Baseline](#hardware-baseline)
-4. [Architecture and Documentation](#architecture-and-documentation)
-6. [Safety and Security](#safety-and-security)
-7. [Build and Integration](#build-and-integration)
-8. [Verification](#verification)
-9. [Known Constraints](#known-constraints)
-10. [Documentation Authority](#documentation-authority)
+2. [Architecture](#architecture)
+3. [Product Behavior](#product-behavior)
+4. [Hardware Baseline](#hardware-baseline)
+5. [Safety and Security](#safety-and-security)
+6. [Build](#build)
+7. [Verification](#verification)
+8. [Known Constraints](#known-constraints)
+9. [Documentation Map and Authority](#documentation-map-and-authority)
 
 ---
 
@@ -39,201 +39,75 @@ The current firmware supports:
 - temporary lockout after repeated authentication failures;
 - authenticated entry and request-to-exit unlock paths;
 - door-position-aware relock through the Door Control Service;
-- interrupt handoff plus deferred debounce for the door sensor and exit button;
-- non-blocking LCD, LED and sound feedback;
-- persistent credential integrity checking with marker, CRC and post-write verification;
-- controlled-reset cleanup for critical application faults;
-- native-host behavioral verification of the Lock Control Service FSM.
+- interrupt handoff with deferred debounce for the door sensor and exit button;
+- semantic LCD, LED and buzzer presentation services;
+- persistent credential validation through marker, CRC and post-write verification;
+- fail-safe actuator recovery and controlled reset for critical application faults;
+- native-host behavioral verification of the Lock Control FSM.
 
 ### Engineering highlights
 
-The firmware intentionally emphasizes architectural and verification concerns that are commonly relevant in larger embedded systems:
+The firmware is intentionally structured to expose engineering decisions that remain relevant beyond the electronic-lock use case:
 
-- **Table-driven product FSM** — Lock Control owns product state, guards, counters, pending intent and semantic action selection without depending on peripherals or STM32 HAL.
-- **Explicit dependency direction** — reusable modules do not include the application layer and hardware-dependent STM32 types are kept behind application/configuration and Platform boundaries.
-- **Static composition** — runtime objects have static storage duration; the application uses no dynamic allocation.
-- **Semantic action boundary** — Lock Control returns actions instead of directly performing hardware or UI side effects.
-- **Mandatory enrollment policy** — Lock Control distinguishes first-boot provisioning from authenticated runtime replacement without duplicating the registration state topology; cancellation cannot escape initial enrollment and successful provisioning completes through a controlled reset.
-- **Door-mechanism service boundary** — lock actuator, door sensor and exit button are coordinated through Door Control rather than being independently manipulated by product logic.
-- **Deferred interrupt processing** — GPIO EXTI callbacks publish timestamps only; debounce, event interpretation and state-machine dispatch occur later in serialized application context.
-- **Non-blocking runtime policy** — product timing is timestamp-based; human-scale delays are not used to implement application timeouts.
-- **Persistent-memory ownership** — a complete STM32F103 Flash page is reserved by the linker for the credential record so executable code cannot silently overlap the erase unit.
-- **Native production-code testing** — host tests compile the real Lock Control implementation and execute each scenario in a fresh process, preserving the production singleton boundary.
+- **Table-driven product FSM** — Lock Control owns product states, events, guards, counters, pending intent, internal effects and semantic action selection without directly accessing peripherals.
+- **Decision/execution separation** — Lock Control returns semantic actions; App Executor performs the corresponding service, actuator and presentation operations.
+- **Explicit dependency direction** — reusable services and components do not depend on the application layer, and STM32-specific access is isolated behind application configuration and Platform boundaries.
+- **Static composition** — application runtime objects have static storage duration and the product uses no dynamic allocation.
+- **Door-mechanism service boundary** — the lock actuator, door sensor and exit button are coordinated through Door Control rather than manipulated independently by product policy.
+- **Deferred interrupt processing** — EXTI callbacks only hand off edge timestamps; debounce and semantic event dispatch run later in serialized application context.
+- **Cooperative timing model** — product-level timeouts and presentation patterns are timestamp-driven rather than implemented with human-scale blocking delays.
+- **Persistent-memory ownership** — the linker reserves a complete STM32F103 Flash page for the credential record so executable sections cannot silently overlap its erase unit.
+- **Fail-safe recovery paths** — normal relock remains door-interlocked, while explicit fault recovery can request a forced safe lock before controlled reset.
+- **Native production-code testing** — host tests compile the real Lock Control implementation and verify its public event/action behavior in isolated processes.
 - **Reproducible cross-build** — Debug and Release firmware configurations are described by CMake presets and an `arm-none-eabi` toolchain file.
 
 > [!IMPORTANT]
-> The current execution model is synchronous and cooperative. App Core creates no FreeRTOS tasks, queues, mutexes or software timers.
+> The current runtime is synchronous and cooperative. App Core creates no FreeRTOS tasks, queues, mutexes or software timers.
 
 > [!IMPORTANT]
-> Generated [`main.c`](Core/Src/main.c) initializes the application once and continuously calls `App_ReadInput()` and `App_Dispatch()` from the main loop. Application APIs are serialized and non-reentrant.
+> Generated [`main.c`](Core/Src/main.c) initializes the application once and continuously calls `App_ReadInput()` and `App_Dispatch()`. The public application API is non-reentrant and is expected to remain serialized by the execution owner.
 
 ### Current status
 
 | Area | Current state |
 | --- | --- |
-| Target and CubeMX project | STM32F103C8T6 configuration present and configured for CMake generation |
-| Firmware build | CMake + Ninja + GNU Arm Embedded Toolchain; Debug and Release presets present |
+| Target and CubeMX project | STM32F103C8T6 configuration present and generated for the current hardware baseline |
+| Firmware build | CMake + Ninja + GNU Arm Embedded Toolchain with Debug and Release presets |
 | Platform layer | GPIO, I2C, PWM, Time and internal Flash implemented |
-| Component layer | Keyboard, LCD, PCF8574, LED, buzzer, lock actuator, door sensor and exit button implemented |
+| Components | Keyboard, LCD, PCF8574, LED, buzzer, lock actuator, door sensor and exit button implemented |
 | Domain services | Lock Control, Credential Entry, Credential Register, Credential Storage, Authentication, Timeout Validation and Door Control implemented |
 | Presentation services | Display Render, Status Indication and Sound Generator implemented |
-| Application layer | Static composition, initialization, event routing, timeout ownership and semantic action execution implemented |
-| Door mechanism | Lock actuator, door sensor and exit button integrated through Door Control Service |
-| Request to exit | Debounced exit-button press mapped into the Lock Control request-to-exit path |
-| Door-aware relock | Debounced close indication, 800 ms confirmation delay, synchronous sensor confirmation and final lock interlock implemented |
+| Door mechanism | Lock actuator, door sensor and exit button integrated through Door Control |
 | Persistent credential | Linker-reserved Flash page, marker, CRC, idempotent save and post-write verification implemented |
-| Automated host verification | 17 independently executable Lock Control FSM scenarios through CTest |
-| Low-battery path | LED/indication path exists; battery sensing and product policy remain pending |
-| Hardware-in-the-loop verification | Still requires expansion |
-| Continuous integration | Reproducible commands are documented; repository CI workflow is not yet implemented |
+| Native host verification | 20 independently executable Lock Control scenarios registered with CTest |
+| Hardware-in-the-loop verification | Manual target validation exists; broader automated HIL coverage remains future work |
+| Continuous integration | Reproducible local build/test commands exist; repository CI is not yet implemented |
+| Power management | Low-battery indication infrastructure exists; battery measurement and low-power product policy are not yet implemented |
 
-The prototype remains intentionally single-device and single-credential. It does not provide multi-user management, access logs, connectivity, secure-element-backed credentials, tamper response or certified access-control guarantees.
-
----
-
-## Product Contract
-
-### Authoritative parameters
-
-| Parameter | Value | Owner |
-| --- | ---: | --- |
-| Credential length | 6 digits | Credential Entry / Register / Authentication / Storage |
-| Consecutive authentication failure limit | 3 | Lock Control |
-| Credential-confirmation mismatch limit | 3 | Lock Control |
-| Keyboard debounce | 40 ms | Matrix Keyboard configuration |
-| Door-sensor debounce | 500 ms | Door Sensor configuration |
-| Exit-button debounce | 20 ms | Exit Button configuration |
-| Credential-entry inactivity | 5,000 ms | App Core timeout table |
-| Door-position confirmation delay | 800 ms | App Core timeout table |
-| Access-denied feedback | 1,500 ms | App Core timeout table |
-| Lockout | 10,000 ms | App Core timeout table |
-| Credential-saved feedback | 1,500 ms | App Core timeout table |
-| Synchronous LCS follow-up limit | 4 actions/events | App Core |
-| LCD | 16 columns x 2 rows | LCD / App configuration |
-| PCF8574 address | `0x20`, 7-bit | App configuration |
-| LCD backlight request | 1,500 Hz at 50% initial brightness | App configuration / PWM adapter |
-| Persistent credential record | 8 bytes | Credential Storage |
-| Reserved credential Flash region | 1 KiB, page 63 | Linker / Credential Storage |
-
-The five product timeout definitions in [`App_Config.h`](App/Config/Inc/App_Config.h) and their semantic LCS events are the current authoritative timing contract.
-
-> [!NOTE]
-> The previous standalone authorized-unlock timeout is no longer part of the product FSM. After an accepted credential or request-to-exit event, the firmware remains in the unlocked-access path until the required door-position sequence is observed and safely confirmed.
-
-### Essential business rules
-
-1. **PA8 low is the configured safe locked command.** High requests unlock.
-2. On normal startup, the application checks Credential Storage before activating locked idle behavior.
-3. If no valid credential record exists, LCS enters mandatory first-boot enrollment directly from boot and marks that registration route with private first-boot policy state.
-4. First-boot cancellation cannot return the FSM to normal `LOCKED` operation; the active registration-entry phase is refreshed instead.
-5. The first complete keyboard click while `LOCKED` opens a credential-entry session and is consumed as the wake action.
-6. Digits `0` through `9` enter the candidate; `#` confirms and `*` clears or cancels according to CES state.
-7. Key `C` during an active credential-entry route changes the pending operation from unlock to credential registration; the currently installed credential must then authenticate before replacement begins.
-8. Successful authentication for normal entry moves LCS to `ACCESS_UNLOCKED` and requests `DCS_RequestUnlock()`.
-9. A validated request-to-exit press bypasses authentication but converges on the same `ACCESS_UNLOCKED` and door-aware relock sequence.
-10. Request-to-exit does not reset or increment the authentication-failure counter.
-11. A debounced Door Sensor `ACTIVE` event while access is unlocked starts an 800 ms confirmation interval.
-12. After that delay, App Executor requests a synchronous current door-sensor status through DCS.
-13. Only a lock-permissive current sensor status generates `READY_TO_LOCK`.
-14. Normal relock calls `DCS_RequestLock()`, which samples the Door Sensor again immediately before commanding the actuator.
-15. A final lock denial caused by a late door-position change returns the logical flow to `ACCESS_UNLOCKED`; actuator-operation failure enters controlled-reset handling.
-16. Authentication failure starts 1.5 seconds of denial feedback. The third consecutive failed authentication enters a 10-second lockout after denial feedback completes.
-17. Authentication success and lockout expiry reset the authentication-failure count; request-to-exit does not.
-18. Credential registration requires a first new entry and a confirmation entry. The first two staging mismatches retry confirmation; the third clears mismatch history and restarts registration from first entry.
-19. A successfully validated credential is persisted through Credential Storage before the application updates its runtime credential copy.
-20. After successful first-boot persistence and bounded save feedback, LCS selects a dedicated completion action that routes App Executor through controlled reset; the next startup loads the newly installed credential through the normal boot path.
-21. App Core owns one mutually exclusive product timeout at a time and emits each expiration once.
-22. Raw credentials are never rendered. Short-lived application-owned copies are explicitly erased after use.
-
-Detailed behavior is maintained in:
-
-- [complete application-layer reference](App/README.md);
-- [authoritative Lock Control FSM](Libs/Services/Lock_Control/README.md);
-- [Door Control and relock policy](Libs/Services/Door_Control/README.md);
-- [Credential Storage and persistent-memory contract](Libs/Services/Credential_Storage/README.md);
-- [native host tests for the LCS FSM](Tests/README.md);
-- [timeout lifecycle](App/README.md#9-timeout-model);
-- [door-control and relock flow](App/README.md#10-door-control-and-relock-flow);
-- [public API and execution model](App/README.md#5-public-api-and-execution-model);
-- [credential ownership and security](App/README.md#13-credential-ownership-and-security);
-- [action execution](App/README.md#12-action-execution).
+The prototype is intentionally single-device and single-credential. It does not currently provide multi-user management, access logging, connectivity, tamper response, secure-element-backed credentials or certified access-control guarantees.
 
 ---
 
-## Hardware Baseline
+## Architecture
 
-- MCU: **STM32F103C8T6**, Arm Cortex-M3, LQFP48;
-- supply baseline in CubeMX: 3.3 V;
-- system clock: **72 MHz from 8 MHz HSE through PLL x9**;
-- AHB: 72 MHz;
-- APB1: 36 MHz, with 72 MHz timer clock;
-- APB2: 72 MHz;
-- HAL millisecond tick: `HAL_GetTick()`, configured through the TIM1 update time base;
-- raw microsecond source: TIM2 with prescaler 71;
-- generated configuration source: [`Electronic-Lock.ioc`](Electronic-Lock.ioc).
-
-| Resource | Assignment |
-| --- | --- |
-| PB15, PB14, PB13, PB12 | Keyboard rows 0 through 3; pull-up, rising/falling EXTI configuration |
-| PA6, PA5, PA4, PA3 | Keyboard columns 0 through 3; push-pull outputs |
-| PB10 | Lock-status LED; application config treats it as active-high |
-| PB11 | Low-battery status LED; application config treats it as active-high |
-| PA8 | Lock actuator; low = configured safe/locked request, high = unlock request |
-| PA11 | Door sensor; pull-up, active-low, rising/falling EXTI |
-| PA0 | Exit button; pull-up, active-low, rising/falling EXTI |
-| PB8 / PB9 | I2C1 SCL / SDA |
-| PB4 | TIM3 channel 1 passive-buzzer PWM |
-| PB6 | TIM4 channel 1 LCD-backlight PWM |
-| TIM2 | Raw hardware counter used by `Platform_GetMicros()` |
-| PA9 / PA10 | USART1 TX / RX configured by CubeMX |
-| PA13 / PA14 | SWDIO / SWCLK debug interface |
-
-CubeMX currently initializes PA8 low before `App_Init()`. App Core then binds the Platform descriptor and initializes the Lock Actuator Driver, but `App_InitLockActuator()` does not yet issue a redundant explicit lock command after driver initialization. This remains tracked as startup safety debt.
-
-Firmware state describes the **requested electrical lock command**, not verified lock-bolt engagement. Door Sensor feedback describes the configured door-contact state; it is not direct actuator-position feedback.
-
-### Interrupt boundary
-
-`App_ConfigHalCallbacks.c` implements the strong HAL GPIO EXTI callback for the application-owned physical inputs.
-
-For both PA0 and PA11 the callback:
-
-1. captures the common application millisecond timestamp;
-2. publishes the edge to the corresponding interrupt-oriented component driver;
-3. performs no GPIO sampling;
-4. performs no debounce calculation;
-5. dispatches no LCS event;
-6. commands no actuator.
-
-Deferred processing belongs to `DCS_Update()` in serialized application context.
-
-Hardware and Platform details:
-
-- [CubeMX configuration](Electronic-Lock.ioc);
-- [Platform interfaces](Platforms/README.md);
-- [App configuration and hardware bindings](App/Config/README.md).
-
----
-
-## Architecture and Documentation
-
-### Layered architecture
+### Layered organization
 
 ```mermaid
 flowchart TB
-    MAIN["Execution owner<br/>generated main loop"]
-    APP["Application Layer<br/>Config + Core + Executor"]
-    DOMAIN["Domain Services<br/>LCS / CES / CRS / CSS / <br/>AUTH / TVS / DCS"]
+    MAIN["Execution Owner<br/>generated main loop"]
+    APP["Application<br/>Config + Core + Executor"]
+    DOMAIN["Domain Services<br/>LCS / CES / CRS / CSS /<br/> AUTH / TVS / DCS"]
     UI["Presentation Services<br/>DRS / SIS / SGS"]
-    COMPONENTS["Components and Adapters<br/>Keyboard / LCD / LEDs /<br/> Buzzer / Door I/O"]
-    PLATFORM["Platform Interfaces<br/>GPIO / I2C / PWM / <br/>Time / Flash"]
-    HAL["STM32 HAL / CMSIS / <br/>CubeMX"]
+    COMPONENTS["Components / Adapters<br/>Keyboard / LCD / LEDs /<br/> Buzzer / Door I/O"]
+    PLATFORM["Platform Interfaces<br/>GPIO / I2C / PWM /<br/> Time / Flash"]
+    HAL["HAL / CMSIS / CubeMX"]
 
     MAIN --> APP
     APP --> DOMAIN
     APP --> UI
     APP --> COMPONENTS
     APP --> PLATFORM
+
     UI --> COMPONENTS
     DOMAIN --> COMPONENTS
     DOMAIN --> PLATFORM
@@ -241,22 +115,24 @@ flowchart TB
     PLATFORM --> HAL
 ```
 
-The important boundary is not the number of directories; it is the allowed dependency direction.
+The architecture is defined primarily by **dependency direction**, not by the number of directories.
 
 - `main.c` sees only the public App Core interface.
-- `App/` is the firmware composition and orchestration layer.
-- LCS owns authoritative product state and policy but performs no hardware/UI side effects.
-- DCS owns door-mechanism coordination and lock interlock but does not include or manipulate LCS state.
-- CES owns the active credential candidate.
-- CRS owns temporary credential-registration staging and confirmation comparison.
-- CSS owns the persistent record format and storage transaction policy.
-- presentation services own non-blocking semantic feedback patterns.
-- components own reusable device behavior.
-- Platform interfaces isolate STM32 HAL/CubeMX mechanics from reusable components and services.
+- `App/` owns product composition, startup, event routing, timeout ownership and semantic action execution.
+- **LCS** owns authoritative product behavior and policy but performs no hardware or UI side effects.
+- **DCS** owns door-mechanism coordination and the normal relock interlock.
+- **CES** owns the active credential candidate.
+- **CRS** owns temporary registration staging and confirmation comparison.
+- **CSS** owns the persistent credential record format and Flash transaction policy.
+- **AUTH** performs synchronous credential comparison.
+- **TVS** provides rollover-safe elapsed-time validation for caller-owned intervals.
+- presentation services convert semantic product feedback into LCD, LED and sound behavior.
+- components implement reusable device behavior.
+- Platform interfaces isolate reusable code from STM32 HAL and CubeMX details.
 
 ### Application execution model
 
-The only public application API is intentionally small:
+The public application interface is intentionally small:
 
 ```c
 App_InitStatus_t App_Init      (void);
@@ -264,7 +140,7 @@ void             App_ReadInput (void);
 void             App_Dispatch  (void);
 ```
 
-The current execution owner uses:
+The generated execution owner follows the cooperative model:
 
 ```c
 if(App_Init() != APP_INIT_SUCCESSFULLY)
@@ -279,35 +155,49 @@ while(1)
 }
 ```
 
-`App_ReadInput()` performs one non-blocking keyboard acquisition and immediately routes a completed key action.
+`App_ReadInput()` performs one non-blocking keyboard acquisition step and routes a completed key action when available.
 
-`App_Dispatch()` advances the serialized runtime by polling the active product timeout, updating Door Control, updating display/indications/sound and mapping validated physical events into semantic LCS events.
+`App_Dispatch()` advances the serialized runtime by:
 
-### Runtime control flow
+- checking the active product timeout;
+- updating Door Control and processing debounced physical-input events;
+- updating display, indication and sound services;
+- dispatching semantic events to Lock Control;
+- executing the semantic action returned by Lock Control.
+
+A synchronous action result may immediately produce another LCS event. App Core bounds this follow-up chain with `APP_MAX_LCS_DISPATCH_DEPTH` so an accidental event/action cycle cannot monopolize the cooperative execution owner indefinitely.
+
+### Semantic control flow
 
 ```mermaid
 flowchart LR
-    INPUT["Keyboard / Door Sensor / Exit Button"]
+    INPUT["Keyboard / Door Sensor / <br/>Exit Button"]
     APP["App Core"]
     LCS["Lock Control FSM"]
     EXEC["App Executor"]
-    DOMAIN["CES / CRS / AUTH /<br/> CSS / DCS"]
-    FX["Display / LEDs / Sound /<br/> Actuator"]
+    SERVICES["Domain / Presentation <br/>Services"]
+    HW["Components / Platform / <br/>Hardware"]
 
     INPUT --> APP
-    APP --> LCS
+    APP -->|semantic event| LCS
     LCS -->|semantic action| EXEC
-    EXEC --> DOMAIN
-    EXEC --> FX
-    DOMAIN -->|result / event| APP
-    APP -->|bounded follow-up| LCS
+    EXEC --> SERVICES
+    SERVICES --> HW
+    SERVICES -->|result| EXEC
+    EXEC -->|follow-up event| APP
 ```
 
-A synchronous result may immediately produce another semantic LCS event. App Core bounds this follow-up chain with `APP_MAX_LCS_DISPATCH_DEPTH` so an accidental logic cycle cannot monopolize the cooperative execution owner indefinitely.
+The central design rule is:
 
-### Door-aware relock flow
+> **Lock Control decides what the product shall do; App Executor and the lower layers decide how the requested operation is performed.**
 
-Authenticated entry and request-to-exit deliberately converge on the same post-unlock mechanism:
+---
+
+## Product Behavior
+
+### Core access flow
+
+Authenticated entry and request-to-exit use different authorization paths but converge on the same post-unlock door-aware relock behavior.
 
 ```mermaid
 sequenceDiagram
@@ -319,45 +209,170 @@ sequenceDiagram
 
     IN-->>APP: Accepted access request
     APP->>LCS: AUTH_SUCCESS or EXIT_REQUEST
-    LCS-->>APP: REQUEST_UNLOCK / EXIT_REQUEST_UNLOCK
+    LCS-->>APP: Unlock action
     APP->>DCS: DCS_RequestUnlock()
 
     DS-->>DCS: Debounced ACTIVE event
     DCS-->>APP: DOOR_SENSOR_EVENT_ACTIVE
     APP->>LCS: DOOR_POSITION_CONFIRMED
     LCS-->>APP: BEGIN_DOOR_SENSOR_CONFIRMATION
-    APP->>APP: Start 800 ms confirmation timeout
+    APP->>APP: Start 800 ms confirmation interval
 
     APP->>LCS: DOOR_SENSOR_CONFIRMATION_TIMEOUT
     LCS-->>APP: REQUEST_DOOR_SENSOR_CONFIRMATION
     APP->>DCS: DCS_GetSensorStatus()
-    DCS-->>APP: ACTIVE / IDLE / UNKNOWN
 
-    alt ACTIVE
+    alt Lock-permissive sensor state
         APP->>LCS: READY_TO_LOCK
         LCS-->>APP: RETURN_TO_LOCKED_FROM_GRANTED_ACCESS
         APP->>DCS: DCS_RequestLock()
-        Note over DCS,DS: Sensor is sampled again immediately<br/>before the actuator lock command
-    else IDLE
+        Note over DCS,DS: Sensor is sampled again immediately<br/>before the lock command
+    else Door condition not confirmed
         APP->>LCS: DOOR_POSITION_NOT_CONFIRMED
         Note over APP,LCS: Return to ACCESS_UNLOCKED
-    else UNKNOWN / operation failure
-        Note over APP,DCS: Controlled-reset safe path
+    else Sensor / actuator operation failure
+        Note over APP,DCS: Fail-safe controlled-reset path
     end
 ```
 
 The repeated sensor read is deliberate. `DCS_GetSensorStatus()` authorizes the FSM's readiness decision; `DCS_RequestLock()` performs the final physical interlock immediately before commanding the actuator.
 
-### Persistent credential memory model
+### Credential lifecycle
 
-Credential Storage owns one eight-byte V1 record in the final 1 KiB Flash page:
+The product supports two credential-registration routes:
+
+- **first boot** — if no valid credential exists, enrollment is mandatory and does not require prior authentication;
+- **runtime replacement** — changing an installed credential requires successful authentication of the current credential first.
+
+A registration operation collects a first new candidate and a confirmation candidate. CRS compares the staged values, while Lock Control owns the retry/mismatch policy.
+
+After successful validation:
+
+1. the credential is persisted through Credential Storage;
+2. the application updates its runtime credential copy only after storage succeeds;
+3. temporary application/registration copies are explicitly cleared;
+4. normal replacement returns to locked idle;
+5. first-boot enrollment completes through controlled reset so the next startup validates and reloads the persisted credential through the normal boot path.
+
+### Current product parameters
+
+The values below summarize the current product configuration. The compile-time definitions in [`App_Config.h`](App/Config/Inc/App_Config.h), the participating service headers and the Lock Control policy remain authoritative.
+
+| Parameter | Current value |
+| --- | ---: |
+| Credential length | 6 digits |
+| Consecutive authentication failure limit | 3 |
+| Credential-confirmation mismatch limit | 3 |
+| Keyboard debounce | 40 ms |
+| Door-sensor debounce | 500 ms |
+| Exit-button debounce | 20 ms |
+| Credential-entry inactivity | 5,000 ms |
+| Door-position confirmation interval | 800 ms |
+| Access-denied feedback | 1,500 ms |
+| Lockout | 10,000 ms |
+| Credential-saved feedback | 1,500 ms |
+| Synchronous LCS follow-up limit | 4 actions/events |
+| Persistent credential record | 8 bytes |
+| Reserved credential Flash region | 1 KiB / final Flash page |
+
+> [!NOTE]
+> The previous standalone authorized-unlock timeout is no longer part of the product FSM. Once access is granted, the firmware remains in the unlocked-access path until the required door-position sequence is observed and safely confirmed.
+
+---
+
+## Hardware Baseline
+
+The current target is an **STM32F103C8T6** running at **72 MHz** from an 8 MHz HSE through PLL x9.
+
+The generated hardware configuration is maintained in [`Electronic-Lock.ioc`](Electronic-Lock.ioc). Product-side bindings are centralized through [`App_Config.h`](App/Config/Inc/App_Config.h).
+
+| Resource | Current assignment |
+| --- | --- |
+| PB15..PB12 | Keyboard rows 0..3, pull-up, rising/falling EXTI |
+| PA6..PA3 | Keyboard columns 0..3, push-pull outputs |
+| PB10 | Lock-status LED |
+| PB11 | Low-battery status LED |
+| PA8 | Lock actuator, active-low locked command |
+| PA11 | Door sensor, pull-up, active-low, rising/falling EXTI |
+| PA0 | Exit button, pull-up, active-low, rising/falling EXTI |
+| PB8 / PB9 | I2C1 SCL / SDA |
+| PB4 | TIM3 channel 1 buzzer PWM |
+| PB6 | TIM4 channel 1 LCD-backlight PWM |
+| TIM2 | Raw microsecond counter used by `Platform_GetMicros()` |
+| PA9 / PA10 | USART1 TX / RX |
+| PA13 / PA14 | SWDIO / SWCLK |
+
+### Startup safe-state baseline
+
+CubeMX initializes PA8 low, which corresponds to the configured locked electrical request.
+
+During `App_Init()`, the application then:
+
+1. initializes the lock-actuator Platform GPIO descriptor;
+2. initializes the Lock Actuator component with active-low lock polarity;
+3. explicitly calls `LockActuator_Lock()`;
+4. aborts initialization if any of those operations fail.
+
+This provides an application-level locked request in addition to the generated GPIO startup state.
+
+Firmware state represents the **commanded electrical actuator state**, not verified mechanical bolt engagement. The Door Sensor represents the configured door-contact condition and is not direct actuator-position feedback.
+
+### Interrupt boundary
+
+The application-owned EXTI callback performs handoff only.
+
+For the door sensor and exit button it:
+
+- captures the application millisecond timestamp;
+- publishes the edge to the corresponding component driver;
+- performs no debounce calculation;
+- dispatches no Lock Control event;
+- commands no actuator.
+
+Deferred processing belongs to Door Control in serialized application context.
+
+---
+
+## Safety and Security
+
+### Safety policy
+
+The current design treats the configured locked actuator command as the safe electrical request.
+
+Key invariants are:
+
+- PA8 low corresponds to the configured locked command.
+- Startup explicitly requests the locked actuator state after driver initialization.
+- Normal relock is allowed only through the Door Control interlock.
+- `DCS_RequestLock()` samples the Door Sensor immediately before commanding the actuator.
+- `DCS_ForceLock()` is intentionally separate from normal relock and is reserved for fail-safe recovery.
+- unlock requests originate only after product policy has authorized access.
+- an unlock-command failure first attempts to restore the safe lock command; failure of that recovery escalates to a critical fault.
+- controlled-reset cleanup cancels active timing, clears transient credential state, requests a forced lock, stops sound and disables the LCD backlight before reset.
+- product-state transitions and actuator commands are never executed from GPIO interrupt context.
+- the cooperative owner must continue calling `App_Dispatch()` so timeout, input, presentation and relock processing can advance.
+
+The detailed failure mapping is maintained in [`App/README.md`](App/README.md).
+
+### Credential ownership
+
+Credential lifetime is deliberately split across modules:
+
+- **CES** owns the active user-entry candidate;
+- **CRS** owns temporary registration staging;
+- **CSS** owns the on-Flash representation and persistence transaction, but no long-lived RAM credential;
+- **App Config** owns the runtime credential buffer used by authentication;
+- **App Executor** creates bounded temporary copies for synchronous operations and explicitly overwrites them after use;
+- presentation services receive only semantic state and masked entry progress, never raw credential digits.
+
+### Persistent-data integrity
+
+Credential Storage uses one V1 record in the final 1 KiB Flash page:
 
 ```text
 FLASH             0x08000000 .. 0x0800FBFF   63 KiB executable region
 CREDENTIAL_FLASH  0x0800FC00 .. 0x0800FFFF    1 KiB reserved page
 ```
-
-The C implementation obtains the base through linker symbol `__credential_flash_start__` instead of duplicating the address in service policy code.
 
 Record layout:
 
@@ -367,121 +382,33 @@ byte 6     marker 0xA5
 byte 7     CRC-8/ATM over digits + marker
 ```
 
-CSS validates the complete record before exposing digits, avoids unnecessary writes when the requested valid record is already stored, locks Flash after programming attempts and performs exact post-write readback plus record validation.
+The storage service validates the complete record, avoids unnecessary rewrites when the requested valid record is already present, relocks Flash after programming attempts and performs post-write readback plus record validation.
 
-### Application and infrastructure
-
-| Module | Responsibility | Detailed documentation |
-| --- | --- | --- |
-| Application Layer | Product composition, initialization, input/event orchestration, timeouts, action execution and UI coordination | [README](App/README.md) |
-| App Config | Board/product policy and statically allocated runtime-object registry | [README](App/Config/README.md) |
-| Platform | Project-owned GPIO, I2C, PWM, Time and Flash boundary over STM32 | [README](Platforms/README.md) |
-| CubeMX Core | Generated startup, clocks, GPIO, I2C, timers, UART and interrupt plumbing | [main.c](Core/Src/main.c), [IOC](Electronic-Lock.ioc) |
-| STM32 Drivers | Vendor HAL and CMSIS implementation | [Drivers](Drivers) |
-
-### Domain services
-
-| Service | Responsibility | Detailed documentation |
-| --- | --- | --- |
-| Lock Control | Authoritative table-driven FSM, guards, counters, pending-operation routing and semantic actions | [README](Libs/Services/Lock_Control/README.md) |
-| Door Control | Lock actuator / door sensor / exit button coordination, deferred physical-input processing and normal lock interlock | [README](Libs/Services/Door_Control/README.md) |
-| Credential Entry | Active entry session, normalized candidate and clear/cancel semantics | [README](Libs/Services/Credential_Entry/README.md) |
-| Credential Register | Temporary first-entry staging and confirmation validation for credential replacement | [README](Libs/Services/Credential_Register/README.md) |
-| Credential Storage | Persistent record format, integrity validation and internal-Flash transaction policy | [README](Libs/Services/Credential_Storage/README.md) |
-| Authentication | Synchronous comparison of one complete candidate against the installed credential | [README](Libs/Services/Authentication/README.md) |
-| Timeout Validation | Rollover-safe evaluation of caller-owned millisecond intervals | [README](Libs/Services/Timeout_Validation/README.md) |
-
-### Presentation services
-
-| Service | Responsibility | Detailed documentation |
-| --- | --- | --- |
-| Display Render | Semantic screens and masked credential progress | [README](Libs/Services/Display_Render/README.md) |
-| Status Indication | Non-blocking semantic LED patterns | [README](Libs/Services/Status_Indication/README.md) |
-| Sound Generator | Non-blocking semantic buzzer patterns and priority | [README](Libs/Services/Sound_Generator/README.md) |
-
-### Components and adapters
-
-| Component | Responsibility | Detailed documentation |
-| --- | --- | --- |
-| Matrix Keyboard | Matrix scan, per-key debounce and complete key actions | [README](Libs/Components/MatrixKeyboard/README.md) |
-| LCD | HD44780 behavior, PCF8574 bus adapter and PWM backlight adapter | [README](Libs/Components/LCD/README.md) |
-| PCF8574 | I2C I/O-expander access and output-port shadow | [README](Libs/Components/PCF8574/README.md) |
-| LED | Active-level-independent digital LED control | [README](Libs/Components/Led/README.md) |
-| Buzzer | Passive-buzzer PWM control | [README](Libs/Components/Buzzer/README.md) |
-| Lock Actuator | Polarity-independent digital lock/unlock commands | [README](Libs/Components/LockActuator/README.md) |
-| Door Sensor | Interrupt-oriented, polarity-independent debounced door-contact state | [README](Libs/Components/DoorSensor/README.md) |
-| Exit Button | Interrupt-oriented, non-blocking debounced request-to-exit events | [README](Libs/Components/ExitButton/README.md) |
-
----
-
-## Safety and Security
-
-### Safety invariants
-
-The current design treats the actuator's configured locked command as the safe electrical request.
-
-- PA8 shall be low during startup and controlled-reset cleanup.
-- Normal relock is allowed only after Door Control observes the configured lock-permissive sensor condition.
-- `DCS_RequestLock()` performs an immediate sensor check before the actuator command.
-- `DCS_ForceLock()` is intentionally separate from normal relock and bypasses the door-sensor interlock only for explicit fail-safe cleanup paths.
-- `DCS_RequestUnlock()` is used only after product policy has already authorized an unlock through LCS.
-- Door-contact confirmation is not trusted indefinitely; the condition is sampled again immediately before normal relock.
-- Presentation failure must never be relied upon to establish the safe actuator command.
-- Product timing uses timestamps rather than human-scale blocking delays.
-- HAL EXTI callbacks perform handoff only; product-state transitions and actuator commands are forbidden from interrupt context.
-- App Core calls shall not overlap; the cooperative execution owner is responsible for serialization.
-- `App_Dispatch()` must continue running while access is unlocked so physical-input and relock processing can advance.
-- Controlled-reset cleanup cancels timing, ends transient credential sessions, clears staging/runtime copies, requests a force lock, stops sound and disables the LCD backlight before reset.
-
-The detailed failure mapping is maintained in the [application safety and failure policy](App/README.md#14-safety-and-failure-policy).
-
-### Credential ownership
-
-Credential lifetime is deliberately split across modules:
-
-- **CES** owns the active user-entry candidate.
-- **CRS** owns only temporary registration staging.
-- **CSS** owns the on-Flash representation and transaction policy but keeps no RAM credential.
-- **App Config** owns the long-lived runtime credential buffer used by authentication.
-- **App Executor** creates only bounded temporary copies for synchronous operations and explicitly overwrites them after use.
-- **UI services** receive masked length/progress, never raw digits.
-
-### Persistent-data integrity
-
-The V1 credential record provides detection of erased, malformed, incomplete or likely accidentally corrupted data through:
-
-- explicit erased-value detection;
-- normalized digit-range checks;
-- fixed format marker `0xA5`;
-- CRC-8/ATM;
-- post-write exact readback and full decode validation.
-
-These are **integrity and format checks**, not cryptographic security.
+These mechanisms provide **format and accidental-corruption detection**, not cryptographic security.
 
 ### Security boundary
 
-The current prototype does **not** provide:
+The prototype does not currently provide:
 
 - encryption at rest;
 - salted hashing or a cryptographic password verifier;
-- secure-element-backed storage;
 - authenticity against deliberate Flash modification;
-- guaranteed credential scrubbing from every compiler temporary or CPU register;
+- secure-element-backed storage;
 - automatic debug/readout-protection provisioning;
-- invasive physical-extraction resistance;
 - tamper detection or response;
+- invasive physical-extraction resistance;
 - audit/access logging;
 - certified access-control security guarantees.
 
-Anyone with sufficient access to internal Flash can recover or replace the V1 credential representation and calculate a matching CRC. Production deployment therefore requires a separate threat model, provisioning strategy and security review.
+A party with sufficient access to internal Flash can recover or replace the stored credential representation and calculate a matching CRC. Production deployment would therefore require a separate threat model, provisioning strategy and security review.
 
 ---
 
-## Build and Integration
+## Build
 
 ### Firmware prerequisites
 
-The repository's current firmware build expects:
+The current firmware build expects:
 
 - CMake 3.22 or newer;
 - Ninja;
@@ -506,13 +433,13 @@ cmake --preset Release
 cmake --build --preset Release
 ```
 
-The toolchain emits an ELF target, map file and linker memory-usage report. `compile_commands.json` is exported to support tooling such as `clangd`.
+The build produces the firmware ELF and map output and reports linker memory usage. `compile_commands.json` is exported for tooling such as `clangd`.
 
 The active linker script is [`STM32F103xx_FLASH.ld`](STM32F103xx_FLASH.ld), which separates executable Flash from the credential page.
 
 ### Run native host tests
 
-The `Tests/` project is intentionally independent from the ARM cross-build. Configure it with the development host compiler:
+The `Tests/` project is intentionally independent from the ARM cross-build and must be configured with a native development-host compiler:
 
 ```sh
 cmake -S Tests -B build/host-tests -DCMAKE_BUILD_TYPE=Debug
@@ -520,144 +447,137 @@ cmake --build build/host-tests --parallel
 ctest --test-dir build/host-tests --output-on-failure
 ```
 
-On GCC/Clang-style host compilers, production LCS code and the host harness compile with:
+On GCC/Clang-style host compilers, the production LCS implementation and host harness compile with:
 
 ```text
 -Wall -Wextra -Wpedantic -Werror
 ```
 
-Do not configure host tests through the root ARM firmware presets.
-
-### CubeMX integration
-
-`Electronic-Lock.ioc` is configured with CMake as the target toolchain. Generated code remains the hardware initialization owner, while application integration stays inside CubeMX user-code regions.
-
-After regenerating code, always review the diff and verify at minimum:
-
-- PA8 remains `LOCK_ACTUATOR` and starts low;
-- PA11 remains the pull-up rising/falling-EXTI `DOOR_SENSOR` input;
-- PA0 remains the pull-up rising/falling-EXTI `EXIT_BUTTON` input;
-- PB15..PB12 remain keyboard rows with pull-up/EXTI configuration;
-- PA6..PA3 remain keyboard column outputs;
-- PB10 and PB11 remain status LED outputs;
-- PB4 remains TIM3 channel 1 for the buzzer;
-- PB6 remains TIM4 channel 1 for LCD backlight PWM;
-- PB8/PB9 remain I2C1 SCL/SDA;
-- TIM2 keeps the intended raw-counter configuration;
-- the HAL time base remains consistent with `Platform_GetMillis()` expectations;
-- every project-owned App, Platform, Component and Service source remains in the firmware target;
-- the linker script still reserves page 63 as `CREDENTIAL_FLASH`.
-
-STM32CubeIDE may still be used for target debugging and CubeMX-related workflows; the repository's reproducible build description is CMake-based.
+Do not configure the native tests through the root ARM firmware presets.
 
 ---
 
 ## Verification
 
-### Current automated verification
+### Native host verification
 
-The repository currently contains a native Lock Control FSM suite with **independently executable scenarios**.
+The current automated suite is a black-box behavioral verification of the production **Lock Control Service**.
 
-The test architecture intentionally:
+It intentionally:
 
-- compiles the production `Lock_Control_Service.c` implementation directly;
-- uses only the public LCS interface;
-- does not expose test-only state access;
-- does not duplicate the production FSM;
-- starts one fresh process per scenario so the singleton begins from its natural static boot state;
-- uses CTest names/labels for selective execution;
-- treats compiler warnings as errors on the native test target;
-- applies a short per-scenario timeout to detect accidental hangs.
+- compiles the production `Lock_Control_Service.c`;
+- includes only the public LCS interface;
+- does not expose private FSM state;
+- does not duplicate the production transition table;
+- runs each scenario in a fresh process so the private singleton starts from its natural static boot state;
+- compares public input events with the exact semantic actions returned by `LCS_Process()`;
+- treats compiler warnings as errors;
+- applies a bounded per-scenario timeout.
 
-Current scenarios cover boot gating/failure, normal access, cancellation/timeouts, authentication lockout, failure-count reset, registration authorization, first-boot registration, authorized replacement, mismatch limits, storage failure, invalid-event state preservation, request-to-exit behavior, failure-counter preservation and relock recovery when the door condition is not confirmed.
+The current baseline contains **20 independently executable CTest scenarios**. Coverage includes:
 
-The LCS production policy now additionally specializes mandatory first-boot
-cancellation, third-mismatch restart and first-boot completion reset behavior.
-The host suite is the next verification artifact to update so those new branches
-are explicitly covered rather than being inferred from older registration
-scenarios.
-
-See [Tests/README.md](Tests/README.md) for the authoritative scenario catalog and debugging workflow.
-
-### Firmware and hardware acceptance
-
-Before treating the prototype as a reliable physical lock, verify at minimum:
-
-- PA8 safe startup and safe output during controlled-reset/fault handling;
-- lock-actuator electrical polarity on the actual driver stage;
-- complete keyboard map, wake-key consumption and 40 ms debounce;
-- PA11 active-low door-contact mapping, EXTI delivery and 500 ms debounce;
-- PA0 request-to-exit press/release EXTI delivery and 20 ms debounce;
-- authenticated entry and request-to-exit convergence on the same door-aware relock sequence;
-- no normal relock while the door sensor is not in the configured active/lock-permissive state;
-- 800 ms door confirmation delay and final immediate sensor recheck before lock;
-- recovery when the door contact changes between confirmation and final relock;
-- six masked digits, incomplete-entry behavior and clear/cancel semantics;
-- mandatory first-boot enrollment, including cancellation containment, third-mismatch restart and post-persistence reset;
+- boot gating and initialization failure;
+- normal authenticated access;
+- cancellation and inactivity paths;
+- authentication failure counting and lockout;
+- authentication-success counter reset;
+- first-boot mandatory enrollment;
+- first-boot cancellation containment and timeout preservation;
 - authenticated credential replacement;
-- exact 5 s, 800 ms, 1.5 s, 10 s and credential-saved 1.5 s intervals plus measured dispatch latency;
-- failure-count reset and lockout entry after the third rejected authentication;
-- persistent credential survival across reset/power cycle;
-- leading-zero credential preservation;
-- marker/CRC rejection of intentionally corrupted or incomplete records;
-- Flash locked state after successful and injected-failure storage paths;
-- reserved page 63 not overlapping executable sections;
-- LCD, backlight, both indication paths and every ringtone on target;
-- I2C, PWM and timer behavior at the configured 72 MHz clock tree;
-- reset or induced critical fault while the actuator is unlocked;
-- UI failures cannot produce or prolong an unsafe actuator command.
+- registration mismatch retries and third-mismatch restart;
+- persistent-storage failure;
+- invalid and out-of-context event preservation;
+- request-to-exit access;
+- request-to-exit preservation of authentication-failure history;
+- door-confirmation/relock recovery;
+- unlock-command failure recovery;
+- critical escalation when safe-lock recovery also fails.
 
-### Power-fault storage acceptance
+See [`Tests/README.md`](Tests/README.md) for the authoritative scenario catalog, exact expectations and debugging workflow.
 
-The V1 persistent record is detectable but not redundant. Where controlled power interruption is available, validate at least:
+### Target verification boundary
 
-- interruption after erase;
-- interruption after the first programmed word;
-- interruption during/after the second programmed word;
-- rejection of every incomplete marker/CRC-invalid record;
-- correct first-registration behavior when no valid credential remains.
+Host tests validate the hardware-independent Lock Control event/action contract. They do **not** replace target verification of:
 
-The current design detects incomplete/corrupted writes; it does not preserve the previous credential across an interrupted replacement.
+- electrical actuator polarity and safe startup;
+- GPIO/EXTI delivery;
+- real debounce behavior;
+- I2C/PWM/timer behavior;
+- LCD command timing;
+- physical door-sensor interpretation;
+- Flash behavior under real power interruption;
+- mechanical lock engagement;
+- end-to-end hardware timing.
+
+Broader service integration and hardware-in-the-loop automation remain future verification work.
 
 ---
 
 ## Known Constraints
 
-The following limitations describe the current implementation and are intentionally kept visible rather than hidden behind the prototype label.
+The following limitations describe the current implementation and are intentionally kept visible.
 
-- **Main-loop timing is not yet characterized.** Maximum loop latency, input-response latency and timeout-observation error still need measured worst-case values.
-- **Presentation failures are mainly degraded-feedback faults.** Not every LCD/LED/sound failure is promoted to global operational failure.
-- **Low-battery sensing is not implemented.** The low-battery LED and indication runtime exist, but no measurement source or product threshold policy drives them.
-- **Keyboard EXTI is configured but normal key acquisition is polling.** Its final wake-only or unused interrupt policy remains open.
-- **TIM2 microsecond wrap semantics require explicit validation.** `Platform_GetMicros()` exposes the raw hardware counter and callers must respect the timer's real width/wrap interval.
-- **Automated coverage is concentrated on LCS.** CES, CRS, CSS, DCS, application integration and hardware-in-the-loop paths still need broader automated verification.
-- **No repository CI quality gate exists yet.** The build/test commands are reproducible, but push/PR automation has not yet been added.
-- **Only one product timeout can be active.** The current App Core timeout model relies on mutually exclusive timed FSM phases and is not a general overlapping-timer facility.
-- **The application is non-reentrant.** A future RTOS/multithreaded owner would require explicit task ownership and synchronization instead of calling current App APIs concurrently.
-- **Power management is not integrated.** No STOP/sleep product policy is active in the current runtime.
-- **Credential storage is V1 and single-slot.** One eight-byte record occupies a dedicated 1 KiB page; there is no redundant A/B slot, journal, generation counter, commit record or wear leveling.
-- **Interrupted credential replacement can lose the old credential.** Marker and CRC prevent acceptance of an incomplete replacement but cannot preserve the previous record after the page has been erased.
-- **The credential is recoverable from Flash.** Digits are stored directly and CRC is not encryption, hashing or authentication.
-- **`CSS_HasCredential()` collapses unavailable conditions.** Erased, malformed, corrupted and unreadable records all appear as `false` to its Boolean caller.
-- **First-boot timeout handling is only partially specialized.** Cancellation can no longer escape mandatory enrollment, but `LCS_EVENT_ENTRY_TIMEOUT` has no dedicated first-boot registration transition. The event is ignored by LCS and enrollment remains active without an automatic timeout refresh/feedback cycle.
-- **No direct lock-bolt position feedback exists.** The firmware knows the commanded actuator state and door-contact state, not confirmed mechanical lock engagement.
-- **Security provisioning remains external.** Debug/readout protection, secure provisioning, tamper policy and physical-attack resistance require a dedicated product-security design.
-
-Implementation-specific constraints are tracked in the [App known-constraints section](App/README.md#18-known-constraints) and the corresponding module READMEs.
+- **Main-loop timing is not yet characterized.** Worst-case dispatch latency, input-response latency and timeout-observation error still need measured values.
+- **LCD operations are synchronous.** The HD44780 driver uses fixed execution delays rather than reading the busy flag, so display operations can block for their bounded communication/timing duration.
+- **Presentation failures are generally degraded-feedback faults.** Not every LCD, LED or sound failure is promoted to a global operational fault.
+- **Low-battery sensing is not implemented.** The indication path exists, but no ADC measurement source or product threshold policy currently drives it.
+- **Keyboard EXTI is configured while normal acquisition is polling.** Its final wake-only or unused interrupt policy remains open.
+- **TIM2 microsecond wrap semantics require explicit validation.** `Platform_GetMicros()` exposes the raw hardware counter and callers must respect its actual width and wrap interval.
+- **Automated coverage is concentrated on LCS.** CES, CRS, CSS, DCS, App integration and hardware-in-the-loop paths still need broader automated verification.
+- **No repository CI quality gate exists yet.** Build and test commands are reproducible locally, but push/PR automation has not yet been added.
+- **Only one product timeout can be active at a time.** App Core relies on mutually exclusive timed FSM phases; it is not a general overlapping-timer facility.
+- **The application is non-reentrant.** A future RTOS or multithreaded owner would require explicit ownership and synchronization.
+- **Power management is not integrated.** No STOP/sleep product policy is active.
+- **Credential storage is single-slot.** The V1 record has no redundant A/B slot, journal, generation counter, commit record or wear leveling.
+- **Interrupted credential replacement can lose the previous credential.** Marker and CRC reject an incomplete new record but cannot preserve the erased previous record.
+- **The credential is recoverable from Flash.** CRC is not encryption, hashing or authentication.
+- **`CSS_HasCredential()` collapses unavailable conditions.** Erased, malformed, corrupted and unreadable records appear as the same Boolean result to its caller.
+- **First-boot inactivity timeout remains intentionally unspecialized.** `LCS_EVENT_ENTRY_TIMEOUT` has no dedicated first-boot registration transition; it is ignored while mandatory enrollment remains active.
+- **No direct lock-bolt position feedback exists.** Firmware knows the commanded actuator state and door-contact state, not confirmed mechanical lock engagement.
+- **Security provisioning remains external.** Debug/readout protection, secure provisioning and tamper policy require a separate product-security design.
 
 ---
 
-## Documentation Authority
+## Documentation Map and Authority
 
-When repository artifacts disagree, use the following order to determine the implemented baseline:
+The root README is intentionally a **project-level overview**, not the canonical specification for every module.
 
-1. [`Electronic-Lock.ioc`](Electronic-Lock.ioc) defines the intended CubeMX hardware configuration.
-2. The active linker script defines executable and persistent-memory partitioning.
-3. Public headers define callable APIs, public types and compile-time contracts.
-4. Source files define implemented runtime behavior.
-5. Module READMEs explain module behavior, rationale, integration and known constraints.
-6. This root README summarizes the project-level baseline.
+### Documentation map
 
-For product behavior, treat the Lock Control transition table and production source as the authoritative state-machine definition. For door-mechanism policy, use the Door Control source/README. For persistent-record semantics, use Credential Storage plus the linker script.
+| Topic | Canonical project document |
+| --- | --- |
+| Application composition and orchestration | [`App/README.md`](App/README.md) |
+| Product hardware bindings and compile-time configuration | [`App/Config/README.md`](App/Config/README.md) and [`App_Config.h`](App/Config/Inc/App_Config.h) |
+| Lock Control FSM | [`Libs/Services/Lock_Control/README.md`](Libs/Services/Lock_Control/README.md) |
+| Door mechanism and relock policy | [`Libs/Services/Door_Control/README.md`](Libs/Services/Door_Control/README.md) |
+| Credential entry | [`Libs/Services/Credential_Entry/README.md`](Libs/Services/Credential_Entry/README.md) |
+| Credential registration | [`Libs/Services/Credential_Register/README.md`](Libs/Services/Credential_Register/README.md) |
+| Persistent credential storage | [`Libs/Services/Credential_Storage/README.md`](Libs/Services/Credential_Storage/README.md) |
+| Authentication | [`Libs/Services/Authentication/README.md`](Libs/Services/Authentication/README.md) |
+| Timeout utility | [`Libs/Services/Timeout_Validation/README.md`](Libs/Services/Timeout_Validation/README.md) |
+| Platform abstraction | [`Platforms/README.md`](Platforms/README.md) |
+| Native host verification | [`Tests/README.md`](Tests/README.md) |
+| Generated hardware configuration | [`Electronic-Lock.ioc`](Electronic-Lock.ioc) |
+| Flash partitioning | [`STM32F103xx_FLASH.ld`](STM32F103xx_FLASH.ld) |
+
+Component and presentation-service READMEs provide module-specific design notes and usage constraints under [`Libs/Components`](Libs/Components) and [`Libs/Services`](Libs/Services).
+
+### Source-of-truth policy
+
+Different artifacts own different kinds of information:
+
+- **CubeMX hardware configuration:** `Electronic-Lock.ioc`
+- **memory partitioning:** the active linker script
+- **product-specific compile-time bindings and timing values:** `App_Config.h`
+- **public callable contracts and public types:** module headers
+- **implemented runtime behavior:** production source files
+- **complete Lock Control behavioral model:** production LCS source plus the Lock Control README
+- **verification scenario catalog:** `Tests/README.md`
+- **design rationale and module-level constraints:** the corresponding module README
+- **project-level summary:** this root README
+
+When a summary in this file disagrees with the artifact that owns the corresponding contract, the owning artifact shall be treated as authoritative and this README shall be corrected.
+
+---
 
 The project is distributed under the terms of [LICENSE](LICENSE).

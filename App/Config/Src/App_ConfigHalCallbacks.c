@@ -1,14 +1,24 @@
 /**********************************************************************************************************************************
  * @file    App_ConfigHalCallbacks.c
- * @brief   STM32 HAL callback bridge for application-owned interrupt inputs.
+ * @brief   STM32 HAL EXTI callback bridge for application-owned interrupt inputs.
  *
- * @details Implements the strong HAL GPIO EXTI callback used by the CubeMX-generated interrupt handlers. The bridge filters the exit
- *          button and door-sensor lines and publishes their timestamps to the corresponding application-owned driver instances. It
- *          does not sample or debounce either input, call product services or command the lock from interrupt context.
+ * @details Implements the strong HAL_GPIO_EXTI_Callback() used by the CubeMX-generated EXTI interrupt path. The bridge identifies the
+ *          application-owned Exit Button and Door Sensor lines, captures the current application timestamp and forwards the interrupt
+ *          notification to the corresponding component driver.
+ *
+ *          The callback performs only bounded interrupt handoff. It does not sample GPIO state, execute debounce processing, update
+ *          services, dispatch Lock Control events or command the lock actuator from interrupt context. Stable input evaluation and
+ *          product-level event translation are deferred to the serialized application runtime through the Door Control Service.
+ *
+ * @note    The callback may observe an EXTI edge before the corresponding component driver has completed initialization. Driver
+ *          NotifyInterrupt() contracts shall therefore reject or ignore premature notifications safely.
+ *
+ * @note    This module is part of the App composition boundary and shall not contain product-state policy or general runtime
+ *          orchestration.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-25
+ * @version 1.1.0
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes

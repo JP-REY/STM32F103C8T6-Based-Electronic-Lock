@@ -90,7 +90,8 @@ flowchart TD
     UPDATE["ExitButton_Update<br/>application context"]
     GPIO["GPIO Platform Interface"]
     EVENT["Debounced Button Event"]
-    APP["Application / Lock Policy"]
+    DCS["Door Control Service"]
+    APP["App Core / Lock Control"]
     ACTUATOR["Lock Actuator"]
 
     BUTTON --> EXTI
@@ -98,8 +99,10 @@ flowchart TD
     NOTIFY --> UPDATE
     UPDATE --> GPIO
     UPDATE --> EVENT
-    EVENT --> APP
-    APP --> ACTUATOR
+    EVENT --> DCS
+    DCS --> APP
+    APP -->|"Authorized action"| DCS
+    DCS --> ACTUATOR
 ```
 
 The EXTI callback does not read the GPIO or wait for contact bounce to finish. It publishes interrupt activity to the driver. A serialized application loop or service calls `ExitButton_Update()` periodically to validate the stable input level and produce an event.
@@ -107,9 +110,10 @@ The EXTI callback does not read the GPIO or wait for contact bounce to finish. I
 This architecture keeps human-scale timing and application behavior outside the ISR.
 
 In the current STM32F103 integration, App Config binds the active-low button to
-PB10 with a pull-up and rising/falling EXTI, configures a 20 ms debounce interval
-and forwards HAL notifications through `App_ConfigHalCallbacks.c`. The planned
-Door Control Service will own periodic updates and request-to-exit policy.
+PA0 with a pull-up and rising/falling EXTI, configures a 20 ms debounce interval
+and forwards HAL notifications through `App_ConfigHalCallbacks.c`. The Door
+Control Service owns periodic updates and the caller-owned event slot; App Core
+maps a validated press into the request-to-exit event consumed by LCS.
 
 ---
 
@@ -169,7 +173,7 @@ The driver is **not responsible** for:
 - Calling the STM32 HAL interrupt handler.
 - Blocking inside an ISR.
 - Directly controlling the lock actuator.
-- Selecting the unlock duration.
+- Selecting the authorized access and door-aware relock sequence.
 - Applying authorization or alarm policy.
 - Detecting damaged wires or electrical tampering.
 - Retaining events in a queue.
@@ -532,9 +536,11 @@ void ExitButtonExample_Update(void)
 
 `EXIT_BUTTON_GPIO_PIN_NUMBER` represents the zero-based pin number expected by `PGPIO_Init()`. `EXIT_BUTTON_Pin` represents the HAL bit mask supplied to `HAL_GPIO_EXTI_Callback()`.
 
-The consuming service should retain `event` in its runtime object and convert
-`EXIT_BUTTON_EVENT_PRESS` into a semantic request-to-exit event. It shall
-establish the finite unlock deadline before commanding the Lock Actuator Driver.
+The consuming Door Control Service retains `event` in the application-owned
+runtime slot. App Core converts `EXIT_BUTTON_EVENT_PRESS` into
+`LCS_EVENT_EXIT_REQUEST`; the resulting App Executor action requests unlock
+through DCS. Relocking then follows the same door-position confirmation path as
+authenticated access and has no standalone finite unlock deadline.
 
 The example uses a generic 40 ms interval. The current product configuration
 uses `APP_EXIT_BUTTON_DEBOUNCE_TIME_MS` with a value of 20 ms.
@@ -581,7 +587,7 @@ The driver produces input events only. It does not call `LockActuator_Unlock()`.
 The higher-level Door Control Service and application policy are responsible for:
 
 - Accepting or rejecting the request-to-exit event.
-- Establishing a finite unlock timeout.
+- Coordinating the door-position-aware relock sequence through App Core and LCS.
 - Commanding the actuator in the required safe order.
 - Providing display, LED or sound feedback.
 - Returning the actuator to the locked command on every terminal path.
@@ -661,9 +667,9 @@ Current implementation limitations:
 - No event timestamp is returned to the application.
 - No internal synchronization for multiple application-context callers.
 - The sequence handoff assumes atomic aligned 32-bit access on the target platform.
-- The STM32F103 App binds and initializes the component on PB10 and publishes
-  EXTI notifications. Periodic `ExitButton_Update()` calls and request-to-exit
-  policy await the planned Door Control Service.
+- The STM32F103 App binds and initializes the component on PA0 and publishes
+  EXTI notifications. `DCS_Update()` performs periodic processing, and App Core
+  maps each validated press into the current request-to-exit policy.
 
 ---
 

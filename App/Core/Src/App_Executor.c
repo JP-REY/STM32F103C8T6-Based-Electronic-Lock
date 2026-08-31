@@ -2,18 +2,26 @@
  * @file    App_Executor.c
  * @brief   Executes semantic Lock Control actions for the electronic-lock application.
  *
- * @details Converts each LCS_Action_t selected by the authoritative Lock Control state machine into coordinated operations across
- *          Credential Entry, Authentication, Credential Register, Credential Storage, timeout management, the lock actuator and
- *          presentation services. Immediate results are returned as semantic follow-up events for bounded dispatch by App Core.
+ * @details Converts each LCS_Action_t selected by the authoritative Lock Control state machine into concrete application side effects
+ *          across Credential Entry, Authentication, Credential Register, Credential Storage, application-owned timeout management,
+ *          Door Control and presentation services.
  *
- *          The executor borrows the runtime-object registry owned by App Config. It also owns the application fail-safe endpoint
- *          and the explicit erasure of transient or retained credential material during terminal fault handling.
+ *          Operations with an immediate semantic result return an LCS_Event_t follow-up to App Core, allowing the bounded synchronous
+ *          Lock Control action/event dispatch chain to continue without moving product-state decisions into the executor.
+ *
+ *          The executor borrows the runtime-object registry and credential buffers owned by App Config. It also owns the common
+ *          controlled-reset endpoint used for terminal application faults, including best-effort restoration of the configured safe
+ *          locked request, cancellation of transient activity and explicit erasure of sensitive runtime credential material before
+ *          requesting system reset.
+ *
+ * @note    Product-state transitions and policy remain exclusively owned by the Lock Control Service. App Executor performs only the
+ *          side effects selected by LCS actions and reports immediate outcomes as semantic events.
  *
  * @note    Execution is synchronous, serialized and non-reentrant. App Core is the only intended caller.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    2026-08-23
+ * @version 1.1.0
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes

@@ -1,20 +1,27 @@
 /**********************************************************************************************************************************
  * @file    App_Core.h
- * @brief   Public synchronous interface of the electronic-lock application core.
+ * @brief   Public lifecycle and execution interface of the electronic-lock application.
  *
- * @details Defines the public lifecycle and execution entry points of the electronic-lock application. The module acts as the
- *          orchestration boundary between CubeMX-generated resources, platform interfaces, component drivers and domain/UI
- *          services, including credential entry, replacement, persistence and authentication coordination.
+ * @details Defines the public entry points used to initialize and cooperatively execute the electronic-lock application. App_Init()
+ *          establishes the complete application runtime before App_ReadInput() and App_Dispatch() are used during normal operation.
  *
- *          Concrete handles and dependency bindings are owned by App Config and remain private to the App layer. Callers therefore
- *          interact with application operations without depending on STM32, Platform, adapter, component or service types.
+ *          App_ReadInput() owns Matrix Keyboard acquisition at the public application boundary, while App_Dispatch() advances
+ *          application timing, Door Control, presentation services and deferred physical-input event processing. Product-state
+ *          decisions remain owned by the Lock Control Service and concrete semantic side effects are executed internally by
+ *          App Executor.
  *
- * @note    App_Init() shall be called after CubeMX peripheral initialization and before the first App_ReadInput() or
- *          App_Dispatch() call.
+ *          Product bindings, Platform descriptors, component handles, service runtimes and credential buffers are owned internally
+ *          by App Config. Public callers therefore interact with the application without depending on STM32 HAL, Platform, adapter,
+ *          component or service implementation types.
+ *
+ * @note    App_Init() shall be called after CubeMX-generated peripheral initialization and shall complete successfully before the
+ *          first App_ReadInput() or App_Dispatch() call.
+ *
+ * @note    Public execution entry points are intended for serialized cooperative use and are not reentrant.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    Aug 22, 2026
+ * @version 1.2.0
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 
 #ifndef APP_CORE_INC_APP_CORE_H_

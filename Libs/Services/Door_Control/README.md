@@ -332,7 +332,7 @@ Each component stores:
 
 No delay loop is used. A later edge restarts the quiet interval. Events are not queued, so `App_Dispatch()` must continue running.
 
-The application currently configures 20 ms debounce for both inputs.
+The application currently configures 20 ms debounce for the Exit Button and 500 ms debounce for the Door Sensor.
 
 ---
 
@@ -419,10 +419,20 @@ sequenceDiagram
         LCS-->>APP: RETURN_TO_LOCKED_FROM_GRANTED_ACCESS
         APP->>DCS: DCS_RequestLock()
         DCS->>DS: DoorSensor_GetState()
-        DCS->>LA: LockActuator_Lock() if still ACTIVE
-    else Current status is IDLE or UNKNOWN
-        Note over APP,LCS: No READY_TO_LOCK event is dispatched
-        Note over APP,LCS: Recovery/retry policy is not yet defined by the current contract
+        alt Final lock request is APPROVED
+            DCS->>LA: LockActuator_Lock()
+            APP->>APP: Restore locked presentation
+        else Final lock request is DENIED
+            APP->>LCS: DOOR_POSITION_NOT_CONFIRMED
+            Note over APP,LCS: LCS returns to ACCESS_UNLOCKED
+        else Final lock request FAILED
+            APP->>APP: Controlled reset cleanup
+        end
+    else Current status is IDLE
+        APP->>LCS: DOOR_POSITION_NOT_CONFIRMED
+        Note over APP,LCS: LCS returns to ACCESS_UNLOCKED
+    else Current status is UNKNOWN
+        APP->>APP: Controlled reset cleanup
     end
 ```
 
@@ -430,9 +440,9 @@ The two current-level checks are intentional. `DCS_GetSensorStatus()` verifies t
 ready-to-lock decision. `DCS_RequestLock()` then rechecks the sensor immediately before the actuator command so a late contact change
 cannot silently bypass the normal interlock.
 
-The current LCS contract commits `LOCKED` before returning `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS`. Therefore a later
-`DCS_RequestLock()` denial or actuator failure cannot currently be reported back to LCS through a dedicated action-execution result event.
-This is an integration limitation and must be handled explicitly by safe App policy until such feedback is modeled.
+The current LCS contract commits `LOCKED` before returning `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS`. App Executor reconciles the final
+`DCS_RequestLock()` result synchronously: `DENIED` produces `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`, whose dedicated `LOCKED` transition
+returns the FSM to `ACCESS_UNLOCKED`; `FAILED` enters the controlled-reset path. Only `APPROVED` restores locked presentation.
 
 ### Request to exit
 
@@ -476,7 +486,10 @@ door-position and relock sequence.
 | Sensor is `IDLE` or `UNKNOWN` during normal lock request | Returns `DCS_LOCK_REQUEST_DENIED`; actuator is not commanded. |
 | `DCS_GetSensorStatus()` obtains UNKNOWN | Returns `DCS_OPERATION_OK` with `DCS_SENSOR_STATUS_UNKNOWN`; caller must apply policy. |
 | Lock Actuator command fails | Returns a failed operation status. |
-| Final relock is denied or fails after LCS already returned the relock action | DCS exposes the result, but no current LCS action-execution failure event consumes it. |
+| Synchronous confirmation reports `IDLE` | App Executor returns `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`; LCS returns from `READY_TO_LOCK` to `ACCESS_UNLOCKED`. |
+| Synchronous confirmation reports `UNKNOWN` | App Executor enters controlled-reset cleanup. |
+| Final relock is denied after LCS returned the relock action | App Executor returns `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`; the dedicated `LOCKED` transition reconciles the FSM to `ACCESS_UNLOCKED`. |
+| Final relock actuator command fails | App Executor enters controlled-reset cleanup. |
 | Component update fails | `DCS_Update()` currently discards the status; no DCS fault event exists. |
 | EXTI notification arrives before component initialization | Component NotifyInterrupt function ignores it. |
 | Unsupported EXTI source reaches the shared callback | Callback ignores it. |
@@ -511,23 +524,22 @@ operation changes LCS state by itself.
 Current verification includes:
 
 * Full STM32 Debug firmware compilation with the ARM toolchain.
-* Native Door Sensor interrupt/debounce checks for pre-debounce silence, edge replacement, one-shot ACTIVE/IDLE events and unknown GPIO
-  handling.
-* Native LCS scenarios for authenticated unlock, request-to-exit unlock, door-position confirmation, confirmation timeout,
-  ready-to-lock completion and invalid door events in unrelated states.
+* The 20-scenario native LCS suite, including authenticated unlock, request-to-exit unlock, door-position confirmation, confirmation
+  timeout, ready-to-lock completion, lost-confirmation recovery and final-relock-denial reconciliation.
 
 Target validation shall additionally verify:
 
 * PA0 and PA11 rising/falling EXTI delivery.
 * Correct active-low electrical interpretation for both inputs.
-* Measured 20 ms debounce behavior under contact bounce.
+* Measured 20 ms Exit Button and 500 ms Door Sensor debounce behavior under contact bounce.
 * Door open then close producing `IDLE` then `ACTIVE` exactly once.
 * No actuator command from interrupt context.
 * Normal lock denial while the door contact is not permissive.
 * `DCS_GetSensorStatus()` reporting ACTIVE after the confirmation delay before `READY_TO_LOCK` is dispatched.
-* No `READY_TO_LOCK` dispatch when the synchronous status is IDLE or UNKNOWN.
-* Final `DCS_RequestLock()` denial if the contact changes after confirmation but before actuator execution.
-* Product recovery behavior if the door reopens during the confirmation delay.
+* `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` recovery when the synchronous status is IDLE.
+* Controlled-reset recovery when the synchronous status is UNKNOWN.
+* Final `DCS_RequestLock()` denial and `LOCKED`-state reconciliation if the contact changes after confirmation but before actuator execution.
+* Controlled-reset recovery when the final actuator lock command fails.
 
 ---
 
@@ -539,11 +551,11 @@ Target validation shall additionally verify:
 * Door Sensor `IDLE` is not yet translated into an LCS door-open event.
 * The normal lock request is synchronous and not retried.
 * The actuator reports command success, not confirmed mechanical position.
-* No explicit negative door-confirmation event is currently defined for `DCS_SENSOR_STATUS_IDLE` or `UNKNOWN` while LCS waits in its
-  ready-to-lock phase; retry/recovery policy remains an App/LCS design decision.
-* A denied or failed final relock can occur after LCS has already committed its logical locked state; no current LCS action-execution
-  failure event reconciles that mismatch.
-* Product behavior after a denied relock command requires further explicit LCS/App policy.
+* `DCS_SENSOR_STATUS_IDLE` has explicit semantic recovery, while `UNKNOWN` is intentionally escalated to controlled reset rather than
+  represented by a separate LCS event.
+* Final relock denial has explicit LCS reconciliation, but the retry depends on a later debounced `ACTIVE` door event; DCS itself does
+  not schedule or retry the request.
+* Final actuator-command failure is recoverable only through the controlled-reset path; no non-reset retry policy is modeled.
 * The service has no readiness query and relies on caller-maintained attachment preconditions.
 * Opaque `void*` attachment prevents compile-time concrete-type checking at the public DCS boundary.
 * The service supports exactly one door mechanism.
@@ -561,7 +573,7 @@ When extending DCS:
 5. Define ownership and lifetime for every attached pointer.
 6. Update App Config, App Core, root README, component READMEs and native tests together.
 7. Add explicit failure propagation before claiming update failures are fail-safe.
-8. Define both positive and negative result events before adding a new synchronous LCS confirmation handshake.
+8. Preserve the current `ACTIVE` / `IDLE` / `UNKNOWN` mapping when extending the synchronous LCS confirmation handshake.
 9. Preserve the final sensor interlock immediately before a normal actuator lock command.
 10. Verify both native logic and the complete ARM firmware build.
 
