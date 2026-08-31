@@ -96,8 +96,8 @@ symbol exposed by the module.
 
 CSS is stateless. It retains no RAM credential, has no public handle and
 requires no initialization call. Persistent state exists only in the
-linker-reserved Flash record; runtime credentials remain owned by the
-application or by a future dedicated Credential Runtime service.
+linker-reserved Flash record; the current runtime credential is owned by App
+Config and managed through App Executor.
 
 ---
 
@@ -161,7 +161,8 @@ flowchart LR
     APP_CORE -->|"confirmed six digits"| CSS
     CSS --> FLASH
     FLASH --> PAGE63
-    CSS -->|"copy valid digits"| RUNTIME
+    CSS -->|"lazy first-auth copy"| RUNTIME
+    APP_CORE -->|"publish after save success"| RUNTIME
     RUNTIME --> AS
 ```
 
@@ -175,23 +176,26 @@ calls LCS directly.
 
 The application coordinates CSS in three places:
 
-1. **Startup:** retrieve the registered credential or detect that none exists.
+1. **Startup:** query whether a valid registered credential is available.
 2. **Registration completion:** save the newly confirmed credential and update
    runtime storage only after persistent verification succeeds.
-3. **Authentication setup:** provide the caller-owned runtime credential to the
-   authentication path without reading Flash for every candidate attempt.
+3. **First authentication:** lazily copy the installed credential into the
+   caller-owned runtime buffer, then reuse it without reading Flash for every attempt.
 
 CSS does not dispatch `LCS_Event_t` values directly. The application interprets
 `CSS_OpStatus_t` and decides which Lock Control event is appropriate.
 
-The intended startup mapping is:
+The current startup mapping is:
 
-| CSS result | Application interpretation |
+| Current startup observation | Application interpretation |
 |:---|:---|
-| `CSS_OPERATION_OK` | runtime credential is ready; continue normal initialization |
-| `CSS_OPERATION_NOT_FOUND` | dispatch `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` and begin first registration |
-| `CSS_OPERATION_STORAGE_ERROR` | persistent storage is not trustworthy; enter the application fault policy |
-| `CSS_OPERATION_INVALID_ARGUMENT` | integration defect; destination contract was violated |
+| `CSS_HasCredential() == true` | dispatch `LCS_EVENT_INIT_OK`; defer byte retrieval until authentication is requested |
+| `CSS_HasCredential() == false` | dispatch `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` and begin mandatory first registration |
+
+Because `CSS_HasCredential()` intentionally collapses an absent record and a
+Platform read failure into `false`, the current startup path does not distinguish
+those two causes. During lazy retrieval, any `CSS_GetCredential()` result other
+than `CSS_OPERATION_OK` enters controlled-reset cleanup.
 
 During credential registration, `CSS_OPERATION_OK` maps to
 `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS`; every failed save or readback
@@ -265,8 +269,8 @@ CSS does not own:
 * Flash wear leveling, multiple records or transaction journaling.
 
 These responsibilities belong to input services, Credential Register staging,
-Authentication, App Core, Lock Control, presentation services, the
-Flash Platform or a future security/storage design.
+Authentication, App Core and App Executor, Lock Control, presentation services,
+the Flash Platform or a future security/storage design.
 
 ---
 
@@ -608,27 +612,24 @@ use `CSS_GetCredential()` directly.
 
 ### 11.1 Startup Credential Decision
 
-The robust startup path performs one retrieval rather than a separate Boolean
-check followed by a second read:
+The current startup path performs an availability gate and deliberately defers
+copying credential bytes into RAM:
 
 ```mermaid
 flowchart TD
-    A["Application dependencies <br/>initialized"] --> B["CSS_GetCredential runtime<br/> buffer"]
-    B --> C{"CSS result"}
-    C -->|"OK"| D["Runtime credential ready"]
+    A["Application dependencies <br/>initialized"] --> B["CSS_HasCredential"]
+    B --> C{"Valid record available?"}
+    C -->|"Yes"| D["Dispatch INIT_OK"]
     D --> E["Activate normal locked <br/>operation"]
-    C -->|"NOT_FOUND"| F["Dispatch credential not <br/>registered path"]
-    F --> G["LCS enters Register<br/>First Entry"]
-    C -->|"STORAGE_ERROR<br/>INVALID_ARGUMENT"| H["Enter application fault policy"]
+    E --> F["Keep runtime credential<br/>invalid until first auth"]
+    C -->|"No"| G["Dispatch credential not <br/>registered path"]
+    G --> H["LCS enters Register<br/>First Entry"]
 ```
-
-Using one retrieval avoids reading the record twice and preserves the difference
-between a normal first boot and a storage integration failure.
 
 The `CREDENTIAL_NOT_REGISTERED` boot route is admitted by the LCS inactive
 gate and activates the FSM directly in credential-register first entry. The
-remaining work is in App Core: call `CSS_GetCredential()` during startup and
-select this route when CSS reports `CSS_OPERATION_NOT_FOUND`.
+current Boolean gate treats an unreadable or invalid record as unavailable; it
+does not preserve the richer `CSS_GetCredential()` failure distinction at boot.
 
 ### 11.2 Credential Registration Completion
 
@@ -636,7 +637,7 @@ The intended registration completion order is:
 
 ```mermaid
 sequenceDiagram
-    participant APP as App Core
+    participant APP as App Core / Executor
     participant LCS as Lock Control Service
     participant CRS as Credential Register Staging
     participant CSS as Credential Storage Service
@@ -671,9 +672,12 @@ persisted.
 
 ### 11.3 Runtime Authentication Integration
 
-CSS shall not be read on every authentication attempt. Startup or successful
-registration loads a caller-owned runtime credential once; Authentication then
-compares candidates against that runtime value.
+CSS is not read on every authentication attempt. On the first
+`LCS_ACTION_REQUEST_AUTHENTICATION`, App Executor calls `CSS_GetCredential()`
+only when its private `runtime_credential_valid` flag is false. Later attempts
+reuse that application-owned runtime value. Successful registration copies the
+verified proposed credential into the same runtime buffer and marks it valid
+without requiring another Flash read.
 
 This boundary provides:
 
@@ -682,9 +686,9 @@ This boundary provides:
 * explicit runtime credential lifetime and clearing policy;
 * one place to refresh the reference after credential replacement.
 
-The current Authentication service still contains a firmware-compiled reference
-credential. Replacing that constant with a runtime credential is a separate
-integration change and not a responsibility of CSS.
+The Authentication Service already accepts both candidate and installed runtime
+credential buffers. It retains neither value and therefore requires no CSS
+dependency or configuration call when the runtime credential changes.
 
 ---
 
@@ -773,8 +777,8 @@ Consequences:
 
 `CSS_GetCredential()` copies digits out instead of returning an internal pointer
 or retaining the caller destination. This makes ownership explicit and lets the
-application or a future Credential Runtime service define lifetime, access and
-clearing policy.
+current App Config/App Executor runtime or a future dedicated owner define
+lifetime, access and clearing policy.
 
 CSS never exposes its private serialized record as the authentication data
 model.
@@ -1018,15 +1022,16 @@ Current limitations:
 12. Local encoded-record variables and CPU registers are not guaranteed to be
     scrubbed after every operation.
 13. Firmware flashing with mass erase removes the credential.
-14. Authentication still requires a separate migration from its compiled
-    reference credential to caller-owned runtime data.
+14. Startup availability intentionally collapses an absent record and a Platform
+    read failure into the same first-registration route.
 
 Potential future improvements shall be driven by product security and recovery
 requirements:
 
-* introduce a dedicated Credential Runtime owner with explicit initialization,
-  refresh and clearing rules;
-* migrate Authentication to accept or initialize from the runtime credential;
+* replace the function-local runtime-valid flag with a dedicated Credential
+  Runtime owner if broader initialization, refresh and clearing rules are needed;
+* preserve the current two-buffer Authentication boundary if runtime ownership
+  moves to a dedicated service;
 * add two-slot or journaled records with generation and commit metadata for
   interrupted-update recovery;
 * define a versioned record header before multiple schema versions are needed;

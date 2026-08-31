@@ -1,20 +1,30 @@
 /**********************************************************************************************************************************
  * @file    App_Config.c
- * @brief   Static product configuration and application runtime-object storage.
+ * @brief   Static product configuration and application-owned runtime-object storage.
  *
- * @details Defines the immutable keyboard policy and owns every Platform descriptor, adapter context, component handle,
- *          instance-based service runtime and credential buffer composed by the App layer. A single immutable registry exposes
- *          borrowed pointers to App_Core.c, App_Executor.c and the HAL callback bridge while preserving static lifetime and
- *          centralized ownership.
+ * @details Defines the immutable product configuration and owns the statically allocated Platform descriptors, adapter contexts,
+ *          component handles, instance-based service runtimes, event/status slots and credential buffers composed by the App layer.
  *
- *          This module performs no hardware initialization and executes no business workflow. App_Init() binds and initializes the
- *          object graph; App_ExecuteAction() operates on it in response to semantic Lock Control actions.
+ *          These objects are published through one immutable App_RuntimeInstances_t registry whose bindings remain fixed for the
+ *          complete firmware lifetime. App Core and App Executor borrow references from that registry while initializing,
+ *          orchestrating and operating on the shared application runtime objects.
  *
- * @note    No dynamic allocation is used. All referenced storage remains valid for the complete firmware lifetime.
+ *          The application HAL callback bridge accesses the application-owned Door Sensor and Exit Button instances required to
+ *          forward EXTI notifications into their component interrupt-handoff paths.
+ *
+ *          This module performs no hardware initialization, event orchestration, product-state decision or semantic-action execution.
+ *          App Core initializes and coordinates the object graph, Lock Control owns product-state policy, and App Executor performs
+ *          the concrete side effects selected by semantic LCS actions.
+ *
+ * @note    No dynamic allocation is used. All owned objects and buffers have static storage duration and remain valid for the complete
+ *          firmware lifetime.
+ *
+ * @note    The App_RuntimeInstances_t registry is immutable only with respect to its bindings. Most referenced objects remain mutable
+ *          because they contain normal component, service or application runtime state.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    2026-08-25
+ * @version 1.2.0
+ * @date    Aug 30, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes

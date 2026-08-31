@@ -1599,9 +1599,9 @@ The in-memory failure counter is not persistent. Resetting or power-cycling the 
 
 The dedicated [host test suite](../../../Tests/README.md) compiles the production `Lock_Control_Service.c` directly and validates the public `LCS_Process()` contract without accessing private state.
 
-Following the first-boot enrollment policy update, the suite shall cover:
+The current 20-scenario catalog covers:
 
-- Every transition record in the current 40-record table.
+- Accepted behavioral paths spanning the current 40-record table, without inferring one-to-one structural coverage from black-box scenarios.
 - Sentinel, out-of-range, and representative state-invalid events with explicit state-preservation checks.
 - Normal-boot and first-boot guard selection for shared cancellation and registration-completion events.
 - Guard boundary conditions for authentication failures and registration mismatches.
@@ -1618,6 +1618,8 @@ Following the first-boot enrollment policy update, the suite shall cover:
 - Authenticated access through door-position confirmation, bounded confirmation delay, `READY_TO_LOCK`, and relock.
 - Request-to-exit unlock through the same shared relock sequence.
 - Preservation of authentication-failure history across request-to-exit access.
+- Recovery from unlock execution failure when force-lock succeeds, and controlled-reset escalation when that fallback also fails.
+- Recovery from lost door confirmation both before final authorization and after a denied final relock request.
 - Invalid-event state preservation in `ACCESS_UNLOCKED`, `DOOR_SENSOR_CONFIRMATION`, and `READY_TO_LOCK`.
 - Storage success, storage failure, and success-feedback completion paths.
 - Rejection of `AUTH_SUCCESS` when no request is pending.
@@ -1625,7 +1627,7 @@ Following the first-boot enrollment policy update, the suite shall cover:
 
 Because the service has a private singleton and no public reset API, CTest runs each scenario in a separate host process. Every scenario therefore starts from the statically initialized `BOOT` state without adding a production reset hook.
 
-The host-test README remains the authoritative execution and maintenance guide. Its [scenario catalog](../../../Tests/README.md#7-lcs-scenario-catalog) shall be updated to match the new boot-policy transitions, and its [extension procedure](../../../Tests/README.md#12-extending-the-suite-when-lcs-changes) defines the coverage expected when states, events, guards, effects, actions, or transitions change.
+The host-test README remains the authoritative execution and maintenance guide. Its [scenario catalog](../../../Tests/README.md#7-lcs-scenario-catalog) is synchronized with the current 20 registered CTest processes, including first-boot exit policy, mismatch restart, relock reconciliation and unlock-failure recovery. Its [extension procedure](../../../Tests/README.md#12-extending-the-suite-when-lcs-changes) defines the coverage expected when states, events, guards, effects, actions, or transitions change.
 
 ---
 

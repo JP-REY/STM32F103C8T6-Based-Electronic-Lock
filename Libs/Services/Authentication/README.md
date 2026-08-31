@@ -46,7 +46,7 @@
 * [10. Operation Flows](#10-operation-flows)
 
   * [10.1 Normal Authentication](#101-normal-authentication)
-  * [10.2 Startup Runtime Loading](#102-startup-runtime-loading)
+  * [10.2 Lazy Runtime Loading](#102-lazy-runtime-loading)
   * [10.3 Credential Replacement](#103-credential-replacement)
 * [11. Usage Example](#11-usage-example)
 * [12. Design Decisions](#12-design-decisions)
@@ -76,11 +76,11 @@ The public operation receives two caller-owned arrays containing exactly six nor
 1. `Candidate`: the credential just entered by the user.
 2. `Credential`: the installed credential retained in application runtime storage.
 
-The service compares both arrays and returns an `AS_Result_t` that distinguishes successful authentication, credential rejection and invalid API input. It does not know whether successful authentication will authorize bounded unlock or entry into credential registration; that pending-purpose decision remains in the [Lock Control Service](../Lock_Control/README.md).
+The service compares both arrays and returns an `AS_Result_t` that distinguishes successful authentication, credential rejection and invalid API input. It does not know whether successful authentication will authorize the access-unlock path or entry into credential registration; that pending-purpose decision remains in the [Lock Control Service](../Lock_Control/README.md).
 
 AS owns no mutable state and no reference credential. It does not require initialization, a public handle, a singleton instance or a credential-configuration function. Every request is completely determined by the two buffers supplied to `AS_Authenticate()`.
 
-The installed runtime credential is normally populated by the application from the [Credential Storage Service](../Credential_Storage/README.md) during startup and replaced only after a newly registered credential has been persisted successfully.
+Startup uses the [Credential Storage Service](../Credential_Storage/README.md) only as an availability gate. The installed credential bytes are populated lazily before the first authentication action and replaced only after a newly registered credential has been persisted successfully.
 
 The acronym `AS` means **Authentication Service** and prefixes every public symbol exposed by the module.
 
@@ -112,7 +112,7 @@ The acronym `AS` means **Authentication Service** and prefixes every public symb
 
 ### 3.1 Layer Placement
 
-AS belongs to the hardware-independent Services layer. App Core owns the temporary candidate and installed runtime credential passed through the public comparison boundary:
+AS belongs to the hardware-independent Services layer. App Config owns the temporary candidate and installed runtime credential passed through the public comparison boundary; App Core and App Executor coordinate their use:
 
 ```mermaid
 flowchart LR
@@ -125,7 +125,7 @@ flowchart LR
     end
 
     subgraph APP["Application Layer"]
-        CORE["App Core<br/>orchestration"]
+        CORE["App Core / Executor<br/>orchestration"]
         CANDIDATE["Temporary candidate<br/>caller-owned"]
         RUNTIME["Installed credential<br/>runtime object"]
     end
@@ -137,7 +137,8 @@ flowchart LR
 
     CES --> CORE
     CORE --> CANDIDATE
-    CSS -->|"startup load / verified replacement"| RUNTIME
+    CSS -->|"lazy first-auth load"| RUNTIME
+    CORE -->|"publish after verified replacement"| RUNTIME
     CANDIDATE -->|"Candidate"| AUTH
     RUNTIME -->|"Credential"| AUTH
     AUTH -->|"AS_Result_t"| CORE
@@ -151,22 +152,24 @@ The arrows describe application orchestration rather than direct service-to-serv
 The expected normal authentication sequence is:
 
 1. CES reports a complete candidate.
-2. App Core obtains a bounded caller-owned copy with `CES_GetCandidate()`.
-3. App Core ends the CES session so CES erases its internal candidate.
-4. App Core verifies that the installed runtime credential is available.
-5. App Core calls `AS_Authenticate(Candidate.Digits, RuntimeCredential)`.
-6. App Core maps the result into `LCS_EVENT_AUTH_SUCCESS` or `LCS_EVENT_AUTH_FAILURE`.
-7. App Core erases the complete candidate copy.
+2. App Executor obtains a bounded application-owned copy with `CES_GetCandidate()`.
+3. App Executor ends the CES session so CES erases its internal candidate.
+4. App Executor loads the installed runtime credential with `CSS_GetCredential()` if it has not already been loaded or replaced.
+5. App Executor calls `AS_Authenticate(Candidate.Digits, RuntimeCredential)`.
+6. App Executor maps the result into `LCS_EVENT_AUTH_SUCCESS` or `LCS_EVENT_AUTH_FAILURE`, which App Core dispatches to LCS.
+7. App Executor erases the complete candidate copy.
 
 The runtime credential remains available for later requests. It is not a temporary authentication candidate and shall not be erased after every comparison.
 
 ### 3.3 Runtime Credential Lifecycle
 
-The installed runtime credential belongs to App Core or to a future dedicated runtime-credential owner. Its lifecycle is separate from AS:
+The installed runtime credential belongs to App Config and is managed by App Executor. Its lifecycle is separate from AS:
 
 ```text
 startup
-  -> CSS_GetCredential(runtime)
+  -> CSS_HasCredential() availability gate
+  -> first authentication action
+  -> CSS_GetCredential(runtime) when not yet valid
   -> repeated AS_Authenticate(candidate, runtime)
   -> successful credential replacement
   -> CSS_SaveCredential(new credential)
@@ -177,9 +180,10 @@ Recommended ownership rules:
 
 | Condition | Runtime credential handling |
 |---|---|
-| CSS returns a valid credential during startup | Mark runtime object valid and use it as the AS reference. |
-| CSS reports no installed credential | Keep runtime object invalid and enter first-registration flow. |
-| CSS startup read fails | Keep runtime object invalid and enter controlled fault policy. |
+| `CSS_HasCredential()` is true during startup | Activate locked operation while leaving runtime bytes unloaded. |
+| `CSS_HasCredential()` is false during startup | Keep runtime object invalid and enter first-registration flow. |
+| Lazy `CSS_GetCredential()` succeeds | Mark runtime object valid and use it as the AS reference. |
+| Lazy `CSS_GetCredential()` fails | Erase transient data and enter controlled-reset policy. |
 | Authentication completes | Preserve runtime credential; erase only the candidate. |
 | New credential is persisted successfully | Replace the runtime credential with the verified new value. |
 | Persistent replacement fails | Do not publish the proposed credential as the installed runtime reference. |
@@ -303,7 +307,7 @@ Both arrays contain numeric decimal digits and have no string terminator. The no
 
 The caller shall provide at least `AS_CREDENTIAL_LENGTH` readable bytes for each non-NULL pointer. C array-parameter syntax documents the required capacity but does not enforce or recover the actual object size.
 
-CES, CRS, CSS and AS currently expose independent V1 length constants. App Core shall ensure these contracts remain compatible when moving credential copies between service boundaries.
+CES, CRS, CSS and AS currently expose independent V1 length constants. App Config enforces their compatibility with `_Static_assert` declarations before the application moves credential copies between service boundaries.
 
 ### 7.2 Authentication Result
 
@@ -349,7 +353,7 @@ Index:       0    1    2    3    4    5
 Credential: [r0] [r1] [r2] [r3] [r4] [r5]
 ```
 
-AS neither creates nor persists this object. During normal startup, App Core obtains it from `CSS_GetCredential()`. After successful registration, App Core updates it only after `CSS_SaveCredential()` reports verified success.
+AS neither creates nor persists this object. App Executor obtains it from `CSS_GetCredential()` lazily on the first authentication request. After successful registration, App Executor updates it only after `CSS_SaveCredential()` reports verified success.
 
 This runtime object replaces the former private `AS_ConfiguredPin` constant. Authentication behavior can therefore follow the credential installed by the user rather than one value fixed in the firmware image.
 
@@ -374,8 +378,8 @@ Both buffers remain caller-owned:
 
 | Property | Candidate | Runtime credential |
 |---|---|---|
-| Owner | App Core temporary authentication context | App Core or future runtime-credential owner |
-| Typical source | `CES_GetCandidate()` | `CSS_GetCredential()` or verified registration output |
+| Owner | App Core temporary authentication context | App Config storage managed by App Executor |
+| Typical source | `CES_GetCandidate()` | Lazy `CSS_GetCredential()` or verified registration output |
 | Expected lifetime | One authentication request | Repeated requests during active runtime |
 | Modified by AS | No | No |
 | Pointer retained by AS | No | No |
@@ -457,7 +461,7 @@ The App Core integration sequence is:
 ```mermaid
 sequenceDiagram
     participant CES as Credential Entry
-    participant APP as App Core
+    participant APP as App Core / Executor
     participant AS as Authentication
     participant LCS as Lock Control
 
@@ -478,30 +482,34 @@ sequenceDiagram
     APP->>APP: Erase candidate copy
 ```
 
-### 10.2 Startup Runtime Loading
+### 10.2 Lazy Runtime Loading
 
-AS is not called until App Core has completed the startup credential decision:
+Startup verifies only that a valid persistent record is available. The first authentication action performs the actual copy into runtime storage:
 
 ```mermaid
 flowchart TD
-    BOOT["Application startup"] --> GET["CSS_GetCredential<br/>(runtime)"]
+    BOOT["Application startup"] --> HAS["CSS_HasCredential"]
+    HAS --> AVAILABLE{"Record available?"}
+    AVAILABLE -->|"No"| REGISTER["Dispatch first-registration <br/>route"]
+    AVAILABLE -->|"Yes"| LOCKED["Activate locked operation<br/>runtime still unloaded"]
+    LOCKED --> REQUEST["First REQUEST_AUTHENTICATION<br/>action"]
+    REQUEST --> GET["CSS_GetCredential<br/>(runtime)"]
     GET --> RESULT{"CSS result"}
     RESULT -->|"OK"| READY["Mark runtime credential <br/>valid"]
-    RESULT -->|"NOT_FOUND"| REGISTER["Dispatch first-registration <br/>route"]
-    RESULT -->|"STORAGE_ERROR"| FAULT["Controlled fault/reset policy"]
-    READY --> AUTH["Enable AS authentication <br/>requests"]
+    RESULT -->|"Failure"| FAULT["Controlled reset cleanup"]
+    READY --> AUTH["Call AS_Authenticate"]
 ```
 
-Reading Flash before every authentication is not required. The application retains the installed reference in RAM and passes it to stateless AS whenever a complete candidate is ready.
+Reading Flash before every authentication is not required. A function-local validity flag in App Executor prevents repeated retrieval; the application retains the installed reference in RAM and passes it to stateless AS whenever another complete candidate is ready.
 
 ### 10.3 Credential Replacement
 
 After CRS confirms a proposed credential:
 
-1. App Core obtains the validated copy from CRS.
-2. App Core calls `CSS_SaveCredential()`.
+1. App Executor obtains the validated copy from CRS.
+2. App Executor calls `CSS_SaveCredential()`.
 3. CSS writes and verifies the persistent record.
-4. Only after `CSS_OPERATION_OK` does App Core replace the installed runtime credential.
+4. Only after `CSS_OPERATION_OK` does App Executor replace the installed runtime credential.
 5. Subsequent `AS_Authenticate()` calls receive the new runtime reference.
 6. All transient registration and caller-owned temporary buffers are cleared.
 
@@ -558,7 +566,7 @@ static void App_AuthenticateReadyCandidate(void)
 }
 ```
 
-`App_ClearSensitiveObject()`, `App_DispatchLcsEvent()` and `App_EnterControlledFaultPolicy()` are application placeholders, not AS functions. Production code shall use the project-approved cleanup mechanism and ensure the runtime credential object was populated successfully by CSS.
+`App_ClearSensitiveObject()`, `App_DispatchLcsEvent()` and `App_EnterControlledFaultPolicy()` are application placeholders, not AS functions. Production code shall use the project-approved cleanup mechanism and ensure the runtime credential was loaded lazily from CSS or published after verified registration before calling AS.
 
 ---
 
@@ -759,8 +767,7 @@ Current limitations include:
 
 Possible future improvements include:
 
-* A shared credential-domain type used by CES, CRS, CSS, AS and App Core.
-* Compile-time credential-length compatibility assertions.
+* A shared credential-domain type used by CES, CRS, CSS and AS that can replace the independent length macros and current App Config `_Static_assert` compatibility checks.
 * A project-approved constant-time comparison routine.
 * A guaranteed non-elidable zeroization utility.
 * Authentication against a derived or keyed representation.

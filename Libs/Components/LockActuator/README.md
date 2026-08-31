@@ -84,7 +84,7 @@ The driver does not access MCU GPIO registers directly. All GPIO operations are 
 ```mermaid
 flowchart TD
 
-    APP["Application"]
+    APP["Door Control Service"]
     DRIVER["Lock Actuator Driver"]
     GPIO_IF["GPIO Platform Interface"]
     HAL["MCU / HAL"]
@@ -104,7 +104,7 @@ This architecture allows:
 - Reusing the driver across different microcontrollers.
 - Supporting different electrical command polarities.
 - Keeping external power-stage details outside the component driver.
-- Keeping application safety timing outside the low-level actuator interface.
+- Keeping door-position and relock policy outside the low-level actuator interface.
 
 ---
 
@@ -173,8 +173,8 @@ The driver is **not responsible** for:
 - Initializing the GPIO Platform handle.
 - Driving an inductive load directly.
 - Configuring or protecting the external power stage.
-- Limiting the unlock duration.
-- Scheduling automatic relocking.
+- Deciding which event authorizes relocking.
+- Scheduling or retrying relock requests.
 - Confirming mechanical bolt or door position.
 - Detecting jams, overcurrent or actuator travel failure.
 - Applying access-control policy.
@@ -197,7 +197,7 @@ The driver does not need to know:
 - The vendor HAL type used for the port.
 - The external transistor, MOSFET, relay or motor driver.
 - The actuator voltage or current requirements.
-- The mechanism used to enforce the application unlock timeout.
+- The door-position or application policy used to decide when relocking is safe.
 
 The `GPIO_Handle_t` passed to `LockActuator_Init()` is owned by the caller. It must remain valid while the lock actuator driver instance is in use.
 
@@ -388,7 +388,7 @@ LockActuator_OpStatus_t LockActuator_Unlock(
 **Notes:**
 
 - The function does not establish or enforce an unlock timeout.
-- The application shall guarantee a bounded unlock interval and safe relock path.
+- Higher layers shall coordinate the safe relock path; the current product waits for the required debounced door position, applies a bounded confirmation delay and rechecks the sensor before locking.
 - Successful GPIO writing does not confirm mechanical unlocking.
 
 ### 9.4 LockActuator_GetState
@@ -460,19 +460,18 @@ flowchart TD
 
     REQUEST{"Requested Command"}
     LOCK["LockActuator_Lock"]
-    DEADLINE["Establish Finite Unlock <br/>Deadline"]
     UNLOCK["LockActuator_Unlock"]
-    WAIT["Application Dispatches <br/>Deadline"]
-    RELOCK["LockActuator_Lock"]
+    WAIT["Higher Layer Observes<br/>Door / Product Policy"]
+    RELOCK["Later Lock Request"]
 
     REQUEST -- "Lock" --> LOCK
-    REQUEST -- "Unlock" --> DEADLINE
-    DEADLINE --> UNLOCK
+    REQUEST -- "Unlock" --> UNLOCK
     UNLOCK --> WAIT
     WAIT --> RELOCK
+    RELOCK --> LOCK
 ```
 
-The deadline is owned and enforced by the application, not by this driver.
+The condition and timing that lead from unlock to a later lock request are owned by higher layers, not by this driver.
 
 ---
 
@@ -513,28 +512,29 @@ bool LockActuatorExample_Init(void* GPIO_Port, uint16_t GPIO_Pin)
 
 bool LockActuatorExample_Unlock(void)
 {
-    /* Establish a finite application deadline before this request. */
     return LockActuator_Unlock(
                &LockActuator
            )== LOCK_ACTUATOR_OPERATION_OK;
 }
 
-void LockActuatorExample_OnUnlockTimeout(void)
+bool LockActuatorExample_Lock(void)
 {
-    (void)LockActuator_Lock(&LockActuator);
+    return LockActuator_Lock(
+               &LockActuator
+           )== LOCK_ACTUATOR_OPERATION_OK;
 }
 ```
 
 The GPIO port, pin and output configuration depend on the target board and external actuator circuit.
 
-For this project, PB8 LOW is the current safe locked request. App Core binds PB8
+For this project, PA8 LOW is the current safe locked request. App Core binds PA8
 to a Platform GPIO descriptor and initializes this component with
 `LOCK_ACTUATOR_ACTIVE_LEVEL_LOW`. Driver initialization does not write the GPIO;
 the startup safe level is established by CubeMX before `App_Init()`.
 
-App Executor currently commands the same Platform descriptor directly. The
-planned Door Control Service will become the runtime owner of lock/unlock
-commands and use this driver without changing the board binding.
+App Executor requests runtime lock, force-lock and unlock operations through the
+Door Control Service, which owns access to this driver and applies the current
+door-sensor interlock for normal relocking.
 
 ---
 
@@ -618,8 +618,8 @@ The following constraints apply when using the driver:
 - The selected active level must match the external actuator control circuit.
 - Internal handle members shall not be accessed or modified directly.
 - The output shall start in a hardware-defined safe state.
-- The application shall establish a finite deadline before requesting unlock.
-- The application shall request lock on timeout, denial, cancellation, reset and fault paths.
+- Higher layers shall define the authorized unlock and door-aware relock sequence before requesting commands.
+- Fail-safe paths shall use the Door Control force-lock operation when product policy requires the safe output independently from sensor state.
 - Calls shall be serialized because the driver provides no internal synchronization.
 
 > [!WARNING]
@@ -636,9 +636,9 @@ The Lock Actuator Driver can be used as a building block for:
 - Cabinet and enclosure locks.
 - GPIO-controlled relay interfaces.
 - Solenoid control interfaces.
-- Higher-level timed-unlock services.
+- Higher-level door-aware access services.
 
-Application-level logic determines when unlock is authorized and how long the unlocked command remains active.
+Application-level logic determines when unlock is authorized and which confirmed door condition permits a later relock request.
 
 ---
 
@@ -647,16 +647,15 @@ Application-level logic determines when unlock is authorized and how long the un
 Current implementation limitations:
 
 - No internal unlock timer or automatic relock.
-- No redundant hardware or software energization deadline.
+- No internal door-position trigger or relock scheduler.
 - No mechanical bolt-position feedback.
 - No door-position feedback.
 - No actuator current or power-stage diagnostics.
 - No jam, overcurrent or travel-time detection.
 - No internal synchronization for concurrent callers.
 - `LOCK_ACTUATOR_STATE_UNKNOWN` is reserved but is not returned by the current implementation.
-- App Core initializes the component on PB8, but App Executor still commands the
-  shared Platform GPIO directly. Runtime command ownership awaits the planned
-  Door Control Service.
+- App Core initializes the component on PA8, and the integrated Door Control
+  Service owns runtime lock, force-lock and unlock commands.
 
 ---
 

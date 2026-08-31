@@ -8,7 +8,7 @@
 </p>
 
 > [!IMPORTANT]
-> The Credential Entry Service manages only the construction and lifecycle of a candidate credential. When requested, it copies a complete candidate into caller-provided storage for authentication. It does not read the physical keyboard, validate credentials, manage inactivity timeouts, control the lock actuator, or produce display, LED, or buzzer effects.
+> The Credential Entry Service manages only the construction and lifecycle of a candidate credential. When requested, it copies a complete candidate into caller-provided storage for authentication, registration staging or confirmation validation. It does not read the physical keyboard, validate credentials, manage inactivity timeouts, control the lock actuator, or produce display, LED, or buzzer effects.
 
 ---
 
@@ -34,7 +34,7 @@
   * [7.4 Input Kind](#74-input-kind)
   * [7.5 Input Command](#75-input-command)
   * [7.6 Domain Events](#76-domain-events)
-  * [7.7 Candidate Copy Descriptor](#77-candidate-copy-descriptor)
+  * [7.7 Candidate Copy Object](#77-candidate-copy-object)
 * [8. Session Model](#8-session-model)
 
   * [8.1 Session States](#81-session-states)
@@ -50,9 +50,10 @@
 
   * [10.1 CES_BeginSession](#101-ces_beginsession)
   * [10.2 CES_ProcessInput](#102-ces_processinput)
-  * [10.3 CES_GetCurrentLength](#103-CES_GetCurrentLength)
+  * [10.3 CES_GetCurrentLength](#103-ces_getcurrentlength)
   * [10.4 CES_GetCandidate](#104-ces_getcandidate)
-  * [10.5 CES_EndSession](#105-ces_endsession)
+  * [10.5 CES_RefreshSession](#105-ces_refreshsession)
+  * [10.6 CES_EndSession](#106-ces_endsession)
 * [11. Operation Flow](#11-operation-flow)
 
   * [11.1 Credential-Entry Flow](#111-credential-entry-flow)
@@ -83,7 +84,7 @@ The service receives semantic commands from the application layer, accepts norma
 
 The service is independent from the Matrix Keyboard Driver. It does not receive physical keyboard codes and does not know which physical key represents a digit, confirmation, clearing, or cancellation. The application translates the keyboard output into `CES_Input_t` before invoking the service.
 
-The service is also independent from the authentication, timeout, user-interface, and actuator-control policies. These behaviors are coordinated by the Lock Controller and implemented by their respective services.
+The service is also independent from authentication, timeout, user-interface and actuator-control policies. The Lock Control Service decides semantic product transitions, App Core maps input and timeout outcomes, and App Executor invokes the required lifecycle and authentication operations.
 
 The acronym `CES` means **Credential Entry Service** and is used as the prefix for every public symbol exposed by this module.
 
@@ -93,6 +94,7 @@ The acronym `CES` means **Credential Entry Service** and is used as the prefix f
 
 - Fixed-length candidate credential with exactly six decimal digits.
 - Explicit credential-entry session lifecycle.
+- In-place session refresh that erases the candidate without ending the session.
 - Semantic input commands independent from physical keyboard codes.
 - Validation of normalized decimal digits from `0U` through `9U`.
 - Candidate-length tracking.
@@ -117,7 +119,7 @@ The acronym `CES` means **Credential Entry Service** and is used as the prefix f
 
 The Credential Entry Service belongs to the hardware-independent domain-services layer.
 
-It sits above physical input acquisition and below the Lock Controller orchestration logic:
+It sits above physical input acquisition and below the application orchestration boundary:
 
 ```mermaid
 flowchart LR
@@ -128,9 +130,9 @@ flowchart LR
     subgraph APP["Application Layer"]
         direction TB
         MAP["Input Translation<br/>OutputKey to CES_Input_t"]
-        CTRL["Lock Controller<br/>state-machine orchestration"]
+        CORE["App Core / Executor<br/>input, action and timeout<br/>orchestration"]
 
-        MAP -->|"CES_Input_t"| CTRL
+        MAP -->|"CES_Input_t"| CORE
     end
 
     subgraph SERVICES["Domain Services"]
@@ -138,23 +140,26 @@ flowchart LR
         CES["Credential Entry<br/>candidate and session rules"]
         TVS["Timeout Validation<br/>activity expiration"]
         AUTH["Authentication<br/>credential validation"]
+        CRS["Credential Register<br/>staging and confirmation"]
+        LCS["Lock Control Service<br/>semantic FSM policy"]
     end
 
     MK -->|"OutputKey"| MAP
-
-    CTRL -->|"Session API<br/>returns CES_Event_t"| CES
-    CTRL -->|"Activity and timeout evaluation"| TVS
-    CTRL -->|"Complete candidate copy"| AUTH
+    CORE <-->|"LCS events / actions"| LCS
+    CORE -->|"Session API<br/>returns CES_Event_t"| CES
+    CORE -->|"Activity and timeout evaluation"| TVS
+    CORE -->|"Complete candidate copy"| AUTH
+    CORE -->|"Complete candidate copy"| CRS
 ```
 
 The dependency direction preserves the following boundaries:
 
 - The Matrix Keyboard Driver reports physical input without knowing the credential-entry policy.
 - The application translates physical key codes into semantic CES commands.
-- The Lock Controller decides when the service session begins and ends.
+- LCS decides the semantic phase; App Executor begins, refreshes or ends CES in response to the selected action.
 - The Credential Entry Service owns only the candidate and session-local rules.
-- The Timeout Validation Service evaluates inactivity independently.
-- The Authentication Service validates only a complete candidate.
+- App Core owns the active inactivity timeout and delegates elapsed arithmetic to the Timeout Validation Service.
+- App Executor passes only a complete copied candidate to Authentication or Credential Register processing.
 
 ### 3.2 Application Integration
 
@@ -163,15 +168,15 @@ The application is responsible for orchestrating the service in the following or
 1. Read the keyboard through the Matrix Keyboard Driver.
 2. Translate the physical key output into `CES_Input_t`.
 3. Pass the semantic command to `CES_ProcessInput()`.
-4. Interpret the returned `CES_Event_t` through the Lock Controller.
-5. Update activity timing only when the event represents meaningful user activity.
+4. Handle local rendering/timing outcomes in App Core or translate the event into an LCS semantic event.
+5. Restart credential-entry timing after an accepted digit or through an LCS-selected refresh action.
 6. Render masked credential-entry feedback when required.
-7. Allocate a destination buffer and request a candidate copy only after `CES_EVENT_READY`.
+7. Provide a caller-owned `CES_Candidate_t` object and request a candidate copy only after `CES_EVENT_READY`.
 8. Immediately end the CES session after a successful candidate copy.
-9. Pass the copied candidate to the Authentication Service.
-10. Erase the caller-owned candidate copy after authentication finishes.
+9. Pass the copied candidate to Authentication, CRS staging or CRS confirmation validation according to the LCS-selected action.
+10. Erase the caller-owned candidate copy after its synchronous consumer finishes.
 
-The Credential Entry Service never calls the Matrix Keyboard Driver, Timeout Validation Service, Authentication Service, or Lock Controller directly.
+The Credential Entry Service never calls the Matrix Keyboard Driver, Timeout Validation Service, Authentication Service, App Core, App Executor or Lock Control Service directly.
 
 ---
 
@@ -191,7 +196,7 @@ Services/
     └── README.md
 ```
 
-The public header contains the semantic input model, events, candidate copy descriptor, operation status, and API declarations.
+The public header contains the semantic input model, events, candidate copy object, operation status, and API declarations.
 
 The source file owns the singleton runtime state and all private candidate-processing rules.
 
@@ -215,7 +220,7 @@ The Credential Entry Service is responsible for:
 - Clearing a non-empty candidate.
 - Cancelling an empty credential-entry session.
 - Preserving state when an input cannot be accepted.
-- Copying a complete candidate into caller-provided storage for immediate authentication.
+- Copying a complete candidate into caller-provided storage for immediate authentication or registration processing.
 
 ### 5.2 Explicit Non-Responsibilities
 
@@ -235,7 +240,7 @@ The Credential Entry Service is **not responsible** for:
 - Rendering candidate digits or masking characters.
 - Controlling the LCD, LEDs, or buzzer.
 - Dispatching global application events.
-- Performing Lock Controller state transitions.
+- Performing application event dispatch or Lock Control state transitions.
 - Creating tasks, queues, timers, or other RTOS objects.
 
 ---
@@ -301,7 +306,7 @@ The value is numeric. It is not an ASCII character and is not a Matrix Keyboard 
 typedef uint8_t CES_Length_t;
 ```
 
-Its valid runtime range is from `0U` through `CES_CREDENTIAL_LENGTH`.
+During an active session its valid range is from `0U` through `CES_CREDENTIAL_LENGTH`. `CES_GetCurrentLength()` uses `0xFFU` as the separate inactive-session sentinel.
 
 ### 7.3 Operation Status
 
@@ -398,7 +403,7 @@ typedef enum
 | `CES_EVENT_CLEARED` | Candidate erased | Remains active | Clear-or-cancel was requested while the candidate was non-empty. |
 | `CES_EVENT_CANCELLED` | Candidate erased | Becomes inactive | Clear-or-cancel was requested while the candidate was empty. |
 
-`CES_EVENT_READY` does not authenticate the credential and does not automatically end the session. The Lock Controller must obtain the candidate, invoke authentication, and close the session at the appropriate application transition.
+`CES_EVENT_READY` does not authenticate, stage or validate the credential and does not automatically end the session. App Core translates it to `LCS_EVENT_CANDIDATE_READY`; the LCS-selected action then lets App Executor obtain the candidate and perform the phase-appropriate downstream operation.
 
 ### 7.7 Candidate Copy Object
 
@@ -424,7 +429,7 @@ Before calling `CES_GetCandidate()`, the application shall:
 
 * Provide a valid `CES_Candidate_t` object.
 * Call the function only after `CES_ProcessInput()` returns `CES_EVENT_READY`.
-* Keep the object available until authentication processing and credential erasure are complete.
+* Keep the object available until its synchronous authentication or registration consumer and credential erasure are complete.
 
 The caller does not need to allocate a separate digit buffer, assign a destination pointer or provide a capacity value.
 
@@ -437,11 +442,11 @@ On success, the service:
 * Retains ownership of its internal candidate storage.
 * Does not allocate memory or transfer internal-buffer ownership.
 
-After a successful copy, the Lock Controller shall call `CES_EndSession()` to erase the service-owned candidate and close the credential-entry session before continuing authentication with the caller-owned copy.
+After a successful copy for authentication, App Executor calls `CES_EndSession()` before comparing the caller-owned copy. Registration actions instead use `CES_RefreshSession()` or a later terminal cleanup according to their phase.
 
 The copied credential remains valid independently from later CES operations because it is stored directly in the caller-owned `CES_Candidate_t` object. Consequently, `CES_EndSession()` erases only the internal CES candidate.
 
-The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after authentication processing is finished. Candidate digits shall not be logged, displayed or retained in long-lived application storage.
+The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after its synchronous downstream consumer is finished. Candidate digits shall not be logged, displayed or retained in long-lived application storage.
 
 ---
 
@@ -454,9 +459,9 @@ The service owns one internal session with two externally observable lifecycle c
 | Session Condition | Candidate Length | Accepted Operations |
 |---|---:|---|
 | Inactive | `0U` | `CES_BeginSession()` |
-| Active and empty | `0U` | Digit, confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_EndSession()` |
-| Active and partial | `1U` to `5U` | Digit, confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_EndSession()` |
-| Active and complete | `6U` | Confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_GetCandidate()`, `CES_EndSession()` |
+| Active and empty | `0U` | Digit, confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_RefreshSession()`, `CES_EndSession()` |
+| Active and partial | `1U` to `5U` | Digit, confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_RefreshSession()`, `CES_EndSession()` |
+| Active and complete | `6U` | Confirm, clear-or-cancel, `CES_GetCurrentLength()`, `CES_GetCandidate()`, `CES_RefreshSession()`, `CES_EndSession()` |
 
 The session lifecycle is represented below:
 
@@ -477,6 +482,10 @@ flowchart TD
     ACTIVE_EMPTY -->|"First valid digit"| ACTIVE_PARTIAL
 
     ACTIVE_PARTIAL -->|"Sixth valid digit"| ACTIVE_COMPLETE
+
+    ACTIVE_EMPTY -->|"CES_RefreshSession()"| ACTIVE_EMPTY
+    ACTIVE_PARTIAL -->|"CES_RefreshSession()"| ACTIVE_EMPTY
+    ACTIVE_COMPLETE -->|"CES_RefreshSession()"| ACTIVE_EMPTY
 
     ACTIVE_COMPLETE -->|"Confirm / READY<br/>CES_GetCandidate()<br/>CES_EndSession()"| INACTIVE_END
 
@@ -502,6 +511,7 @@ The following invariants apply throughout service operation:
 - Ending a session while none is active fails.
 - A successful session start establishes an empty candidate.
 - A successful session end clears the candidate.
+- A successful session refresh clears the candidate while preserving the active session.
 - Candidate length never exceeds `CES_CREDENTIAL_LENGTH`.
 - Every stored candidate element is a decimal digit from `0U` through `9U`.
 - Candidate fullness is determined by length, never by digit values.
@@ -536,7 +546,7 @@ When `Kind` is `CES_INPUT_KIND_CONFIRM`, the current candidate length determines
 | `0U` through `5U` | `CES_EVENT_INCOMPLETE` | Candidate remains unchanged and the session remains active. |
 | `6U` | `CES_EVENT_READY` | Candidate remains available and the session remains active. |
 
-Explicit confirmation allows the user to clear a complete candidate before authentication if necessary.
+Explicit confirmation allows the user to clear a complete candidate before authentication or registration processing if necessary.
 
 ### 9.3 Clear or Cancel Input
 
@@ -574,10 +584,10 @@ The V1 application policy is:
 |---|---|---|---|
 | `CES_EVENT_NONE` | No | No | Ignore the input. |
 | `CES_EVENT_INPUT_ACCEPTED` | Yes | Yes | Render one additional masking character. |
-| `CES_EVENT_INCOMPLETE` | Product-defined feedback | Yes | Keep the session active. |
-| `CES_EVENT_CLEARED` | Yes | Yes | Render an empty candidate field. |
-| `CES_EVENT_READY` | Transition-dependent | Not required | Copy the candidate, end the CES session, and begin authentication. |
-| `CES_EVENT_CANCELLED` | Transition-dependent | Not required | Return to the locked-idle flow. |
+| `CES_EVENT_INCOMPLETE` | Yes | Yes, through the selected refresh action | LCS selects a phase-specific refresh; App Executor calls `CES_RefreshSession()` and restarts the entry timeout. |
+| `CES_EVENT_CLEARED` | Yes | No | Render an empty candidate field without restarting the current timeout. |
+| `CES_EVENT_READY` | Transition-dependent | Not required | Dispatch candidate-ready; LCS selects authentication, staging or confirmation validation for the active phase. |
+| `CES_EVENT_CANCELLED` | Transition-dependent | Not required | Dispatch cancellation; LCS selects normal cleanup or mandatory first-boot refresh for the active phase. |
 
 Physical keyboard outputs that do not map to any supported semantic command should be discarded by the application before calling `CES_ProcessInput()`.
 
@@ -649,14 +659,14 @@ CES_Length_t CES_GetCurrentLength(void);
 
 | Return Value | Description |
 |---|---|
-| `0xFFU` | No session is active or the active candidate is empty. |
-| `1U` through `6U` | Number of accepted candidate digits. |
+| `0xFFU` | No session is active. |
+| `0U` through `6U` | Number of accepted candidate digits in the active session. |
 
 The function does not expose the candidate values.
 
 ### 10.4 CES_GetCandidate
 
-Copies a complete candidate into a caller-owned `CES_Candidate_t` object for immediate authentication.
+Copies a complete candidate into a caller-owned `CES_Candidate_t` object for immediate authentication or registration processing.
 
 #### Function Signature
 
@@ -694,13 +704,32 @@ On success:
 * The credential-entry session remains active.
 * Ownership of `Candidate` and its credential storage remains with the caller.
 
-The function does not authenticate the candidate and does not end the credential-entry session. Sequencing confirmation before candidate retrieval remains a Lock Controller responsibility, while CES verifies that an active complete candidate is available.
+The function does not authenticate the candidate and does not end the credential-entry session. Sequencing confirmation before candidate retrieval remains an application/LCS responsibility, while CES verifies that an active complete candidate is available.
 
-After a successful copy, the Lock Controller shall immediately call `CES_EndSession()` before passing the caller-owned candidate to the Authentication Service. This erases the service-owned candidate and closes the credential-entry session without modifying the copied candidate.
+After a successful authentication copy, App Executor immediately calls `CES_EndSession()` before passing the caller-owned candidate to the Authentication Service. Registration actions may instead refresh or retain the session until their phase result is processed. None of those operations modifies the copied candidate.
 
-The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after authentication processing is finished.
+The caller is responsible for erasing the complete `CES_Candidate_t` object immediately after its synchronous downstream consumer is finished.
 
-### 10.5 CES_EndSession
+### 10.5 CES_RefreshSession
+
+Erases the current candidate while keeping the active credential-entry session available for a fresh attempt.
+
+#### Function Signature
+
+```c
+CES_OpStatus_t CES_RefreshSession(void);
+```
+
+#### Return
+
+| Return Value | Description |
+|---|---|
+| `CES_OPERATION_OK` | The candidate was erased and the session remains active. |
+| `CES_OPERATION_FAIL` | No session is active. |
+
+The function does not start a new session, restart the application-owned timeout or update presentation by itself. App Executor uses it for incomplete entry, registration-phase refresh and confirmation-mismatch flows, then separately restarts the credential-entry timeout and applies the screen/sound policy selected by the LCS action.
+
+### 10.6 CES_EndSession
 
 Ends the active credential-entry session and erases candidate data.
 
@@ -717,7 +746,7 @@ CES_OpStatus_t CES_EndSession(void);
 | `CES_OPERATION_OK` | The active session was ended and cleared. |
 | `CES_OPERATION_FAIL` | No session is active. |
 
-The Lock Controller should call this function whenever the application leaves credential entry. In the successful entry flow, it shall be called immediately after `CES_GetCandidate()` completes successfully and before the copied credential is passed to the Authentication Service. It shall also be called during inactivity-timeout handling, fault handling, or any other product-level transition that leaves credential entry.
+App Executor calls this function whenever the application leaves credential entry. In the normal authentication flow, it is called immediately after `CES_GetCandidate()` completes successfully and before the copied credential is passed to the Authentication Service. It is also called during inactivity-timeout handling, registration cleanup, fault handling or any other product-level transition that leaves credential entry.
 
 ---
 
@@ -728,29 +757,35 @@ The Lock Controller should call this function whenever the application leaves cr
 ```mermaid
 sequenceDiagram
     participant MK as Matrix Keyboard Driver
-    participant APP as Application Input Mapping
-    participant CTRL as Lock Controller
+    participant CORE as App Core
+    participant LCS as Lock Control Service
+    participant EXEC as App Executor
     participant CES as Credential Entry Service
     participant AUTH as Authentication Service
 
-    CTRL->>CES: CES_BeginSession()
+    LCS-->>EXEC: BEGIN_CREDENTIAL_ENTRY_SESSION
+    EXEC->>CES: CES_BeginSession()
 
     loop While credential entry is active
-        MK-->>APP: Physical key output
-        APP-->>CTRL: CES_Input_t
-        CTRL->>CES: CES_ProcessInput()
-        CES-->>CTRL: CES_Event_t
+        MK-->>CORE: Physical key output
+        CORE->>CORE: Translate to CES_Input_t
+        CORE->>CES: CES_ProcessInput()
+        CES-->>CORE: CES_Event_t
     end
 
-    CTRL->>CES: CES_GetCandidate(caller buffer) after READY
-    CES-->>CTRL: Candidate copied
-    CTRL->>CES: CES_EndSession()
-    CTRL->>AUTH: Validate copied candidate
-    AUTH-->>CTRL: Authentication result
-    CTRL->>CTRL: Erase caller-owned copy
+    CORE->>LCS: LCS_EVENT_CANDIDATE_READY
+    LCS-->>EXEC: REQUEST_AUTHENTICATION
+    EXEC->>CES: CES_GetCandidate(caller object)
+    CES-->>EXEC: Candidate copied
+    EXEC->>CES: CES_EndSession()
+    EXEC->>AUTH: AS_Authenticate(candidate, runtime)
+    AUTH-->>EXEC: Authentication result
+    EXEC->>EXEC: Erase caller-owned copy
+    EXEC-->>CORE: AUTH_SUCCESS or AUTH_FAILURE
+    CORE->>LCS: Dispatch follow-up event
 ```
 
-The Lock Controller remains responsible for converting CES events into product-level state transitions.
+App Core handles `INPUT_ACCEPTED` and `CLEARED` locally for timing/presentation and maps phase-changing CES outcomes into semantic LCS events. LCS decides the transition; App Executor performs the selected lifecycle, authentication, staging or confirmation action. The sequence above shows the normal authentication branch; registration branches use the same candidate-copy contract with CRS.
 
 ### 11.2 Timeout Integration
 
@@ -758,13 +793,14 @@ The Credential Entry Service does not measure time and does not evaluate timeout
 
 The timeout flow is:
 
-1. The application receives a meaningful `CES_Event_t`.
-2. The Lock Controller updates activity through the Timeout Validation Service according to the application policy.
-3. The Timeout Validation Service evaluates elapsed time independently.
-4. When expiration is reported, the Lock Controller performs the timeout state transition.
-5. The Lock Controller calls `CES_EndSession()` to erase the candidate and close the session.
+1. App Executor starts the application-owned credential-entry timeout when an LCS action begins or refreshes an entry phase.
+2. App Core restarts the same timeout after `CES_EVENT_INPUT_ACCEPTED`; a local clear does not currently restart it.
+3. `App_Dispatch()` evaluates the active interval through the Timeout Validation Service.
+4. When expiration is reported, App Core cancels the runtime and dispatches `LCS_EVENT_ENTRY_TIMEOUT`.
+5. LCS performs the state-specific timeout transition and returns a cleanup action.
+6. App Executor calls `CES_EndSession()` to erase the candidate when that transition leaves the active entry phase.
 
-The Timeout Validation Service does not directly modify CES state. This preserves the Lock Controller as the single product-flow orchestrator.
+The Timeout Validation Service does not directly modify CES state. LCS remains the authoritative product FSM while App Core and App Executor own timing and concrete session operations.
 
 ---
 
@@ -789,22 +825,16 @@ CES_Event_t event = CES_ProcessInput(&input);
 if (event == CES_EVENT_INPUT_ACCEPTED)
 {
     /*
-     * The Lock Controller may request masked display rendering and
-     * refresh application activity timing.
+     * App Core renders one additional mask character and restarts
+     * the application-owned credential-entry timeout.
      */
 }
 ```
 
-When confirmation produces `CES_EVENT_READY`, the controller provides destination storage and requests a candidate copy for immediate authentication:
+When confirmation produces `CES_EVENT_READY`, the caller provides destination storage and requests a candidate copy for one immediate synchronous consumer:
 
 ```c
-CES_Digit_t candidate_digits[CES_CREDENTIAL_LENGTH] = {0U};
-
-CES_Candidate_t candidate =
-{
-    .Digits = candidate_digits,
-    .Length = 0U
-};
+CES_Candidate_t candidate = {0};
 
 if (event == CES_EVENT_READY)
 {
@@ -813,21 +843,21 @@ if (event == CES_EVENT_READY)
         CES_EndSession();
 
         /*
-         * Pass candidate_digits and candidate.Length to the Authentication
-         * Service without logging or displaying their contents.
+         * Pass candidate.Digits and candidate.Length to Authentication or
+         * Credential Register processing without logging or displaying them.
          */
 
         /*
-         * Erase candidate_digits after authentication because
+         * Erase the complete candidate object after its consumer because
          * CES_EndSession() clears only the service-owned internal candidate.
          */
     }
 }
 ```
 
-The application owns `candidate_digits` throughout this flow. `CES_GetCandidate()` neither allocates this storage nor transfers ownership of its internal buffer.
+The application owns `candidate` and its embedded fixed-size `Digits` array throughout this flow. `CES_GetCandidate()` neither allocates storage nor transfers ownership of its internal buffer.
 
-This example intentionally omits Matrix Keyboard Driver access, timeout implementation, authentication logic, and Lock Controller state transitions because they belong outside CES.
+This example intentionally omits Matrix Keyboard Driver access, timeout implementation, authentication logic and LCS event/action dispatch because they belong outside CES.
 
 ---
 
@@ -845,7 +875,7 @@ The service does not:
 - Start background processing.
 - Create an internal event queue.
 
-This keeps execution bounded and allows the application task to control when service logic runs.
+This keeps execution bounded and allows the serialized application owner to control when service logic runs.
 
 ### 13.2 Singleton Service
 
@@ -890,9 +920,9 @@ The same CES contract could later receive commands translated from another trust
 
 ### 13.4 Domain Events
 
-The service returns `CES_Event_t` instead of dispatching Lock Controller events directly.
+The service returns `CES_Event_t` instead of dispatching LCS events directly.
 
-CES events describe local domain outcomes. The Lock Controller decides whether an outcome causes:
+CES events describe local domain outcomes. App Core either handles them locally or translates them to LCS; the resulting application flow may cause:
 
 - A product-state transition.
 - Display rendering.
@@ -901,7 +931,7 @@ CES events describe local domain outcomes. The Lock Controller decides whether a
 - Activity-timestamp refresh.
 - Authentication processing.
 
-This preserves the Lock Controller as the owner of the high-level state machine.
+This preserves LCS as the owner of the high-level state machine without coupling CES to LCS types.
 
 ### 13.5 Separation of Time and Authentication
 
@@ -934,7 +964,7 @@ This provides:
 
 Candidate fullness must be derived from the tracked length. Candidate digit values cannot act as empty-slot sentinels because `0U` is a valid decimal digit.
 
-When authentication is requested, `CES_GetCandidate()` copies the internal candidate into a separate caller-owned buffer. This allows the Lock Controller to end and clear the CES session without invalidating the authentication input, but it also creates a second sensitive copy that the caller must erase explicitly.
+When a downstream operation is requested, `CES_GetCandidate()` copies the internal candidate into a separate application-owned object. This lets App Executor end or refresh the CES session without invalidating authentication or registration input, but it also creates a second sensitive copy that the caller must erase explicitly.
 
 ---
 
@@ -945,16 +975,17 @@ The service distinguishes API misuse from normal domain outcomes.
 `CES_OpStatus_t` reports lifecycle and candidate-access failures:
 
 - Beginning a session while one is already active returns `CES_OPERATION_FAIL`.
+- Refreshing a session while none is active returns `CES_OPERATION_FAIL`.
 - Ending a session while none is active returns `CES_OPERATION_FAIL`.
 - Requesting a candidate without an active complete candidate returns `CES_OPERATION_FAIL`.
 
-Pointer validity and destination capacity are API preconditions:
+Pointer and caller-owned object validity are API preconditions:
 
 - `CES_ProcessInput()` requires a valid `Input` pointer.
 - `CES_GetCandidate()` requires a valid `Candidate` pointer.
-- `Candidate->Digits` must reference a writable buffer with capacity for at least six digits.
+- A valid `CES_Candidate_t` always embeds writable capacity for exactly six digits.
 
-The service interface does not carry destination capacity and cannot diagnose an undersized buffer. The application must satisfy these preconditions before invoking the API.
+The service cannot validate the lifetime or writability of a non-NULL object supplied through C pointer semantics. The application must satisfy those preconditions before invoking the API.
 
 `CES_Event_t` reports input-processing outcomes:
 
@@ -971,7 +1002,7 @@ The service interface does not carry destination capacity and cannot diagnose an
 
 The service is not internally thread-safe.
 
-All public functions shall be called from one serialized execution context. In the V1 FreeRTOS architecture, the intended owner is the Application Task through the Lock Controller.
+All public functions shall be called from the serialized application context used by `App_ReadInput()`, App Core dispatch and App Executor. The current firmware main loop uses no FreeRTOS task boundary.
 
 The following are not supported without external serialization:
 
@@ -980,7 +1011,7 @@ The following are not supported without external serialization:
 - Direct CES access from independent services.
 - Candidate copy-out while another context modifies or ends the session.
 
-The Timeout Validation Service shall report expiration to the Lock Controller. It shall not call `CES_EndSession()` directly from another execution context.
+App Core shall translate expiration into `LCS_EVENT_ENTRY_TIMEOUT`; the Timeout Validation Service shall not call `CES_EndSession()` directly from another execution context.
 
 ---
 
@@ -995,11 +1026,11 @@ The application and all consuming services shall follow these rules:
 - Never render raw candidate digits on the display.
 - Render masking characters only when showing entry progress.
 - Do not copy the candidate into long-lived application state.
-- Erase the caller-provided destination buffer immediately after authentication.
+- Erase the caller-provided candidate object immediately after authentication or registration processing.
 - End the session after success, failure, cancellation, timeout, fault, or any transition leaving credential entry.
 - Ensure the internal candidate is cleared when a session begins, is explicitly cleared, or ends.
 - Remember that ending the CES session does not erase caller-owned candidate copies.
-- Validate the credential only through the Authentication Service.
+- Authenticate access candidates only through the Authentication Service and validate registration confirmation only through CRS.
 
 The service manages transient candidate entry only. It does not provide cryptographic credential storage, tamper resistance, secure-element integration, or side-channel protection.
 
@@ -1011,6 +1042,9 @@ The minimum behavioral validation for the service includes:
 
 - A session begins successfully from the inactive state.
 - A second begin request fails while a session is active.
+- Refreshing an inactive session fails.
+- Refreshing an active empty, partial or complete session succeeds, erases all digits and preserves the active session.
+- `CES_GetCurrentLength()` returns `0U` for an active empty or refreshed session and `0xFFU` only while inactive.
 - Every decimal digit from `0U` through `9U` is accepted.
 - Credentials containing one or more `0U` digits can still become complete.
 - A value greater than `9U` is ignored without state modification.
@@ -1033,7 +1067,7 @@ The minimum behavioral validation for the service includes:
 - `Candidate->Length` is set to `CES_CREDENTIAL_LENGTH` after a successful copy.
 - Candidate copy-out does not modify the internal candidate or session state.
 - Ending the CES session clears internal storage without modifying the caller-owned copy.
-- The caller-owned copy is erased after authentication processing.
+- The caller-owned copy is erased after authentication or registration processing.
 - `CES_EVENT_NONE` does not cause rendering or activity-timestamp refresh in application integration.
 
 These cases may be validated through debugger-driven tests, a host-side harness, or focused unit tests according to the project phase.
@@ -1052,9 +1086,9 @@ Current V1 limitations include:
 - Clear-or-cancel erases the entire non-empty candidate; individual backspace is not supported.
 - `CES_EVENT_NONE` does not distinguish between individual ignored-input reasons.
 - The service is not internally thread-safe.
-- Candidate copy-out is intended for immediate synchronous authentication.
-- The caller must allocate a destination buffer before candidate retrieval.
-- Destination capacity is not represented in `CES_Candidate_t` and cannot be validated by the service.
+- Candidate copy-out is intended for one immediate synchronous authentication or registration consumer.
+- The caller must provide a valid writable `CES_Candidate_t` object before candidate retrieval.
+- Object lifetime and writability cannot be validated beyond the non-NULL pointer check.
 - Copy-out temporarily creates a second sensitive credential representation that the caller must erase.
 - Timeout validation is external.
 - Authentication policy is external.

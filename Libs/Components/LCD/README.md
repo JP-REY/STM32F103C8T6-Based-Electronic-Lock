@@ -1147,7 +1147,7 @@ int main(void)
     PPWM_Create(
         &LCD_BacklightAdapter,
         &htim4,
-        PWM_CHANNEL_4
+        PWM_CHANNEL_1
     );
 
     PPWM_Init(

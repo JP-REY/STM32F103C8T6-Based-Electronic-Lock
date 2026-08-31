@@ -1,32 +1,31 @@
 # App Configuration and Runtime Registry
 
-`App/Config` centralizes the electronic lock's product policy, STM32 bindings
-and statically allocated application object graph. It separates **what the
-product is composed from** from **how App Core initializes and orchestrates it**
-and **how App Executor applies Lock Control actions**.
+`App/Config` is the **product composition boundary** of the Application Layer.
+
+It centralizes the product-specific bindings, compile-time policy and statically allocated runtime-object graph required by App Core and App Executor, while keeping those details behind the public [`App_Core.h`](../Core/Inc/App_Core.h) interface.
 
 > [!IMPORTANT]
-> This is an internal application module. Firmware entry points outside `App/`
-> must include [`App_Core.h`](../Core/Inc/App_Core.h), not `App_Config.h`.
+> `App_Config.h` is an **internal application header**. Firmware entry points outside `App/` shall include `App_Core.h`, not `App_Config.h`.
+
+> [!IMPORTANT]
+> App Config defines **what objects and bindings exist**. It does not initialize the dependency graph, execute product workflow or decide Lock Control behavior.
 
 ---
 
-## Table of Contents
+## Contents
 
 1. [Purpose and Scope](#1-purpose-and-scope)
 2. [Directory Structure](#2-directory-structure)
-3. [Ownership Model](#3-ownership-model)
-4. [Configuration Catalog](#4-configuration-catalog)
+3. [Ownership and Lifetime](#3-ownership-and-lifetime)
+4. [Product Configuration](#4-product-configuration)
 5. [Hardware Bindings](#5-hardware-bindings)
 6. [Keyboard Configuration](#6-keyboard-configuration)
 7. [Timeout Configuration](#7-timeout-configuration)
 8. [Runtime Registry](#8-runtime-registry)
-9. [Initialization Contract](#9-initialization-contract)
+9. [Interrupt Callback Bridge](#9-interrupt-callback-bridge)
 10. [Credential Storage in RAM](#10-credential-storage-in-ram)
 11. [Dependency and Visibility Rules](#11-dependency-and-visibility-rules)
-12. [Changing the Configuration](#12-changing-the-configuration)
-13. [Validation Checklist](#13-validation-checklist)
-14. [License](#14-license)
+12. [Documentation Authority](#12-documentation-authority)
 
 ---
 
@@ -34,39 +33,49 @@ and **how App Executor applies Lock Control actions**.
 
 The module has two related responsibilities:
 
-1. Declare product-level constants, internal data types and the runtime-registry
-   contract in `Inc/App_Config.h`.
-2. Own the retained dependency objects, component runtimes, event/status slots
-   and credential storage published through one immutable registry from
-   `Src/App_Config.c`.
+1. define product-specific compile-time bindings and policy in `Inc/App_Config.h`;
+2. own the static storage used to compose the application runtime graph in `Src/App_Config.c`.
 
 It owns:
 
-- LCD geometry, PCF8574 address, PWM selection and initial brightness policy;
-- matrix-keyboard dimensions, logical key map, active level and debounce policy;
+- LCD geometry, PCF8574 address and LCD-backlight PWM policy;
+- Matrix Keyboard dimensions, key map, active level and debounce policy;
 - buzzer and status-indication hardware bindings;
-- lock-actuator, door-sensor and exit-button Platform descriptors and component handles;
-- door-sensor and exit-button interrupt/debounce policy;
-- caller-owned Door Sensor and Exit Button event slots;
-- the synchronous Door Control sensor-status output slot;
-- application timeout identifiers, durations and dispatch-depth bound;
+- Lock Actuator, Door Sensor and Exit Button Platform descriptors and component handles;
+- Door Sensor and Exit Button debounce policy;
+- application-owned Door Sensor and Exit Button event slots;
+- the synchronous DCS Door Sensor status slot;
+- application timeout identifiers and durations;
+- the synchronous LCS follow-up bound;
 - compile-time credential-length compatibility checks;
 - instance-based Status Indication Service runtimes;
-- transient and retained credential buffers;
-- the `App_RuntimeInstances_t` registry returned by
-  `App_GetRuntimeInstances()`.
+- transient and retained application credential buffers;
+- the immutable `App_RuntimeInstances_t` registry.
 
-It does not:
+It does **not**:
 
-- initialize GPIO, PWM, I2C-backed components or services;
-- execute input processing or debounce logic;
-- dispatch Lock Control events;
-- execute an `LCS_Action_t`;
-- decide whether an actuator request is authorized;
-- own Door Control Service policy;
+- initialize GPIO, PWM, I2C, components or services;
+- execute Matrix Keyboard acquisition;
+- process Door Sensor or Exit Button debounce;
+- dispatch LCS events;
+- execute `LCS_Action_t`;
+- authorize lock or unlock operations;
+- own DCS lock-interlock policy;
 - own the mutable active-timeout lifecycle;
 - allocate memory dynamically;
-- expose any configuration object through the public App API.
+- expose configuration objects through the public App API.
+
+The boundary is:
+
+```text
+App Config
+    ↓
+product bindings + static storage
+    ↓
+App Core / App Executor
+    ↓
+initialization + orchestration + action execution
+```
 
 ---
 
@@ -83,72 +92,77 @@ Config/
 ```
 
 | File | Responsibility |
-|---|---|
-| `Inc/App_Config.h` | Internal dependency imports, `APP_*` policy definitions, compile-time assertions, timeout data model and runtime-registry declaration |
-| `Src/App_Config.c` | Immutable keyboard policy, static runtime-object storage, event/status slots, registry bindings and getter implementation |
-| `Src/App_ConfigHalCallbacks.c` | Strong HAL GPIO EXTI bridge that forwards Door Sensor and Exit Button edge timestamps to their application-owned drivers |
-| `README.md` | Configuration ownership, hardware bindings, runtime-registry contract and maintenance guidance |
+| --- | --- |
+| `Inc/App_Config.h` | Internal product bindings, policy constants, timeout types, compile-time assertions and runtime-registry declaration |
+| `Src/App_Config.c` | Static runtime-object storage, immutable keyboard policy and registry bindings |
+| `Src/App_ConfigHalCallbacks.c` | Strong HAL EXTI bridge for the application-owned Door Sensor and Exit Button inputs |
+| `README.md` | Composition, ownership and binding reference |
 
 ---
 
-## 3. Ownership Model
+## 3. Ownership and Lifetime
+
+All objects defined by `App_Config.c` have **static storage duration**.
+
+This is required because Platform descriptors, adapters, components and services retain borrowed pointers that must remain valid for the entire firmware lifetime.
 
 ```mermaid
 flowchart LR
     CONFIG["App_Config.c<br/>owns static storage"]
-    REG["App_Instances<br/>immutable pointer registry"]
-    CORE["App_Core.c<br/>initializes and coordinates"]
-    EXEC["App_Executor.c<br/>executes LCS actions"]
-    DCS["Door Control Service<br/>coordinates door mechanism"]
-    DEPS["Platform, adapters,<br/>components and services"]
+    REG["App_Instances<br/>immutable registry"]
+    CORE["App Core<br/>initializes / orchestrates"]
+    EXEC["App Executor<br/>executes LCS actions"]
+    SERVICES["Services / Components<br/>borrow references"]
 
     CONFIG --> REG
     REG --> CORE
     REG --> EXEC
-    CORE --> DEPS
-    EXEC --> DCS
-    DCS --> DEPS
+    CORE --> SERVICES
+    EXEC --> SERVICES
 ```
 
-`App_Instances` is declared as `const App_RuntimeInstances_t`: the registry
-bindings themselves cannot be replaced after composition. Most objects referenced
-by the registry remain mutable because they hold component or service runtime state.
+`App_Instances` is immutable as a registry:
 
-All retained objects have static storage duration. This is required because
-drivers, adapters and services borrow dependency pointers that must remain valid
-for the complete firmware lifetime.
+- registry bindings cannot be replaced after composition;
+- referenced handles remain mutable because they contain normal runtime state;
+- ownership does not transfer when Core, Executor or a service mutates a referenced object.
 
-`App_Config.c` remains the storage owner even when App Core, App Executor or a
-service mutates a referenced runtime object. No ownership transfer occurs.
+No application configuration object is dynamically allocated or freed.
 
-The Door Control Service itself is singleton-based and therefore does not require
-a DCS handle in `App_RuntimeInstances_t`. The registry instead exposes the
-component handles and application-owned event/status slots required to attach and
-integrate DCS.
+### Ownership rule
+
+```text
+storage owner     = App Config
+initialization    = App Core
+product decisions = Lock Control
+side effects      = App Executor / services
+```
+
+Door Control itself is singleton-based and therefore does not require a DCS handle inside `App_RuntimeInstances_t`. App Config instead owns the component handles and output slots that are attached to DCS during application initialization.
 
 ---
 
-## 4. Configuration Catalog
+## 4. Product Configuration
 
-### Display
+### 4.1 Display
 
-| Setting | Value |
-|---|---:|
+| Setting | Current value |
+| --- | ---: |
 | Visible columns | 16 |
 | Rows | 2 (`LCD_2LINE`) |
 | Interface | 4-bit (`LCD_4BIT_MODE`) |
 | Font | 5x8 (`LCD_5X8_FONT`) |
-| PCF8574 address | `0x20` |
+| PCF8574 7-bit address | `0x20` |
 | I2C context | `hi2c1` |
 | Backlight PWM context | `htim4` |
-| Backlight PWM channel | `PWM_CHANNEL_1` |
-| Backlight frequency | 1500 Hz |
+| Backlight Platform channel | `PWM_CHANNEL_1` |
+| Backlight PWM frequency | 1500 Hz |
 | Initial brightness | 50% |
 
-### Keyboard
+### 4.2 Matrix Keyboard
 
-| Setting | Value |
-|---|---:|
+| Setting | Current value |
+| --- | ---: |
 | Rows | 4 |
 | Columns | 4 |
 | Keys | 16 |
@@ -156,101 +170,114 @@ integrate DCS.
 | Scan-adapter active level | Low |
 | Debounce | 40 ms |
 
-### Sound and indications
+### 4.3 Sound and indications
 
-| Setting | Value |
-|---|---|
+| Setting | Current value |
+| --- | --- |
 | Buzzer PWM context | `htim3` |
-| Buzzer PWM channel | `PWM_CHANNEL_1` |
+| Buzzer Platform channel | `PWM_CHANNEL_1` |
 | Lock-status LED active level | High |
 | Low-battery LED active level | High |
 
-### Door mechanism
+### 4.4 Door mechanism
 
-| Setting | Value |
-|---|---|
-| Lock actuator GPIO label | `LOCK_ACTUATOR` |
-| Lock actuator documented board pin | PB8 |
+| Setting | Current value |
+| --- | --- |
+| Lock actuator binding | CubeMX `LOCK_ACTUATOR` |
 | Locked command | Active low |
-| Door sensor GPIO label | `DOOR_SENSOR` |
-| Door sensor documented board pin | PA11 |
-| Door sensor active contact | Low |
-| Door sensor debounce quiet interval | 500 ms |
-| Door sensor input mode | Pull-up, rising/falling EXTI |
-| Exit button GPIO label | `EXIT_BUTTON` |
-| Exit button documented board pin | PA0 |
-| Exit button pressed level | Low |
-| Exit button debounce quiet interval | 20 ms |
-| Exit button input mode | Pull-up, rising/falling EXTI |
+| Door Sensor binding | CubeMX `DOOR_SENSOR` |
+| Door Sensor active contact | Low |
+| Door Sensor debounce | 500 ms |
+| Exit Button binding | CubeMX `EXIT_BUTTON` |
+| Exit Button pressed level | Low |
+| Exit Button debounce | 20 ms |
 | Runtime mechanism coordinator | Door Control Service |
 
-The application owns the three physical door-mechanism component handles, while
-the Door Control Service coordinates their runtime use. The HAL EXTI bridge only
-publishes edge timestamps to the Door Sensor and Exit Button Drivers. Debounce,
-stable-event generation and normal actuator interlocking are intentionally kept
-outside interrupt context.
+The Door Sensor and Exit Button intentionally use different debounce intervals.
 
-The Door Sensor and Exit Button use different debounce policies: the Door Sensor
-requires 500 ms of quiet time after the newest edge, while the Exit Button
-requires 20 ms.
+The HAL callback path only publishes edge timestamps. Stable-event generation and normal actuator interlocking remain outside ISR context.
 
-### Application policy
+### 4.5 Application timing policy
 
-| Setting | Value |
-|---|---:|
-| Credential-entry timeout | 5,000 ms |
-| Door-position confirmation delay | 800 ms |
-| Access-denied feedback interval | 1,500 ms |
-| Lockout interval | 10,000 ms |
-| Credential-register saved feedback | 1,500 ms |
-| Maximum synchronous LCS follow-ups | 4 |
-| CES no-digit sentinel | `0xFF` |
+| Setting | Current value |
+| --- | ---: |
+| Credential-entry inactivity | 5,000 ms |
+| Door-position confirmation | 800 ms |
+| Access-denied feedback | 1,500 ms |
+| Lockout | 10,000 ms |
+| Credential-saved feedback | 1,500 ms |
+| Maximum synchronous LCS dispatch iterations | 4 |
 
-The compile-time constants are product policy, not runtime settings. Changing
-one may require corresponding CubeMX, driver, service, application,
-documentation or test updates.
+These values are compile-time product policy rather than runtime settings.
+
+Changing one can require coordinated changes to service behavior, tests and documentation.
 
 ---
 
 ## 5. Hardware Bindings
 
-`App_Config.h` intentionally binds application policy to CubeMX-generated
-symbols rather than duplicating HAL bit-mask values. The following table reflects
-the bindings supported directly by the current App Config source.
+`App_Config.h` binds the application to **CubeMX-generated symbols** instead of hard-coding HAL GPIO masks.
 
-| Product function | Current App binding | Configuration symbol |
-|---|---|---|
-| Keyboard row 0 | CubeMX `KEYBOARD_ROW_0` GPIO | `APP_KEYBOARD_ROW_0_*` |
-| Keyboard row 1 | CubeMX `KEYBOARD_ROW_1` GPIO | `APP_KEYBOARD_ROW_1_*` |
-| Keyboard row 2 | CubeMX `KEYBOARD_ROW_2` GPIO | `APP_KEYBOARD_ROW_2_*` |
-| Keyboard row 3 | CubeMX `KEYBOARD_ROW_3` GPIO | `APP_KEYBOARD_ROW_3_*` |
-| Keyboard column 0 | CubeMX `KEYBOARD_COL_0` GPIO | `APP_KEYBOARD_COL_0_*` |
-| Keyboard column 1 | CubeMX `KEYBOARD_COL_1` GPIO | `APP_KEYBOARD_COL_1_*` |
-| Keyboard column 2 | CubeMX `KEYBOARD_COL_2` GPIO | `APP_KEYBOARD_COL_2_*` |
-| Keyboard column 3 | CubeMX `KEYBOARD_COL_3` GPIO | `APP_KEYBOARD_COL_3_*` |
-| LCD PCF8574 bus | I2C1 (`hi2c1`) | `APP_LCD_IO_EXPANDER_I2C_CONTEXT` |
-| LCD backlight | TIM4, `PWM_CHANNEL_1` | `APP_LCD_BACKLIGHT_PWM_*` |
-| Passive buzzer | TIM3, `PWM_CHANNEL_1` | `APP_BUZZER_PWM_*` |
-| Lock-status LED | CubeMX `LOCK_STATUS_LED`, active high | `APP_LOCK_STATUS_LED_*` |
-| Low-battery LED | CubeMX `LOW_BATTERY_STATUS_LED`, active high | `APP_LOW_BATTERY_STATUS_LED_*` |
-| Lock actuator | CubeMX `LOCK_ACTUATOR`; documented as PB8; active-low lock command | `APP_LOCK_ACTUATOR_*` |
-| Door sensor | CubeMX `DOOR_SENSOR`; documented as PA11; pull-up, active low, rising/falling EXTI | `APP_DOOR_SENSOR_*` |
-| Exit button | CubeMX `EXIT_BUTTON`; documented as PA0; pull-up, active low, rising/falling EXTI | `APP_EXIT_BUTTON_*` |
+The current physical baseline is:
 
-GPIO pin-number definitions such as `APP_DOOR_SENSOR_PIN_NUMBER` are zero-based
-pin indexes derived with `__builtin_ctz()` from the CubeMX HAL pin bit mask.
-They are not HAL GPIO bit masks themselves. `PGPIO_Init()` receives the
-Platform representation expected by the application.
+| Product function | Current physical assignment | App binding |
+| --- | --- | --- |
+| Keyboard row 0 | PB15 | `APP_KEYBOARD_ROW_0_*` |
+| Keyboard row 1 | PB14 | `APP_KEYBOARD_ROW_1_*` |
+| Keyboard row 2 | PB13 | `APP_KEYBOARD_ROW_2_*` |
+| Keyboard row 3 | PB12 | `APP_KEYBOARD_ROW_3_*` |
+| Keyboard column 0 | PA6 | `APP_KEYBOARD_COL_0_*` |
+| Keyboard column 1 | PA5 | `APP_KEYBOARD_COL_1_*` |
+| Keyboard column 2 | PA4 | `APP_KEYBOARD_COL_2_*` |
+| Keyboard column 3 | PA3 | `APP_KEYBOARD_COL_3_*` |
+| LCD PCF8574 bus | I2C1, PB8/PB9 | `APP_LCD_IO_EXPANDER_I2C_CONTEXT` |
+| LCD backlight | TIM4 CH1, PB6 | `APP_LCD_BACKLIGHT_PWM_*` |
+| Passive buzzer | TIM3 CH1, PB4 | `APP_BUZZER_PWM_*` |
+| Lock-status LED | PB10 | `APP_LOCK_STATUS_LED_*` |
+| Low-battery LED | PB11 | `APP_LOW_BATTERY_STATUS_LED_*` |
+| Lock actuator | **PA8** | `APP_LOCK_ACTUATOR_*` |
+| Door Sensor | PA11 | `APP_DOOR_SENSOR_*` |
+| Exit Button | PA0 | `APP_EXIT_BUTTON_*` |
 
-Physical MCU pin assignments that are not explicitly encoded or documented by
-the App Config source should be treated as CubeMX-owned configuration and
-verified against `Electronic-Lock.ioc` rather than duplicated speculatively in
-this README.
+### Binding authority
 
-The Door Sensor and Exit Button are the interrupt-backed inputs owned by this
-module. Their EXTI callback path shall only publish edge timestamps to the
-corresponding driver. Keyboard acquisition remains owned by the Matrix Keyboard
-Driver and its scan adapter.
+The table above is a **human-readable snapshot**, not the canonical hardware-definition mechanism.
+
+Use:
+
+- `Electronic-Lock.ioc` for physical MCU pin/peripheral assignment;
+- CubeMX-generated symbols such as `LOCK_ACTUATOR_Pin` and `LOCK_ACTUATOR_GPIO_Port` for generated code bindings;
+- `App_Config.h` for the application-side adaptation of those symbols into product policy.
+
+For example:
+
+```text
+Electronic-Lock.ioc
+    ↓
+PA8 = LOCK_ACTUATOR
+    ↓
+CubeMX main.h symbols
+    ↓
+APP_LOCK_ACTUATOR_GPIO_PORT
+APP_LOCK_ACTUATOR_PIN_NUMBER
+    ↓
+Platform GPIO descriptor initialization
+```
+
+GPIO `APP_*_PIN_NUMBER` definitions are **zero-based pin numbers**, derived from CubeMX HAL bit masks using `__builtin_ctz()`.
+
+They are not HAL GPIO bit masks themselves.
+
+### Interrupt-backed inputs
+
+The application-owned EXTI inputs are:
+
+| Input | Mode |
+| --- | --- |
+| Door Sensor / PA11 | Pull-up, rising/falling EXTI |
+| Exit Button / PA0 | Pull-up, rising/falling EXTI |
+
+Keyboard rows are also configured as EXTI-capable inputs by CubeMX, but normal keyboard acquisition currently belongs to the Matrix Keyboard polling/scan path and is not routed through `App_ConfigHalCallbacks.c`.
 
 ---
 
@@ -265,280 +292,249 @@ Driver and its scan adapter.
 * 0 # D
 ```
 
-`App_KeyboardConfig` binds:
+The retained `App_KeyboardConfig` binds:
 
-- `APP_KEYBOARD_ROW_COUNT`;
-- `APP_KEYBOARD_COLUMN_COUNT`;
-- `App_KeyboardKeyMap`;
+- row count;
+- column count;
+- key map;
 - `MK_KEY_ACTIVE_LOW`;
-- `APP_KEYBOARD_DEBOUNCE_MS`.
+- 40 ms debounce policy.
 
-The Matrix Keyboard Driver borrows both the key map and configuration object
-after initialization, so neither may have automatic storage duration.
+The Matrix Keyboard Driver borrows both the configuration and key map after initialization, so both remain application-owned static objects.
 
-`App_KeyboardKeys` provides one retained debounce/action runtime per physical
-key. Application code shall not directly modify those entries after they are
-supplied to the driver.
+`App_KeyboardKeys` contains one retained runtime state object per physical key.
 
-The numeric `APP_CREDENTIAL_ENTRY_DIGIT_*` definitions keep physical key codes
-separate from `CES_Input_t` numeric values.
-`APP_CREDENTIAL_ENTRY_DIGIT_INVALID` (`0xFF`) represents a command with no
-numeric credential digit.
+The application shall not directly modify those runtime entries after they are supplied to the driver.
+
+The `APP_CREDENTIAL_ENTRY_DIGIT_*` constants keep physical key codes separate from the numeric values expected by Credential Entry Service.
+
+`APP_CREDENTIAL_ENTRY_DIGIT_INVALID` (`0xFF`) represents a CES command that carries no numeric digit.
 
 ---
 
 ## 7. Timeout Configuration
 
-`App_Config.h` owns the timeout identifier and duration policy. The mutable
-timeout lifecycle remains outside App Config and uses `App_TimeoutRuntime_t`.
+App Config owns **timeout identity and duration policy**.
 
-| Identifier | Duration definition | Current value | Semantic elapsed event |
-|---|---|---:|---|
-| `APP_TIMEOUT_CREDENTIAL_ENTRY` | `APP_CREDENTIAL_ENTRY_TIMEOUT_MS` | 5,000 ms | `LCS_EVENT_ENTRY_TIMEOUT` |
-| `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT_MS` | 800 ms | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` |
-| `APP_TIMEOUT_ACCESS_DENIED` | `APP_ACCESS_DENIED_TIMEOUT_MS` | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
-| `APP_TIMEOUT_LOCKOUT` | `APP_LOCKOUT_TIMEOUT_MS` | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` |
-| `APP_TIMEOUT_CRS_SAVED` | `APP_CRS_SAVED_TIMEOUT_MS` | 1,500 ms | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` |
+App Core owns the mutable lifecycle of the currently active timeout.
 
-The door-position confirmation timeout is **not an unlock-duration timeout**.
-The old fixed unlock interval has been replaced by the door-aware relock flow.
-After `LCS_EVENT_DOOR_POSITION_CONFIRMED`, the application starts the bounded
-800 ms confirmation interval. When it expires,
-`LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` advances LCS to the synchronous
-door-condition confirmation stage.
+| Identifier | Duration | Elapsed LCS event |
+| --- | ---: | --- |
+| `APP_TIMEOUT_CREDENTIAL_ENTRY` | 5,000 ms | `LCS_EVENT_ENTRY_TIMEOUT` |
+| `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | 800 ms | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` |
+| `APP_TIMEOUT_ACCESS_DENIED` | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
+| `APP_TIMEOUT_LOCKOUT` | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` |
+| `APP_TIMEOUT_CRS_SAVED` | 1,500 ms | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` |
 
-`APP_TIMEOUT_COUNT` represents the number of concrete timeout definitions.
-`APP_TIMEOUT_NONE` aliases that value and is a runtime sentinel; it shall never
-index a timeout-definition table.
+The Door Sensor confirmation interval is **not** an unlock-duration timeout.
 
-`App_TimeoutDefinition_t` contains immutable duration/event policy.
-`App_TimeoutRuntime_t` contains the mutable selected identifier, monotonic start
-timestamp and `Active` flag. `Active` is the authoritative validity field.
+The previous fixed authorized-unlock interval has been replaced by the door-aware relock sequence.
+
+### Timeout model
+
+`App_TimeoutDefinition_t` contains immutable policy:
+
+```text
+duration
+elapsed semantic LCS event
+```
+
+`App_TimeoutRuntime_t` contains mutable lifecycle state:
+
+```text
+selected timeout id
+start timestamp
+active flag
+```
+
+`APP_TIMEOUT_COUNT` is the number of concrete definitions.
+
+`APP_TIMEOUT_NONE` aliases that value as a runtime sentinel and shall never be used as an array index.
 
 ---
 
 ## 8. Runtime Registry
 
-`App_RuntimeInstances_t` groups references by role:
+`App_RuntimeInstances_t` exposes borrowed references to the stateful objects required by App Core and App Executor.
 
-| Registry member group | Concrete storage |
-|---|---|
-| `Keyboard_*`, `Keyboard` | immutable key policy, row/column GPIO arrays, GPIO scan adapter, 16 per-key runtimes and Matrix Keyboard handle |
-| `Lcd_*`, `Lcd` | backlight PWM descriptor, PCF8574 handle and LCD handle |
-| `Buzzer_*`, `Buzzer` | buzzer PWM descriptor and Buzzer Driver handle |
-| `Lock_Status_*` | lock-status GPIO, LED handle and independent SIS runtime |
-| `LowBattery_Status_*` | low-battery GPIO, LED handle and independent SIS runtime |
-| `Lock_Actuator_Gpio`, `Lock_Actuator` | actuator Platform GPIO descriptor and Lock Actuator Driver handle |
-| `Door_Sensor_Gpio`, `Door_Sensor` | Door Sensor Platform GPIO descriptor and interrupt-oriented driver handle |
-| `Door_Sensor_Event` | caller-owned slot receiving the latest debounced Door Sensor transition |
-| `Door_Sensor_Status` | caller-owned `DCS_SensorStatus_t` slot used for synchronous Door Control sensor-status queries |
-| `Exit_Button_Gpio`, `Exit_Button` | Exit Button Platform GPIO descriptor and interrupt-oriented driver handle |
-| `Exit_Button_Event` | caller-owned slot receiving the latest debounced Exit Button event |
-| `Runtime_Candidate` | transient complete CES candidate transfer object |
-| `Runtime_Credential` | installed credential retained in RAM |
+| Group | Application-owned objects |
+| --- | --- |
+| Keyboard | key map/config, GPIO arrays, scan adapter, per-key runtime and keyboard handle |
+| Display | backlight PWM descriptor, PCF8574 handle and LCD handle |
+| Sound | buzzer PWM descriptor and Buzzer handle |
+| Lock indication | GPIO descriptor, LED handle and SIS runtime |
+| Low-battery indication | GPIO descriptor, LED handle and SIS runtime |
+| Lock actuator | GPIO descriptor and Lock Actuator handle |
+| Door Sensor | GPIO descriptor, Door Sensor handle, transition-event slot and synchronous DCS status slot |
+| Exit Button | GPIO descriptor, Exit Button handle and event slot |
+| Credentials | transient candidate and retained installed credential |
 
-The registry deliberately contains two Status Indication Service handles because
-those instances retain independent indication, phase and timestamp state.
+### Event slots
 
-Singleton services, including Door Control, are not represented by duplicate
-service handles in the registry. They are accessed through their normal public
-APIs and are attached to the application-owned component/event context during
-initialization.
+`Door_Sensor_Event` and `Exit_Button_Event` are **publication slots**, not queues.
 
-`Door_Sensor_Event` and `Exit_Button_Event` are one-cycle event publication
-slots, not queues. Their corresponding driver update functions overwrite the
-slot on each processing cycle.
+They exist so DCS/component update logic can publish a validated event for immediate application consumption.
 
-`Door_Sensor_Status` serves a different purpose: it is the application-owned
-destination for an instantaneous `DCS_GetSensorStatus()` query used during the
-door-confirmation/relock handshake.
+`Door_Sensor_Status` serves a different purpose: it is the application-owned destination for the synchronous `DCS_GetSensorStatus()` operation used by the relock handshake.
 
-`App_GetRuntimeInstances()` always returns the address of `App_Instances` and
-has no initialization side effects. App Core stores that address in
-`App_Instance` before building the usable dependency graph.
+### Service runtimes
+
+Singleton services are not duplicated in the registry when their APIs do not require caller-owned handles.
+
+Status Indication Service is different: the lock-status and low-battery indication paths each require their own `SIS_Handle_t` because they retain independent pattern, phase and timing state.
+
+### Registry getter
+
+`App_GetRuntimeInstances()` returns the same immutable registry address and performs no initialization.
+
+```text
+App_GetRuntimeInstances()
+    ↓
+App_Instance
+    ↓
+App_Init() initializes referenced objects
+```
+
+The presence of storage does not imply that a referenced driver or service is already initialized.
 
 ---
 
-## 9. Initialization Contract
+## 9. Interrupt Callback Bridge
 
-Configuration storage exists for the complete firmware lifetime, but storage
-existence does not imply that any driver or service is initialized.
+`App_ConfigHalCallbacks.c` implements the strong:
 
-`App_Init()` is responsible for converting the statically allocated object graph
-into a usable runtime graph. The current composition requires, at minimum:
-
-1. bind `App_Instance` to the immutable registry;
-2. initialize the lock-actuator Platform GPIO descriptor and Lock Actuator Driver;
-3. initialize the Door Sensor Platform descriptor and driver with active-low
-   interpretation and the 500 ms quiet interval;
-4. initialize the Exit Button Platform descriptor and driver with active-low
-   interpretation and the 20 ms quiet interval;
-5. attach the three door-mechanism component handles to the Door Control Service;
-6. attach `Exit_Button_Event` and `Door_Sensor_Event` as DCS event-output slots;
-7. initialize the LCD/PCF8574/backlight/render path;
-8. initialize keyboard GPIO descriptors, scan adapter and Matrix Keyboard Driver;
-9. initialize buzzer PWM, Buzzer Driver and Sound Generator;
-10. initialize both GPIO/LED/Status Indication paths;
-11. initialize the remaining application services and select the valid startup
-    route according to stored credential state.
-
-The Door Sensor and Exit Button GPIOs are configured by CubeMX as interrupt
-sources before normal application runtime. Their callback bridge may therefore
-observe an edge before the corresponding driver is ready. The driver
-`NotifyInterrupt()` contracts shall safely ignore notifications received before
-initialization.
-
-The HAL callback must remain a bounded handoff only:
-
-```text
-EXTI edge
-   ↓
-HAL_GPIO_EXTI_Callback()
-   ↓
-DoorSensor_NotifyInterrupt() / ExitButton_NotifyInterrupt()
-   ↓
-return from ISR
-
-serialized application context
-   ↓
-DCS_Update()
-   ↓
-component debounce + stable event publication
+```c
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 ```
 
-No GPIO sampling, debounce waiting, service dispatch, Lock Control processing or
-actuator command belongs in the EXTI callback.
+for the application-owned Door Sensor and Exit Button inputs.
 
-Do not call `App_GetRuntimeInstances()` from unrelated modules to bypass this
-lifecycle or gain access to internal application handles.
+Its contract is deliberately narrow.
+
+```mermaid
+flowchart LR
+    EXTI["GPIO EXTI"]
+    CALLBACK["HAL_GPIO_EXTI_Callback()"]
+    NOTIFY["Driver NotifyInterrupt()"]
+    DCS["DCS_Update()"]
+    APP["App Core"]
+    LCS["Lock Control"]
+
+    EXTI --> CALLBACK --> NOTIFY
+    NOTIFY -. deferred .-> DCS --> APP --> LCS
+```
+
+The callback:
+
+- ignores activity until `App_Instance` is bound;
+- obtains the common application millisecond timestamp;
+- identifies the supported HAL GPIO pin mask;
+- calls `ExitButton_NotifyInterrupt()` or `DoorSensor_NotifyInterrupt()`;
+- returns immediately.
+
+It does **not**:
+
+- read the GPIO state;
+- wait for debounce;
+- call DCS;
+- call `LCS_Process()`;
+- update UI;
+- command the actuator.
+
+Notifications that reach the component before its driver is initialized are expected to be rejected safely by the component contract.
 
 ---
 
 ## 10. Credential Storage in RAM
 
-Two secret-bearing objects are owned here:
+App Config owns two secret-bearing application buffers.
 
-| Object | Lifetime | Purpose | Erasure owner |
-|---|---|---|---|
-| `App_RuntimeCandidate` | One synchronous transfer | CES candidate copied for authentication, CRS staging or confirmation | App Executor clears the credential digit array after the synchronous consumer completes |
-| `App_RuntimeCredential` | Across authentication requests | Credential loaded from CSS or installed after verified save | App Executor controlled-reset path; overwritten after successful replacement |
+| Object | Lifetime | Purpose |
+| --- | --- | --- |
+| `App_RuntimeCandidate` | bounded synchronous transfer | carries a complete CES candidate to AUTH/CRS-related operations |
+| `App_RuntimeCredential` | retained during normal runtime | stores the installed credential used by authentication |
 
-The registry exposes internal pointers to these buffers only because App Core
-and App Executor are separate translation units. This is not permission to
-expose, trace or persist them elsewhere.
+The registry exposes pointers to these buffers only because App Core and App Executor are separate application translation units.
 
-Credential bytes must never appear in logs, debug messages, UI strings,
-documentation examples or crash telemetry.
+They remain internal implementation storage.
 
-The `_Static_assert` declarations in `App_Config.h` require compatible lengths
-for Credential Entry, Authentication, Credential Register, Credential Storage
-and Display Render. If one participating contract changes independently, the
-build must fail instead of silently truncating credential data.
+The application shall never expose their contents through:
+
+- UI;
+- logs;
+- diagnostic strings;
+- public APIs;
+- documentation examples.
+
+App Executor owns the corresponding explicit erasure behavior.
+
+`App_Config.h` also defines compile-time assertions requiring credential length compatibility between:
+
+- CES;
+- Authentication Service;
+- Credential Register Service;
+- Credential Storage Service;
+- Display Render Service.
+
+If one participating contract changes independently, compilation shall fail rather than silently truncate or reinterpret credential data.
 
 ---
 
 ## 11. Dependency and Visibility Rules
 
-- `App_Config.h` may include the concrete types required to describe the internal
-  registry.
-- `App_Config.h` must not become a public application API.
-- Platform, component and reusable-service modules must not depend on App Config.
-- `App_Config.c` defines static storage, immutable policy and registry bindings;
-  it must not grow workflow or state-machine decisions.
-- `App_ConfigHalCallbacks.c` may publish interrupt activity to the Door Sensor
-  and Exit Button Drivers, but it must not debounce inputs, call product
-  services, process LCS events or command the actuator.
-- App Core owns initialization, periodic orchestration, event translation and
-  timeout lifecycle.
-- App Executor owns concrete side effects for `LCS_Action_t`.
-- Door Control owns physical door-mechanism coordination but not product FSM
-  transitions.
-- `App_Core_Internal.h` is the supported cross-translation-unit route for
-  Core-owned internal application coordination.
-- New externally callable behavior requires deliberate review of `App_Core.h`;
-  do not expose the runtime registry as a shortcut.
+- `App_Config.h` is internal to `App/`.
+- Reusable Platform, component and service modules shall not include App Config.
+- `App_Config.c` owns storage and policy, not product workflow.
+- App Core owns initialization, input/event orchestration and active-timeout lifecycle.
+- App Executor owns concrete side effects selected by `LCS_Action_t`.
+- Lock Control owns product-state decisions.
+- Door Control owns physical door-mechanism coordination and normal lock interlocking.
+- `App_ConfigHalCallbacks.c` is restricted to HAL-to-driver interrupt handoff.
+- New externally callable application behavior requires deliberate review of `App_Core.h`.
+- The runtime registry shall not be exposed as a shortcut around Application Layer boundaries.
 
----
-
-## 12. Changing the Configuration
-
-### Change a pin or peripheral
-
-1. Update and regenerate the CubeMX configuration.
-2. Update or verify the corresponding `APP_*` binding.
-3. Confirm the generated GPIO/peripheral symbol and Platform conversion.
-4. Confirm active polarity and interrupt edge configuration where applicable.
-5. Update the hardware table in this README.
-6. Build and validate on target hardware.
-
-### Add a retained object
-
-1. Declare static storage in `App_Config.c`.
-2. Document its owner, borrower and required lifetime.
-3. Add a typed pointer to `App_RuntimeInstances_t`.
-4. Bind it in `App_Instances`.
-5. Initialize or attach it in the correct fail-fast order from App Core.
-6. Add cleanup or explicit erasure if the object carries sensitive state.
-
-### Add an interrupt-backed input
-
-1. Configure and label the GPIO/EXTI source in CubeMX.
-2. Add the Platform descriptor, component handle and product policy to App Config.
-3. Add any caller-owned event/status slot required by the runtime integration.
-4. Initialize the Platform descriptor before the component handle.
-5. Filter the generated HAL pin mask in `App_ConfigHalCallbacks.c`.
-6. Keep the callback bounded to timestamp/sequence notification.
-7. Perform GPIO sampling, debounce and product-policy translation in serialized
-   application/service context.
-8. Document behavior for notifications that arrive before component initialization.
-
-### Add a timeout
-
-1. Add a concrete `App_TimeoutId_t` identifier before `APP_TIMEOUT_COUNT`.
-2. Add a nonzero duration definition.
-3. Associate the timeout with the correct semantic LCS elapsed event.
-4. Start/cancel it from the relevant application action path.
-5. Update App documentation and LCS tests together.
-
-### Change credential length
-
-Update all participating service contracts together. Do not remove or weaken a
-compile-time assertion merely to make an inconsistent build pass.
-
----
-
-## 13. Validation Checklist
-
-- [ ] `App_Config.h` contains no placeholder Doxygen text.
-- [ ] Every registry member has an explicit role comment.
-- [ ] Every static object in `App_Config.c` documents ownership and lifetime where relevant.
-- [ ] `App_Instances` binds every member to correctly typed static storage.
-- [ ] `Door_Sensor_Event`, `Door_Sensor_Status` and `Exit_Button_Event` have distinct documented roles.
-- [ ] Door Sensor debounce is 500 ms and Exit Button debounce is 20 ms unless product policy intentionally changes.
-- [ ] Door Sensor and Exit Button active levels match the electrical design.
-- [ ] Door Sensor and Exit Button rising/falling EXTI configuration matches CubeMX.
-- [ ] `App_ConfigHalCallbacks.c` contains no GPIO sampling, debounce, service dispatch or actuator command.
-- [ ] HAL EXTI filtering forwards only supported application-owned interrupt sources.
-- [ ] `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT_MS` maps to `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT`.
-- [ ] Timeout identifiers and duration definitions remain aligned with the current LCS contract.
-- [ ] The longest valid synchronous event chain fits `APP_MAX_LCS_DISPATCH_DEPTH`.
-- [ ] Lock-status and low-battery LEDs remain consistent with `LED_ACTIVE_HIGH`.
-- [ ] LCD backlight and buzzer PWM channel selections match their current `APP_*` definitions.
-- [ ] Credential-length assertions compile.
-- [ ] No credential value appears in source comments or documentation.
-- [ ] App Config remains an internal application composition module rather than a public API.
-
-See the [general App reference](../README.md) for execution, action dispatch,
-safety and concurrency rules.
-
----
-
-## 14. License
-
-This module is part of the:
+A useful test for placement is:
 
 ```text
-Electronic Lock Project
+Is this a compile-time product binding or retained application object?
+    → App Config
+
+Is this initialization or runtime event routing?
+    → App Core
+
+Is this execution of an LCS action?
+    → App Executor
+
+Is this product-state policy?
+    → Lock Control
 ```
 
-and follows the project's license terms.
+---
+
+## 12. Documentation Authority
+
+This README documents **App Config ownership, composition and bindings**.
+
+It intentionally does not duplicate complete component/service API documentation.
+
+Use the following artifacts as authoritative:
+
+| Information | Source of truth |
+| --- | --- |
+| Physical MCU pin/peripheral assignment | [`../../Electronic-Lock.ioc`](../../Electronic-Lock.ioc) |
+| CubeMX-generated pin/port symbols | generated `main.h` and peripheral headers |
+| Product-side compile-time bindings and timing constants | [`Inc/App_Config.h`](Inc/App_Config.h) |
+| Static application object storage | [`Src/App_Config.c`](Src/App_Config.c) |
+| Runtime registry bindings | [`Src/App_Config.c`](Src/App_Config.c) |
+| EXTI handoff behavior | [`Src/App_ConfigHalCallbacks.c`](Src/App_ConfigHalCallbacks.c) |
+| Application orchestration | [`../README.md`](../README.md) and App Core source |
+| Product FSM | Lock Control Service |
+| Door-mechanism policy | Door Control Service |
+
+The hardware tables in this README are maintained for readability only.
+
+When a physical pin assignment changes, `Electronic-Lock.ioc` shall be updated first; App Config shall continue binding through the corresponding CubeMX symbols, and this README shall then be synchronized with the new baseline.
+
+---
+
+This module follows the project's [license terms](../../LICENSE).
