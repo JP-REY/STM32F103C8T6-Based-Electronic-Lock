@@ -249,8 +249,10 @@ The following 20 scenarios are independently executable. Every scenario starts w
 | `lcs.registration_confirm_entry_exit_paths` | Verify cancellation, incomplete-entry refresh and inactivity timeout during registration confirmation. | Cancellation returns `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; incomplete input returns `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`; timeout also terminates confirmation with `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION`. |
 | `lcs.registration_storage_failure` | Verify fail-safe behavior when persistent credential storage fails. | Storage failure returns `REQUEST_CONTROLLED_RESET`; subsequent registration-feedback and credential-entry events return `LCS_ACTION_NONE`, proving the fault path is absorbing. |
 | `lcs.invalid_events_preserve_state` | Verify that sentinel, out-of-range and valid-but-out-of-context events are rejected without corrupting FSM progress. | Invalid and wrong-state events return `LCS_ACTION_NONE`; valid follow-up events still progress through authentication, unlock, door confirmation and `READY_TO_LOCK`, finally restoring locked idle. |
-| `lcs.relock_not_confirmed_recovery` | Verify both recoverable `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` transitions in the post-unlock relock handshake. | From `READY_TO_LOCK`, a not-confirmed event returns `LCS_ACTION_NONE` and a new door confirmation proves recovery to `ACCESS_UNLOCKED`; after `READY_TO_LOCK` has moved LCS to `LOCKED`, an immediate not-confirmed event again returns `NONE`, a fresh successful relock completes, and normal credential entry proves final locked-idle restoration. |
+| `lcs.relock_not_confirmed_recovery` | Verify both recoverable `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` transitions in the post-unlock relock handshake. | From `READY_TO_LOCK`, a not-confirmed event returns `RESTART_UNLOCK_HOLD_TIMEOUT` and a new door confirmation proves recovery to `ACCESS_UNLOCKED`; after `READY_TO_LOCK` has moved LCS to `LOCKED`, an immediate not-confirmed event again returns `RESTART_UNLOCK_HOLD_TIMEOUT`; a fresh successful relock completes and normal credential entry proves final locked-idle restoration. |
 | `lcs.exit_request_access` | Verify request-to-exit access from locked idle without credential authentication and through the complete bounded relock path. | `EXIT_REQUEST` returns `EXIT_REQUEST_UNLOCK`; the shared door-confirmation sequence completes through `READY_TO_LOCK`; a subsequent credential-entry request proves locked idle was restored. |
+| `lcs.unlock_hold_timeout_door_held_open_recovery` | Verify unlock-hold timeout handling and functional recovery from the door-held-open state. | `UNLOCK_HOLD_TIMEOUT` from unlocked access returns `FORCE_ACTUATOR_LOCK`; credential entry is ignored while door-held-open; a new `EXIT_REQUEST` returns `EXIT_REQUEST_UNLOCK`, allowing the normal confirmation and relock sequence to complete; subsequent credential entry proves locked idle was finally restored. |
+| `lcs.door_held_open_critical_fault` | Verify fail-safe escalation from the door-held-open state after unlock-hold timeout. | `UNLOCK_HOLD_TIMEOUT` returns `FORCE_ACTUATOR_LOCK`; a subsequent `CRITICAL_FAULT` returns `REQUEST_CONTROLLED_RESET`; later exit and credential-entry requests return `LCS_ACTION_NONE`, proving the fault state is absorbing. |
 | `lcs.exit_request_preserves_failure_counter` | Verify that request-to-exit access does not reset accumulated authentication-failure history. | Two authentication failures are followed by a successful request-to-exit unlock/relock cycle; the next authentication failure is still treated as the third consecutive failure and enters lockout. |
 | `lcs.unlock_request_failure_recovery` | Verify semantic recovery when physical unlock execution fails but the safe lock fallback succeeds. | After successful authentication commits LCS to `ACCESS_UNLOCKED` and returns `REQUEST_UNLOCK`, `UNLOCK_REQUEST_FAILED` returns `RETURN_TO_LOCKED`; a subsequent credential-entry request proves normal locked idle was restored. |
 | `lcs.unlock_recovery_critical_fault` | Verify fail-safe escalation when unlock execution fails and the safe lock fallback also fails. | After successful authentication commits LCS to `ACCESS_UNLOCKED`, `CRITICAL_FAULT` returns `REQUEST_CONTROLLED_RESET`; subsequent operational events return `LCS_ACTION_NONE`, proving the fault state is absorbing. |
@@ -263,7 +265,7 @@ The catalog is a behavioral specification. If an intentional LCS change modifies
 
 ### 8.1 FSM Behavior
 
-The current 20-scenario catalog exercises the accepted event paths needed to validate:
+The current 22-scenario catalog exercises the accepted event paths needed to validate:
 
 * Normal boot, first-registration boot and initialization failure.
 * Normal credential entry, incomplete-entry refresh, cancellation and inactivity timeout.
@@ -296,16 +298,20 @@ The following private policy is validated indirectly:
 | Failure-count saturation/reset | Lockout blocks entry and timeout restores a fresh failure budget. |
 | Authentication-success reset | Successful credential authentication clears earlier consecutive failures. |
 | Request-to-exit independence | Request-to-exit bypasses credential authentication and does not clear accumulated authentication failures. |
-| Shared relock sequencing | Both authenticated access and request-to-exit require door confirmation and `LCS_EVENT_READY_TO_LOCK` before returning to locked idle. |
-| Relock confirmation recovery | `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` from `READY_TO_LOCK` silently restores `ACCESS_UNLOCKED`; a later accepted door confirmation proves the target state. |
-| Final relock reconciliation | After `LCS_EVENT_READY_TO_LOCK` has selected the granted-access relock action and moved LCS to `LOCKED`, an immediate `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` silently restores `ACCESS_UNLOCKED`. |
+| Shared relock sequencing | Both authenticated access and request-to-exit enter the shared post-unlock path and require door confirmation followed by `LCS_EVENT_READY_TO_LOCK` before normal locked idle is restored. |
+| Relock confirmation recovery | `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` from `READY_TO_LOCK` returns `LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT` and restores `ACCESS_UNLOCKED`; a later accepted door confirmation proves the recovery target. |
+| Final relock reconciliation | After `LCS_EVENT_READY_TO_LOCK` has selected the granted-access relock action and moved LCS to `LOCKED`, an immediate `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` returns `LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT` and restores `ACCESS_UNLOCKED`. |
+| Unlock-hold timeout boundary | While in `ACCESS_UNLOCKED`, expiration of `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` before the required door-position condition is confirmed selects `LCS_ACTION_FORCE_ACTUATOR_LOCK` and moves the FSM to `DOOR_HELD_OPEN`. |
+| Door-held-open isolation | `DOOR_HELD_OPEN` is distinct from normal `LOCKED`; ordinary credential entry is rejected even though the actuator has been forced to the locked command. |
+| Door-held-open recovery | A new `LCS_EVENT_EXIT_REQUEST` from `DOOR_HELD_OPEN` selects `LCS_ACTION_EXIT_REQUEST_UNLOCK` and restores `ACCESS_UNLOCKED`, requiring a fresh explicit exit request before the actuator may be energized again. |
+| Door-held-open fault escalation | `LCS_EVENT_CRITICAL_FAULT` from `DOOR_HELD_OPEN` selects `LCS_ACTION_REQUEST_CONTROLLED_RESET` and enters the absorbing fault state. |
 | Registration mismatch count | Mismatches one and two retry confirmation; mismatch three restarts registration from first entry. |
 | Mismatch reset | The third-mismatch restart clears history; a later authorized registration receives the full retry budget. |
 | First-boot policy | `CREDENTIAL_NOT_REGISTERED` enables mandatory enrollment; first-boot cancellation refreshes the active registration phase instead of returning to `LOCKED`. |
 | First-boot timeout preservation | `ENTRY_TIMEOUT` currently has no first-boot registration transition; `ACTION_NONE` plus a later phase-specific action proves the enrollment state is preserved. |
 | First-boot completion | Successful first-boot registration ends with `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` instead of the normal return-to-locked action. |
 | Service activation | Only an accepted startup route enables operational behavior. |
-| Fault absorption | Initialization or persistent-storage failure selects controlled reset and later ordinary events cannot restore operation. |
+| Fault absorption | Initialization, persistent-storage failure or an escalated critical runtime fault selects controlled reset behavior, and later ordinary events cannot restore operation. |
 
 `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` is not expected by any current host scenario. If production begins returning that action, add an explicit observable path and update this catalog in the same change.
 

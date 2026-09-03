@@ -885,7 +885,7 @@ static bool LCS_test_invalid_events_preserve_state(void)
                            LCS_ACTION_NONE);
 
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_CONFIRMED,
-                       LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION);
+                           LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION);
 
     /* Wrong-state event shall preserve door-sensor confirmation. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_ENTRY_TIMEOUT,
@@ -942,7 +942,7 @@ static bool LCS_test_relock_not_confirmed_recovery(void)
     LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
 
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
-                           LCS_ACTION_NONE);
+                           LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT);
 
     /* A new door confirmation proves the first silent recovery reached ACCESS_UNLOCKED. */
     LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
@@ -953,7 +953,7 @@ static bool LCS_test_relock_not_confirmed_recovery(void)
 
     /* A final relock denial is reported synchronously from LOCKED and shall recover to unlocked access. */
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED,
-                           LCS_ACTION_NONE);
+                           LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT);
 
     /* Completing the shared relock path proves the second silent recovery also reached ACCESS_UNLOCKED. */
     LCS_TEST_REQUIRE(LCS_test_complete_unlocked_access());
@@ -987,6 +987,88 @@ static bool LCS_test_exit_request_access(void)
     LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
                            LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
 
+    return true;
+}
+
+/**
+ * @brief   Validates recovery from unlock-hold timeout through the door-held-open state.
+ *
+ * @details Enters unlocked access through a request-to-exit and reports expiration of the bounded unlock-hold interval before
+ *          the required door-position condition is confirmed. The timeout shall force the actuator to the locked command and move
+ *          the FSM to the door-held-open state. A credential-entry request is then ignored, proving that normal locked idle was not
+ *          restored. A new exit request shall resume unlocked access, after which the normal door-confirmation and relock sequence
+ *          completes successfully. Acceptance of a final credential-entry request proves that locked idle was restored only after
+ *          successful relocking.
+ *
+ * @note    The scenario validates the door-held-open state indirectly through externally observable actions without accessing the
+ *          private LCS runtime state.
+ *
+ * @return  true  - The unlock-hold timeout, door-held-open recovery and final relock sequence matched the contract;
+ * @return  false - At least one returned action or required fixture failed.
+ */
+static bool LCS_test_unlock_hold_timeout_door_held_open_recovery(void)
+{
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_EXIT_REQUEST_UNLOCK);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_UNLOCK_HOLD_TIMEOUT,
+                           LCS_ACTION_FORCE_ACTUATOR_LOCK);
+
+    /* Door-held-open shall not behave as normal locked idle. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_EXIT_REQUEST_UNLOCK);
+    
+    LCS_TEST_REQUIRE(LCS_test_reach_ready_to_lock_from_unlocked_access());
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_READY_TO_LOCK,
+                           LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS);
+
+    /* Successful completion shall finally restore normal locked idle. */
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_BEGIN_CREDENTIAL_ENTRY_SESSION);
+
+    return true;
+}
+
+/**
+ * @brief   Validates critical-fault escalation from the door-held-open state.
+ *
+ * @details Enters unlocked access through a request-to-exit and reports expiration of the bounded unlock-hold interval before
+ *          the required door-position condition is confirmed. The timeout shall force the actuator to the locked command and move
+ *          the FSM to the door-held-open state. A subsequent critical-fault event shall transition the FSM to the fault state and
+ *          request controlled reset behavior. Later exit and credential-entry requests are ignored, proving that the fault state
+ *          remains terminal for the current runtime instance.
+ *
+ * @note    The scenario reaches the door-held-open state through externally observable actions and validates fault containment
+ *          without accessing the private LCS runtime state.
+ *
+ * @return  true  - The unlock-hold timeout, critical-fault transition and terminal fault behavior matched the contract;
+ * @return  false - At least one returned action or required fixture failed.
+ */
+static bool LCS_test_door_held_open_critical_fault(void)
+{
+    LCS_TEST_REQUIRE(LCS_test_activate_locked());
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_EXIT_REQUEST_UNLOCK);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_UNLOCK_HOLD_TIMEOUT,
+                           LCS_ACTION_FORCE_ACTUATOR_LOCK);
+    
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CRITICAL_FAULT,
+                           LCS_ACTION_REQUEST_CONTROLLED_RESET);
+    
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_EXIT_REQUEST,
+                           LCS_ACTION_NONE);
+
+    LCS_TEST_EXPECT_ACTION(LCS_EVENT_CREDENTIAL_ENTRY_REQUESTED,
+                           LCS_ACTION_NONE);
+    
     return true;
 }
 
@@ -1097,26 +1179,28 @@ static bool LCS_test_unlock_recovery_critical_fault(void)
  */
 static const LCS_TestCase_t LCS_TestCases[] =
 {
-    {"inactive_gate",                          LCS_test_inactive_gate},
-    {"boot_failure",                           LCS_test_boot_failure},
-    {"normal_access",                          LCS_test_normal_access},
-    {"normal_exit_paths",                      LCS_test_normal_exit_paths},
-    {"authentication_lockout",                 LCS_test_authentication_lockout},
-    {"unlock_request_failure_recovery",        LCS_test_unlock_request_failure_recovery},
-    {"unlock_recovery_critical_fault",         LCS_test_unlock_recovery_critical_fault},
-    {"authentication_success_resets_counter",  LCS_test_authentication_success_resets_counter},
-    {"registration_authorization_failure",     LCS_test_registration_authorization_failure},
-    {"first_boot_registration_success",        LCS_test_first_boot_registration_success},
-    {"first_boot_registration_exit_policy",    LCS_test_first_boot_registration_exit_policy},
-    {"authorized_registration_success",        LCS_test_authorized_registration_success},
-    {"registration_mismatch_limit",            LCS_test_registration_mismatch_limit},
-    {"registration_first_entry_exit_paths",    LCS_test_registration_first_entry_exit_paths},
-    {"registration_confirm_entry_exit_paths",  LCS_test_registration_confirm_entry_exit_paths},
-    {"registration_storage_failure",           LCS_test_registration_storage_failure},
-    {"invalid_events_preserve_state",          LCS_test_invalid_events_preserve_state},
-    {"relock_not_confirmed_recovery",          LCS_test_relock_not_confirmed_recovery},
-    {"exit_request_access",                    LCS_test_exit_request_access},
-    {"exit_request_preserves_failure_counter", LCS_test_exit_request_preserves_auth_failure_counter}
+    {"inactive_gate",                               LCS_test_inactive_gate},
+    {"boot_failure",                                LCS_test_boot_failure},
+    {"normal_access",                               LCS_test_normal_access},
+    {"normal_exit_paths",                           LCS_test_normal_exit_paths},
+    {"authentication_lockout",                      LCS_test_authentication_lockout},
+    {"authentication_success_resets_counter",       LCS_test_authentication_success_resets_counter},
+    {"registration_authorization_failure",          LCS_test_registration_authorization_failure},
+    {"first_boot_registration_success",             LCS_test_first_boot_registration_success},
+    {"first_boot_registration_exit_policy",         LCS_test_first_boot_registration_exit_policy},
+    {"authorized_registration_success",             LCS_test_authorized_registration_success},
+    {"registration_mismatch_limit",                 LCS_test_registration_mismatch_limit},
+    {"registration_first_entry_exit_paths",         LCS_test_registration_first_entry_exit_paths},
+    {"registration_confirm_entry_exit_paths",       LCS_test_registration_confirm_entry_exit_paths},
+    {"registration_storage_failure",                LCS_test_registration_storage_failure},
+    {"invalid_events_preserve_state",               LCS_test_invalid_events_preserve_state},
+    {"relock_not_confirmed_recovery",               LCS_test_relock_not_confirmed_recovery},
+    {"exit_request_access",                         LCS_test_exit_request_access},
+    {"unlock_hold_timeout_door_held_open_recovery", LCS_test_unlock_hold_timeout_door_held_open_recovery},
+    {"door_held_open_critical_fault",               LCS_test_door_held_open_critical_fault},
+    {"exit_request_preserves_failure_counter",      LCS_test_exit_request_preserves_auth_failure_counter},
+    {"unlock_request_failure_recovery",             LCS_test_unlock_request_failure_recovery},
+    {"unlock_recovery_critical_fault",              LCS_test_unlock_recovery_critical_fault},
 };
 
 /**
@@ -1188,3 +1272,15 @@ int main(int ArgumentCount, char** Arguments)
 
     return EXIT_FAILURE;
 }
+
+
+
+
+
+
+
+
+
+
+
+

@@ -78,6 +78,8 @@ set(LCS_FSM_TEST_SCENARIOS
     unlock_request_failure_recovery
     unlock_recovery_critical_fault
     first_boot_registration_exit_policy
+    unlock_hold_timeout_door_held_open_recovery
+    door_held_open_critical_fault
 )
 
 # Register each scenario as an independently selectable CTest test. Labels
