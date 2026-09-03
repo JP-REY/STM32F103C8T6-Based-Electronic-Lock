@@ -166,6 +166,8 @@ typedef enum
      */
     LCS_EVENT_ENTRY_TIMEOUT,                        /*< The bounded credential-entry interval elapsed.                                      */
 
+    LCS_EVENT_UNLOCK_HOLD_TIMEOUT,                  /*< The bounded interval awaiting door-position confirmation after unlock elapsed.      */
+    
     LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT,     /*< The bounded delay after door-position confirmation elapsed.                         */
 
     LCS_EVENT_DENIED_ACCESS_TIMEOUT,                /*< The bounded access-denied feedback interval elapsed.                                */
@@ -255,6 +257,10 @@ typedef enum
 
     LCS_ACTION_EXIT_REQUEST_UNLOCK,                                         /*< Request physical unlock for an accepted request-to-exit condition.             */
 
+    LCS_ACTION_FORCE_ACTUATOR_LOCK,                                         /*< Force the actuator to ocked without applying the door-position interlock.      */
+    
+    LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT,                                 /*< Restart the bounded unlock-hold interval after relock confirmation is lost.    */
+    
     LCS_ACTION_DENY_ACCESS,                                                 /*< Preserve the locked state and begin bounded access-denied feedback.            */
 
     LCS_ACTION_ENTER_LOCKOUT,                                               /*< Preserve the locked state, reject credential entry and begin lockout timing.   */

@@ -64,11 +64,12 @@
 
   * [13.1 Successful Authenticated Access](#131-successful-authenticated-access)
   * [13.2 Request-to-Exit Access](#132-request-to-exit-access)
-  * [13.3 Authorized Credential Registration](#133-authorized-credential-registration)
-  * [13.4 First-Boot Registration Route](#134-first-boot-registration-route)
-  * [13.5 Rejected Access and Lockout](#135-rejected-access-and-lockout)
-  * [13.6 Cancellation or Entry Timeout](#136-cancellation-or-entry-timeout)
-  * [13.7 Ignored Events](#137-ignored-events)
+  * [13.3 Door-Held-Open Recovery](#133-door-held-open-recovery)
+  * [13.4 Authorized Credential Registration](#134-authorized-credential-registration)
+  * [13.5 First-Boot Registration Route](#135-first-boot-registration-route)
+  * [13.6 Rejected Access and Lockout](#136-rejected-access-and-lockout)
+  * [13.7 Cancellation or Entry Timeout](#137-cancellation-or-entry-timeout)
+  * [13.8 Ignored Events](#138-ignored-events)
 * [14. API Reference](#14-api-reference)
 
   * [14.1 LCS_Process](#141-lcs_process)
@@ -115,6 +116,11 @@ Those operations cross several service and platform boundaries, so they belong t
 
 Request-to-exit uses the same post-unlock relock states as authenticated access but bypasses credential entry and authentication. It enters `LCS_STATE_ACCESS_UNLOCKED` directly from `LOCKED` and does not reset the authentication-failure counter.
 
+Every successful unlock starts a bounded unlock-hold interval while LCS waits for the required door-position confirmation. If that
+interval expires first, LCS enters `LCS_STATE_DOOR_HELD_OPEN` and requests a forced actuator-lock command that bypasses the normal
+door-position interlock. A new validated exit request returns the FSM to `LCS_STATE_ACCESS_UNLOCKED`, requests unlock again and starts
+a fresh bounded interval so the door can be closed and the ordinary confirmation and relock sequence can finish.
+
 This separation keeps the FSM independent from current hardware, presentation choices, and the exact collection of cooperating modules. An LCD can be replaced, an LED pattern can change, or a new sound service can be added without embedding those dependencies in the state machine.
 
 The acronym `LCS` means **Lock Control Service** and is used as the prefix for every public symbol exposed by this module.
@@ -137,6 +143,9 @@ The acronym `LCS` means **Lock Control Service** and is used as the prefix for e
 - Shared authentication path for unlock and credential-register authorization.
 - Direct request-to-exit routing from locked idle without credential authentication.
 - Shared post-unlock relock sequence for authenticated access and request-to-exit.
+- Bounded unlock-hold interval while awaiting the required door-position condition.
+- Explicit door-held-open recovery through forced actuator lock and a new exit request.
+- Unlock-hold timeout restart when a relock confirmation is lost.
 - Explicit door-position confirmation, bounded confirmation delay, and final ready-to-lock handshake.
 - Request-to-exit preserves accumulated authentication-failure history.
 - Explicit credential-register first-entry, confirmation, validation, persistence, and success-feedback states.
@@ -201,7 +210,7 @@ flowchart LR
     REGISTER --> DISPATCH
     STORAGE --> DISPATCH
     DCS -->|"EXIT_REQUEST<br/>DOOR_POS_CONFIRMED<br/>READY_TO_LOCK"| DISPATCH
-    TIME --> DISPATCH
+    TIME -->|"elapsed bounded intervals"| DISPATCH
     BOOT --> DISPATCH
     DISPATCH <-->|"LCS_Event_t / LCS_Action_t"| LCS
     DISPATCH -->|"unlock / relock / confirmation request"| DCS
@@ -322,6 +331,10 @@ The Lock Control Service is responsible for:
 - Accepting validated request-to-exit access without treating it as authentication success.
 - Preserving authentication-failure history across request-to-exit access.
 - Modeling the shared post-unlock progression through door-position confirmation, final relock readiness, and locked idle.
+- Bounding the unlocked actuator hold while awaiting door-position confirmation.
+- Selecting the door-held-open recovery state and forced actuator-lock action when that interval expires.
+- Requiring a new validated exit request before returning from door-held-open recovery to unlocked access.
+- Restarting the unlock-hold interval when relock confirmation is lost and the FSM returns to unlocked access.
 - Modeling the complete product-level credential-register lifecycle without storing credential bytes.
 - Preserving its domain and hardware independence.
 
@@ -409,13 +422,14 @@ its result and is the only integration boundary that calls `LCS_Process()`.
 | `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Credential Storage Service | The confirmed credential was persisted and verified successfully. |
 | `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE` | Credential Storage Service | The confirmed credential could not be persisted or verified. |
 | `LCS_EVENT_CANDIDATE_INCOMPLETE` | Credential Entry Service | Confirmation was requested before the active candidate reached the required length. |
-| `LCS_EVENT_EXIT_REQUEST` | Door Control Service | A validated request-to-exit condition requests unlock from locked idle. |
+| `LCS_EVENT_EXIT_REQUEST` | Door Control Service | A validated request-to-exit condition requests unlock from locked idle or door-held-open recovery. |
 | `LCS_EVENT_DOOR_POSITION_CONFIRMED` | Door Control Service | The required door-position condition was confirmed and relock timing may begin. |
 | `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED` | Door Control Service | The previously confirmed door position is no longer valid for relock completion. |
 | `LCS_EVENT_READY_TO_LOCK` | Door Control Service | Door-control conditions are satisfied and the lock mechanism may return to locked. |
 | `LCS_EVENT_UNLOCK_REQUEST_FAILED` | App Executor | The requested unlock operation failed, but the actuator was recovered to the locked state and LCS must reconcile back to locked operation. |
 | `LCS_EVENT_CRITICAL_FAULT` | App Executor | An unrecoverable runtime failure occurred and the controlled reset path is required. |
 | `LCS_EVENT_ENTRY_TIMEOUT` | Timeout Validation Service | The bounded credential-entry interval elapsed. |
+| `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` | Timeout Validation Service | The bounded interval awaiting door-position confirmation after unlock elapsed. |
 | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Timeout Validation Service | The bounded delay after door-position confirmation elapsed. |
 | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` | Timeout Validation Service | The bounded access-denied feedback interval elapsed. |
 | `LCS_EVENT_LOCKOUT_TIMEOUT` | Timeout Validation Service | The temporary authentication lockout interval elapsed. |
@@ -448,6 +462,8 @@ semantic outcomes: LCS never interprets raw exit-button edges or raw door-sensor
 | `LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STORAGE` | Request persistent storage of the validated new credential. |
 | `LCS_ACTION_REQUEST_UNLOCK` | Request physical unlock for successfully authenticated access. |
 | `LCS_ACTION_EXIT_REQUEST_UNLOCK` | Request physical unlock for an accepted request-to-exit condition. |
+| `LCS_ACTION_FORCE_ACTUATOR_LOCK` | Force the actuator to the locked command without applying the door-position interlock. |
+| `LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT` | Restart the bounded unlock-hold interval after relock confirmation is lost. |
 | `LCS_ACTION_DENY_ACCESS` | Preserve the locked state and begin bounded access-denied feedback. |
 | `LCS_ACTION_ENTER_LOCKOUT` | Preserve the locked state, reject credential entry and begin lockout timing. |
 | `LCS_ACTION_RETURN_TO_LOCKED` | Restore normal locked-idle operation. |
@@ -497,6 +513,7 @@ The transition occurs and private runtime state changes even though the applicat
 | `LCS_STATE_ACCESS_UNLOCKED` | Access is unlocked and the FSM is awaiting the required door-position condition. |
 | `LCS_STATE_DOOR_SENSOR_CONFIRMATION` | Required door position was observed and the bounded confirmation delay is active. |
 | `LCS_STATE_READY_TO_LOCK` | Door-control confirmation has been requested and the FSM awaits authorization to relock. |
+| `LCS_STATE_DOOR_HELD_OPEN` | The door remained open until the unlock-hold interval elapsed and a new exit request is required. |
 | `LCS_STATE_LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Access remains locked while bounded access-denied feedback is active. |
 | `LCS_STATE_LOCKOUT` | Credential-entry requests are rejected until the lockout interval expires. |
 | `LCS_STATE_FAULT` | A critical failure prevents further normal operation in this runtime. |
@@ -521,23 +538,27 @@ flowchart TB
     LOCKED -->|T14| ACCESS
 
     ACCESS -->|T15| CONFIRM["DOOR SENSOR<br/>CONFIRMATION"]
+    ACCESS -->|T16| HELD["DOOR HELD OPEN<br/>actuator lock forced"]
     ACCESS -->|T12| FAULT
     ACCESS -->|T13| RETURN["LOCKED<br/>return rail"]
 
-    CONFIRM -->|T16| READY["READY TO LOCK<br/>wait"]
+    HELD -->|T17| ACCESS
+    HELD -->|T18| FAULT
 
-    READY -->|T17| RETURN
-    READY -->|T18| ACCESS
+    CONFIRM -->|T19| READY["READY TO LOCK<br/>wait"]
 
-    LOCKED -->|T19| ACCESS
+    READY -->|T20| RETURN
+    READY -->|T21| ACCESS
 
-    AUTH -->|T20| DENIED["ACCESS DENIED<br/>FEEDBACK"]
+    LOCKED -->|T22| ACCESS
+
+    AUTH -->|T23| DENIED["ACCESS DENIED<br/>FEEDBACK"]
 
     ENTRY -->|"T05 / T07"| RETURN
 
-    DENIED -->|T21| RETURN
-    DENIED -->|T22| LOCKOUT["LOCKOUT"]
-    LOCKOUT -->|T23| RETURN
+    DENIED -->|T24| RETURN
+    DENIED -->|T25| LOCKOUT["LOCKOUT"]
+    LOCKOUT -->|T26| RETURN
 
     RETURN --> LOCKED
 
@@ -551,32 +572,32 @@ flowchart TB
     class START initial
     class BOOT,LOCKED secure
     class ENTRY,AUTH,ACCESS,CONFIRM,READY,FIRST active
-    class DENIED,LOCKOUT denied
+    class HELD,DENIED,LOCKOUT denied
     class RETURN connector
     class FAULT fault
 ```
 
 ```mermaid
 flowchart LR
-    FIRST["FIRST ENTRY<br/>T26 / T27 ↺"] -->|T24| CONFIRM["CONFIRM ENTRY<br/>T31 / T32 ↺"]
+    FIRST["FIRST ENTRY<br/>T29 / T30 ↺"] -->|T27| CONFIRM["CONFIRM ENTRY<br/>T34 / T35 ↺"]
 
-    CONFIRM -->|T29| VALIDATE["VALIDATING"]
+    CONFIRM -->|T32| VALIDATE["VALIDATING"]
 
-    VALIDATE -->|T34| PERSIST["PERSISTING"]
+    VALIDATE -->|T37| PERSIST["PERSISTING"]
 
-    PERSIST -->|T37| FEEDBACK["SUCCESS<br/>FEEDBACK"]
+    PERSIST -->|T40| FEEDBACK["SUCCESS<br/>FEEDBACK"]
 
-    FEEDBACK -->|"T39 / T40"| LOCKED["LOCKED"]
+    FEEDBACK -->|"T42 / T43"| LOCKED["LOCKED"]
 
-    VALIDATE -->|T35| CONFIRM
+    VALIDATE -->|T38| CONFIRM
 
-    VALIDATE -->|T36| FIRST
+    VALIDATE -->|T39| FIRST
 
-    FIRST -->|"T25 / T28<br/>normal boot"| LOCKED
+    FIRST -->|"T28 / T31<br/>normal boot"| LOCKED
 
-    CONFIRM -->|"T30 / T33<br/>normal boot"| LOCKED
+    CONFIRM -->|"T33 / T36<br/>normal boot"| LOCKED
 
-    PERSIST -->|T38| FAULT["FAULT"]
+    PERSIST -->|T41| FAULT["FAULT"]
 
     classDef secure fill:#eaf5ed,stroke:#3d7e57,color:#17324d
     classDef active fill:#eaf4fb,stroke:#3478a8,color:#17324d
@@ -589,11 +610,14 @@ flowchart LR
 
 Every edge corresponds to the transition identifier in [Section 9.4](#94-transition-table). `START` is only the static-initialization
 marker. `RETURN` is a layout-only duplicate of `LOCKED`, not another `LCS_State_t`; no long edge reconnects the two boxes because
-that visual cycle would obscure the operational paths. `T06` and `T08` are self-transitions in normal credential entry; `T26`, `T27`,
-`T31`, and `T32` are registration self-transitions displayed inside their state nodes to keep the graphs free of looping edges.
+that visual cycle would obscure the operational paths. `T06` and `T08` are self-transitions in normal credential entry; `T29`, `T30`,
+`T34`, and `T35` are registration self-transitions displayed inside their state nodes to keep the graphs free of looping edges.
 
 The two normal ways into `ACCESS_UNLOCKED` are intentionally visible: `T11` follows successful credential authentication, while `T14`
-accepts a validated request-to-exit directly from `LOCKED`. Both then share `T15` through `T17` for door-position confirmation and relock.
+accepts a validated request-to-exit directly from `LOCKED`. Both start the bounded unlock-hold interval. `T15`, `T19`, and `T20` form
+the successful door-position confirmation and relock path. If the hold interval expires first, `T16` enters `DOOR_HELD_OPEN`; `T17`
+requires a new exit request to unlock again, while `T18` routes forced-lock failure to `FAULT`. `T21` and `T22` return failed relock
+confirmation to `ACCESS_UNLOCKED` and request a fresh unlock-hold interval.
 
 The topology diagrams use transition IDs instead of full event/action labels to remain readable. The transition table in
 [Section 9.4](#94-transition-table) expands every ID into its complete source state, event, guard, target state, internal effect and
@@ -672,6 +696,9 @@ The implementation preserves these invariants:
 - Request-to-exit enters the unlocked-access path without creating an authentication pending purpose.
 - Request-to-exit does not reset or increment the authentication-failure counter.
 - `ACCESS_UNLOCKED` accepts door-position confirmation from both authenticated-access and request-to-exit routes.
+- `UNLOCK_HOLD_TIMEOUT` moves only `ACCESS_UNLOCKED` into `DOOR_HELD_OPEN` and requests a forced actuator-lock command.
+- `DOOR_HELD_OPEN` requires a new exit request to return to `ACCESS_UNLOCKED`; forced-lock failure enters `FAULT`.
+- Both relock-confirmation recovery paths return to `ACCESS_UNLOCKED` with an explicit unlock-hold timeout restart action.
 - Final relock occurs only after `READY_TO_LOCK` is received in `LCS_STATE_READY_TO_LOCK`.
 - Lockout completion resets the consecutive-failure counter.
 - A registration mismatch below the configured limit returns to confirmation entry and increments only the registration-mismatch counter.
@@ -768,7 +795,7 @@ Target-state assignment is mandatory for every accepted transition and is theref
 
 ### 9.4 Transition Table
 
-The current table contains **40 declared transition records**. IDs below follow the actual record order used by the first-match lookup:
+The current table contains **43 declared transition records**. IDs below follow the actual record order used by the first-match lookup:
 
 | ID | Source state | Event | Guard | Pending discriminator | Target state | Internal effect | Returned action |
 |---:|---|---|---|---|---|---|---|
@@ -787,35 +814,42 @@ The current table contains **40 declared transition records**. IDs below follow 
 | `T13` | `ACCESS_UNLOCKED` | `UNLOCK_REQUEST_FAILED` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED` |
 | `T14` | `LOCKED` | `EXIT_REQUEST` | Always | None | `ACCESS_UNLOCKED` | Clear pending | `EXIT_REQUEST_UNLOCK` |
 | `T15` | `ACCESS_UNLOCKED` | `DOOR_POSITION_CONFIRMED` | Always | None | `DOOR_SENSOR_CONFIRMATION` | None | `BEGIN_DOOR_SENSOR_CONFIRMATION` |
-| `T16` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | None | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
-| `T17` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
-| `T18` | `READY_TO_LOCK` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
-| `T19` | `LOCKED` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `NONE` |
-| `T20` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
-| `T21` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
-| `T22` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
-| `T23` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
-| `T24` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
-| `T25` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T26` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T27` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T28` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T29` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
-| `T30` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T31` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T32` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T33` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T34` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
-| `T35` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
-| `T36` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
-| `T37` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
-| `T38` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
-| `T39` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | First boot | None | `LOCKED` | Reset register mismatch count | `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` |
-| `T40` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Normal boot | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
+| `T16` | `ACCESS_UNLOCKED` | `UNLOCK_HOLD_TIMEOUT` | Always | None | `DOOR_HELD_OPEN` | None | `FORCE_ACTUATOR_LOCK` |
+| `T17` | `DOOR_HELD_OPEN` | `EXIT_REQUEST` | Always | None | `ACCESS_UNLOCKED` | None | `EXIT_REQUEST_UNLOCK` |
+| `T18` | `DOOR_HELD_OPEN` | `CRITICAL_FAULT` | Always | None | `FAULT` | None | `REQUEST_CONTROLLED_RESET` |
+| `T19` | `DOOR_SENSOR_CONFIRMATION` | `DOOR_SENSOR_CONFIRMATION_TIMEOUT` | Always | None | `READY_TO_LOCK` | None | `REQUEST_DOOR_SENSOR_CONFIRMATION` |
+| `T20` | `READY_TO_LOCK` | `READY_TO_LOCK` | Always | None | `LOCKED` | None | `RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` |
+| `T21` | `READY_TO_LOCK` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `RESTART_UNLOCK_HOLD_TIMEOUT` |
+| `T22` | `LOCKED` | `DOOR_POSITION_NOT_CONFIRMED` | Always | None | `ACCESS_UNLOCKED` | None | `RESTART_UNLOCK_HOLD_TIMEOUT` |
+| `T23` | `AUTHENTICATING` | `AUTH_FAILURE` | Always | None | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | Clear pending and increment failures | `DENY_ACCESS` |
+| `T24` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Under attempt limit | None | `LOCKED` | Clear pending | `RETURN_TO_LOCKED` |
+| `T25` | `LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE` | `DENIED_ACCESS_TIMEOUT` | Attempt count at limit | None | `LOCKOUT` | Clear pending | `ENTER_LOCKOUT` |
+| `T26` | `LOCKOUT` | `LOCKOUT_TIMEOUT` | Always | None | `LOCKED` | Reset failure count | `RETURN_TO_LOCKED` |
+| `T27` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_TO_CONFIRM_ENTRY_SESSION` |
+| `T28` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T29` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T30` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T31` | `CREDENTIAL_REGISTER_FIRST_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T32` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_READY` | Always | None | `CREDENTIAL_REGISTER_VALIDATING` | None | `REQUEST_CREDENTIAL_REGISTER_STAGES_VALIDATION` |
+| `T33` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T34` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CREDENTIAL_CANCELLED` | First boot | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T35` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `CANDIDATE_INCOMPLETE` | Always | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | None | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T36` | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | `ENTRY_TIMEOUT` | Normal boot | None | `LOCKED` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T37` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_PERSISTING` | Reset register mismatch count | `REQUEST_CREDENTIAL_REGISTER_STORAGE` |
+| `T38` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register retry available | None | `CREDENTIAL_REGISTER_CONFIRM_ENTRY` | Increment register mismatch count | `REFRESH_CREDENTIAL_REGISTER_CONFIRM_ENTRY_SESSION` |
+| `T39` | `CREDENTIAL_REGISTER_VALIDATING` | `STAGING_VALIDATION_FAILURE` | Register attempt limit | None | `CREDENTIAL_REGISTER_FIRST_ENTRY` | Reset register mismatch count | `REFRESH_CREDENTIAL_REGISTER_FIRST_ENTRY_SESSION` |
+| `T40` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_SUCCESS` | Always | None | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | Reset register mismatch count | `END_CREDENTIAL_REGISTER_SAVING_SESSION` |
+| `T41` | `CREDENTIAL_REGISTER_PERSISTING` | `CREDENTIAL_REGISTER_STORAGE_FAILURE` | Always | None | `FAULT` | Reset register mismatch count | `REQUEST_CONTROLLED_RESET` |
+| `T42` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | First boot | None | `LOCKED` | Reset register mismatch count | `RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` |
+| `T43` | `CREDENTIAL_REGISTER_SUCCESS_FEEDBACK` | `CREDENTIAL_REGISTER_DONE` | Normal boot | None | `LOCKED` | Reset register mismatch count | `RETURN_TO_LOCKED_FROM_CREDENTIAL_REGISTER_SESSION` |
 
-`T11` and `T14` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the failure counter. `T14` is request-to-exit and preserves that history. `T15` through `T17` form the shared post-unlock relock sequence.
+`T11` and `T14` deliberately converge on `ACCESS_UNLOCKED`. Only `T11` is an authentication-success route and therefore resets the
+failure counter. `T14` is request-to-exit and preserves that history. Both unlock actions begin the bounded unlock-hold interval.
+`T15`, `T19`, and `T20` form the successful post-unlock relock sequence. `T16` through `T18` define door-held-open recovery, while
+`T21` and `T22` restart unlock-hold timing after relock confirmation is lost.
 
-`T25`/`T26`, `T30`/`T31`, and `T39`/`T40` share source/event pairs but are selected by complementary normal-boot and first-boot guards. `T35`/`T36` likewise share a source/event pair and use complementary mismatch-policy guards.
+`T28`/`T29`, `T33`/`T34`, and `T42`/`T43` share source/event pairs but are selected by complementary normal-boot and first-boot guards.
+`T38`/`T39` likewise share a source/event pair and use complementary mismatch-policy guards.
 
 ### 9.5 Selection Rules
 
@@ -1055,11 +1089,19 @@ static void APP_DispatchLockEvent(LCS_Event_t Event)
             break;
 
         case LCS_ACTION_REQUEST_UNLOCK:
-            /* Request physical unlock for authenticated access and present granted feedback. */
+            /* Request physical unlock, present granted feedback and start unlock-hold timing. */
             break;
 
         case LCS_ACTION_EXIT_REQUEST_UNLOCK:
-            /* Request physical unlock for the accepted request-to-exit path. */
+            /* Request physical unlock and start unlock-hold timing for request-to-exit. */
+            break;
+
+        case LCS_ACTION_FORCE_ACTUATOR_LOCK:
+            /* Bypass the door-position interlock and force the actuator to its locked command. */
+            break;
+
+        case LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT:
+            /* Restart bounded unlock-hold timing after relock confirmation is lost. */
             break;
 
         case LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION:
@@ -1159,6 +1201,7 @@ The service does not read timestamps. The application or a timeout service owns 
 |---|---|
 | Credential-entry inactivity | `LCS_EVENT_ENTRY_TIMEOUT` |
 | Credential-register first/confirmation entry inactivity | `LCS_EVENT_ENTRY_TIMEOUT` |
+| Post-unlock wait for door-position confirmation | `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` |
 | Delay after required door-position confirmation | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` |
 | Access-denied feedback duration | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
 | Temporary lockout duration | `LCS_EVENT_LOCKOUT_TIMEOUT` |
@@ -1166,9 +1209,15 @@ The service does not read timestamps. The application or a timeout service owns 
 
 Registration entry timeout is currently specialized only for normal boot. While mandatory first-boot enrollment is active, no first-boot `ENTRY_TIMEOUT` transition is authorized; a stale or elapsed timeout event is therefore ignored and the mandatory enrollment state is preserved.
 
-The previous standalone authorized-unlock timeout is no longer part of the LCS contract. Granted access remains in
-`LCS_STATE_ACCESS_UNLOCKED` until Door Control Service reports `LCS_EVENT_DOOR_POSITION_CONFIRMED`. After the bounded confirmation delay,
-LCS asks for final door-control evaluation and waits in `LCS_STATE_READY_TO_LOCK` for `LCS_EVENT_READY_TO_LOCK`.
+After either unlock action succeeds, the application starts the bounded unlock-hold interval while LCS remains in
+`LCS_STATE_ACCESS_UNLOCKED`. Door-position confirmation replaces that interval with the shorter confirmation delay and advances the
+normal relock path. If `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` arrives first, LCS enters `LCS_STATE_DOOR_HELD_OPEN` and returns
+`LCS_ACTION_FORCE_ACTUATOR_LOCK`, allowing the application to remove the sustained unlock command without requiring the open door to
+satisfy the normal relock interlock.
+
+If final door-control evaluation later reports `LCS_EVENT_DOOR_POSITION_NOT_CONFIRMED`, LCS returns to
+`LCS_STATE_ACCESS_UNLOCKED` and selects `LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT`. This gives every recovery into unlocked access a new
+bounded interval instead of leaving the actuator under an unbounded unlock command.
 
 A stale timeout event is harmless when no transition accepts it in the current state; it is ignored and returns `LCS_ACTION_NONE`.
 The application should still cancel obsolete timing sources to keep its own lifecycle clear.
@@ -1202,6 +1251,7 @@ sequenceDiagram
     LCS-->>APP: REQUEST_UNLOCK
     Note over LCS: pending_request = NONE<br/>failure count = 0
     APP->>FX: Unlock + granted feedback
+    APP->>FX: Start bounded unlock-hold interval
 
     DCS-->>APP: Required door position confirmed
     APP->>LCS: DOOR_POSITION_CONFIRMED
@@ -1237,6 +1287,7 @@ sequenceDiagram
     LCS-->>APP: EXIT_REQUEST_UNLOCK
     Note over LCS: failure count preserved
     APP->>FX: Unlock for request-to-exit
+    APP->>FX: Start bounded unlock-hold interval
 
     DCS-->>APP: Required door position confirmed
     APP->>LCS: DOOR_POSITION_CONFIRMED
@@ -1252,11 +1303,51 @@ sequenceDiagram
     APP->>FX: Relock and restore idle presentation
 ```
 
-`LCS_EVENT_EXIT_REQUEST` is accepted only from `LOCKED`. It clears stale pending routing but does not reset or increment
-`failed_attempt_count`. Consequently, request-to-exit access cannot erase authentication-failure history and cannot be mistaken for
-successful credential authentication.
+In normal operation, `LCS_EVENT_EXIT_REQUEST` is accepted from `LOCKED`, where it clears stale pending routing and enters unlocked
+access directly. The same event is also accepted from `DOOR_HELD_OPEN` as the explicit recovery request described below. Neither route
+resets or increments `failed_attempt_count`; consequently, request-to-exit access cannot erase authentication-failure history or be
+mistaken for successful credential authentication.
 
-### 13.3 Authorized Credential Registration
+### 13.3 Door-Held-Open Recovery
+
+If the required door-position event is not received before the unlock-hold interval expires, LCS removes the sustained unlock request
+from normal operation and requires an explicit request-to-exit retry:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant APP as Application
+    participant LCS as Lock Control Service
+    participant DCS as Door Control Service
+    participant FX as Actuator / Timing / Feedback
+
+    APP->>LCS: UNLOCK_HOLD_TIMEOUT
+    LCS-->>APP: FORCE_ACTUATOR_LOCK
+    Note over LCS: state = DOOR_HELD_OPEN
+    APP->>DCS: Force locked actuator command<br/>without door-position interlock
+
+    alt Forced actuator command fails
+        APP->>LCS: CRITICAL_FAULT
+        LCS-->>APP: REQUEST_CONTROLLED_RESET
+    else User retries while door remains open
+        U->>APP: Press exit button
+        APP->>LCS: EXIT_REQUEST
+        LCS-->>APP: EXIT_REQUEST_UNLOCK
+        APP->>FX: Unlock and restart hold interval
+        U->>APP: Close door
+        DCS-->>APP: Required door position confirmed
+        APP->>LCS: DOOR_POSITION_CONFIRMED
+        LCS-->>APP: BEGIN_DOOR_SENSOR_CONFIRMATION
+        Note over LCS: normal confirmation and relock path resumes
+    end
+```
+
+`LCS_STATE_DOOR_HELD_OPEN` accepts no credential-entry or door-confirmation event. A new validated `LCS_EVENT_EXIT_REQUEST` is required
+to retract the actuator, return to `LCS_STATE_ACCESS_UNLOCKED` and start another bounded opportunity to close the door. Failure of the
+forced actuator-lock action is reported as `LCS_EVENT_CRITICAL_FAULT`, which moves directly from `DOOR_HELD_OPEN` to `FAULT` and
+requests controlled reset.
+
+### 13.4 Authorized Credential Registration
 
 The runtime registration route reuses normal credential entry and authentication to authorize the change, then follows the
 registration states owned by LCS:
@@ -1318,7 +1409,7 @@ This restart policy applies to both normal runtime registration and mandatory fi
 subsequently cancel or time out from an entry phase and return to `LOCKED`; during first boot, the mandatory-enrollment policy prevents
 cancellation from escaping registration. Authentication failures and registration-confirmation mismatches remain independent policies.
 
-### 13.4 First-Boot Registration Route
+### 13.5 First-Boot Registration Route
 
 When startup credential retrieval reports that no installed credential exists, App Core dispatches `LCS_EVENT_CREDENTIAL_NOT_REGISTERED` while LCS remains in `BOOT`.
 
@@ -1342,7 +1433,7 @@ Consequently, cancellation and confirmation-mismatch policy cannot leave the pro
 > [!NOTE]
 > `LCS_EVENT_ENTRY_TIMEOUT` currently has only normal-boot registration transitions. During first-boot registration no timeout record is authorized, so the event is ignored and the mandatory enrollment state is preserved. If first-boot-specific timeout feedback or session refresh is required later, it shall be introduced explicitly through guarded transitions.
 
-### 13.5 Rejected Access and Lockout
+### 13.6 Rejected Access and Lockout
 
 For each rejected candidate:
 
@@ -1362,7 +1453,7 @@ This allows the application to complete the access-denied presentation before be
 Request-to-exit is independent of this policy: if the product accepts an exit request while two authentication failures are recorded,
 the next rejected authentication is still the third consecutive failure.
 
-### 13.6 Cancellation or Entry Timeout
+### 13.7 Cancellation or Entry Timeout
 
 Cancellation and entry timeout are interpreted according to the active product flow and, for registration, the boot policy.
 
@@ -1385,7 +1476,7 @@ For mandatory first-boot registration:
 
 This distinction guarantees that user cancellation cannot place an unprovisioned first-boot product into normal locked operation.
 
-### 13.7 Ignored Events
+### 13.8 Ignored Events
 
 An event is ignored when:
 
@@ -1450,8 +1541,8 @@ The transition table separates the stable processing mechanism from evolving pro
 
 ### Sparse Linear Representation
 
-Only valid transitions consume storage. The current table has **40 records**, while a dense matrix for **15 runtime states** and
-**25 dispatchable semantic event identifiers** would reserve many unused cells.
+Only valid transitions consume storage. The current table has **43 records**, while a dense matrix for **16 runtime states** and
+**26 dispatchable semantic event identifiers** would reserve many unused cells.
 
 ### Private State Representation
 
@@ -1489,6 +1580,16 @@ returns to `LOCKED`.
 
 This keeps the physical relock policy independent from how access was granted. Authentication success resets failed-attempt history;
 request-to-exit does not.
+
+### Bounded Unlock Hold and Door-Held-Open Recovery
+
+Both unlock actions begin a bounded interval while the FSM awaits door-position confirmation. Expiration produces
+`LCS_EVENT_UNLOCK_HOLD_TIMEOUT`, moves LCS to `LCS_STATE_DOOR_HELD_OPEN` and requests `LCS_ACTION_FORCE_ACTUATOR_LOCK`. The application
+can therefore remove the sustained unlock command even though the open door does not satisfy the ordinary relock interlock.
+
+Recovery requires a new validated exit request. That transition requests unlock again, returns to `ACCESS_UNLOCKED` and begins another
+bounded opportunity to close the door. When either relock decision point loses door confirmation, the dedicated restart action applies
+the same bounded policy to the recovered `ACCESS_UNLOCKED` state.
 
 ### One Event and One Action per Call
 
@@ -1529,16 +1630,24 @@ The service uses safe default behavior at its input and policy boundaries:
 - Access denial and lockout preserve the semantic safe-lock requirement.
 - Door-control events received out of sequence cannot bypass the relock handshake.
 - Final relock is selected only from `LCS_STATE_READY_TO_LOCK` after `LCS_EVENT_READY_TO_LOCK`.
+- Unconfirmed unlocked access is bounded and converges on `LCS_STATE_DOOR_HELD_OPEN` with a forced actuator-lock request.
+- Door-held-open recovery requires a new validated exit request before unlock is commanded again.
 - Startup failure enters `FAULT` and requests a controlled reset.
 - Credential-storage failure enters `FAULT` and requests a controlled reset.
 - Unlock execution failure is explicitly reconciled with the LCS state machine.
 - Failure to recover the safe locked state after an unlock-execution failure is promoted to a critical fault and requests a controlled reset.
+- Failure of the forced actuator-lock action from `DOOR_HELD_OPEN` is promoted to a critical fault and requests a controlled reset.
 
-`LCS_EVENT_INIT_FAIL`, `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE`, and `LCS_EVENT_CRITICAL_FAULT` provide explicit fault paths into `LCS_STATE_FAULT` from the states where those failures are currently defined. Once `FAULT` is entered, the current transition table defines no outgoing transition. The application is expected to preserve safe outputs and execute the controlled-reset policy requested by `LCS_ACTION_REQUEST_CONTROLLED_RESET`.
+`LCS_EVENT_INIT_FAIL`, `LCS_EVENT_CREDENTIAL_REGISTER_STORAGE_FAILURE`, and `LCS_EVENT_CRITICAL_FAULT` provide explicit fault paths into
+`LCS_STATE_FAULT` from the states where those failures are currently defined. Critical-fault transitions are defined from both
+`ACCESS_UNLOCKED` and `DOOR_HELD_OPEN`, covering unrecoverable unlock execution, timeout restart and forced actuator-lock failures. Once
+`FAULT` is entered, the current transition table defines no outgoing transition. The application is expected to preserve safe outputs
+and execute the controlled-reset policy requested by `LCS_ACTION_REQUEST_CONTROLLED_RESET`.
 
 If execution of an unlock request fails while LCS has already committed to `LCS_STATE_ACCESS_UNLOCKED`, App Executor first attempts to restore the actuator to the safe locked state. Successful recovery produces `LCS_EVENT_UNLOCK_REQUEST_FAILED`, allowing LCS to reconcile its semantic state back to `LCS_STATE_LOCKED`. If that recovery also fails, App Executor produces `LCS_EVENT_CRITICAL_FAULT`, causing LCS to enter `LCS_STATE_FAULT` and request a controlled reset.
 
-`LCS_EVENT_CRITICAL_FAULT` is currently defined for this explicit unlock-recovery failure path; it is not a global fault event with precedence over every operational state.
+`LCS_EVENT_CRITICAL_FAULT` is not a global event with precedence over every operational state. It is accepted only from the explicit
+`ACCESS_UNLOCKED` and `DOOR_HELD_OPEN` failure boundaries represented in the table.
 
 Failures from other action-execution paths, such as presentation, timer, or component-update operations, are not universally promoted to LCS semantic events. Where such failures become operationally significant, they should be mapped to explicit events and transitions, with safe actuator behavior taking precedence over presentation effects.
 
@@ -1587,6 +1696,8 @@ An ISR should normally publish a semantic fact to the application event mechanis
 - The wake key does not become an implicit credential digit.
 - The service requests unlock semantically; only the application can operate the actuator.
 - A returned unlock action is not proof that the physical lock successfully moved.
+- Every successful unlock shall start the bounded unlock-hold interval while door-position confirmation is pending.
+- Unlock-hold expiration forces the actuator toward its locked command and requires a new exit request before another unlock attempt.
 - `DOOR_POSITION_CONFIRMED` does not by itself authorize relock; the bounded confirmation phase and later `READY_TO_LOCK` event are required.
 - The application shall enforce safe locked output during denial, lockout, startup failure, and action-execution failure.
 - Sensitive candidate cleanup remains an application and Credential Entry Service responsibility.
@@ -1601,7 +1712,7 @@ The dedicated [host test suite](../../../Tests/README.md) compiles the productio
 
 The current 20-scenario catalog covers:
 
-- Accepted behavioral paths spanning the current 40-record table, without inferring one-to-one structural coverage from black-box scenarios.
+- Accepted behavioral paths across boot, access, relock, denial, lockout and registration policy, without inferring one-to-one structural coverage from black-box scenarios.
 - Sentinel, out-of-range, and representative state-invalid events with explicit state-preservation checks.
 - Normal-boot and first-boot guard selection for shared cancellation and registration-completion events.
 - Guard boundary conditions for authentication failures and registration mismatches.
@@ -1644,7 +1755,8 @@ Current limitations include:
 - Linear lookup cost grows with the number of transition records.
 - The failure limit is a private compile-time policy constant.
 - The failure counter is not persistent across resets.
-- `FAULT` is currently entered from startup failure, credential-storage failure, or the explicit unlock-recovery critical-fault path; no global critical-fault precedence policy is modeled.
+- `FAULT` is currently entered from startup failure, credential-storage failure, or explicit critical-fault paths from
+  `ACCESS_UNLOCKED` and `DOOR_HELD_OPEN`; no global critical-fault precedence policy is modeled.
 - No transition exists out of `LCS_STATE_FAULT`.
 - `LCS_ACTION_BEGIN_CREDENTIAL_REGISTER_SAVING_SESSION` is reserved but currently selected by no transition.
 - First-boot registration currently defines no dedicated `ENTRY_TIMEOUT` transition. The timeout event is ignored while mandatory enrollment remains active; dedicated first-boot timeout feedback or refresh policy would require explicit guarded transitions.
