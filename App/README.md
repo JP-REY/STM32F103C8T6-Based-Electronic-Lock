@@ -535,6 +535,7 @@ Current mapping:
 | App timeout | Duration | Elapsed LCS event |
 | --- | ---: | --- |
 | Credential-entry inactivity | 5,000 ms | `LCS_EVENT_ENTRY_TIMEOUT` |
+| Unlock hold awaiting door position | 30,000 ms | `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` |
 | Door-position confirmation | 800 ms | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` |
 | Access-denied feedback | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
 | Lockout | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` |
@@ -552,20 +553,47 @@ Expiration is evaluated using `Platform_GetMillis()` and Timeout Validation Serv
 
 The timeout is cancelled **before** its semantic event is returned, preventing repeated emission of the same expiration.
 
-There is no fixed authorized-unlock timeout.
+Both authenticated access and request-to-exit start a 30-second unlock-hold interval before App Executor requests physical unlock.
+The interval bounds how long `ACCESS_UNLOCKED` may wait for the required door-position event.
 
-The previous unlock-duration model has been replaced by door-aware relock:
+Door-aware relock uses two distinct timeout phases:
 
 ```text
 unlock
   ↓
-door-position event
+30 s unlock-hold interval
+  ├─ expires first → UNLOCK_HOLD_TIMEOUT
+  │                    ↓
+  │                 force actuator lock
+  │                    ↓
+  │                 wait for a new exit request
+  │
+  └─ door-position event
+             ↓
+      replace active timeout with
+      800 ms confirmation interval
+             ↓
+      synchronous door-state check
+             ↓
+      final lock interlock
+```
+
+Only one interval is active at a time. Starting the 800-millisecond confirmation interval replaces the 30-second unlock-hold interval.
+If either synchronous relock decision later reports `DOOR_POSITION_NOT_CONFIRMED`, the dedicated restart action opens a fresh 30-second
+unlock-hold interval after LCS returns to `ACCESS_UNLOCKED`.
+
+The timeout-expiration path is:
+
+```text
+App_PollTimeout()
   ↓
-800 ms confirmation interval
+cancel active timeout
   ↓
-synchronous door-state check
+return elapsed semantic LCS event
   ↓
-final lock interlock
+LCS_Process()
+  ↓
+semantic recovery action
 ```
 
 ### First-boot timeout behavior
@@ -697,14 +725,16 @@ sequenceDiagram
     alt Credential authenticated
         APP->>LCS: AUTH_SUCCESS
         LCS-->>APP: REQUEST_UNLOCK
+        APP->>APP: Start 30 s unlock-hold interval
         APP->>DCS: DCS_RequestUnlock()
     else Request to exit
         APP->>LCS: EXIT_REQUEST
         LCS-->>APP: EXIT_REQUEST_UNLOCK
+        APP->>APP: Start 30 s unlock-hold interval
         APP->>DCS: DCS_RequestUnlock()
     end
 
-    Note over APP,DCS: Both paths continue through the same<br/>door-aware relock state sequence
+    Note over APP,DCS: Both paths continue through the same bounded<br/>door-aware relock state sequence
 ```
 
 Request-to-exit authorization is a product policy decision made by LCS. DCS only executes the already-authorized unlock request.
@@ -734,7 +764,8 @@ DCS_ForceLock()
       controlled reset
 ```
 
-Both credential-authenticated unlock and request-to-exit unlock use this policy.
+Both credential-authenticated unlock and request-to-exit unlock use this policy. Each action first starts the unlock-hold timeout and
+then requests physical unlock. A timeout-definition failure is reported as `UNLOCK_REQUEST_FAILED` without issuing the unlock command.
 
 This distinction is important:
 
@@ -754,7 +785,7 @@ sequenceDiagram
     DCS-->>APP: DOOR_SENSOR_EVENT_ACTIVE
     APP->>LCS: DOOR_POSITION_CONFIRMED
     LCS-->>APP: BEGIN_DOOR_SENSOR_CONFIRMATION
-    APP->>APP: Start 800 ms interval
+    APP->>APP: Replace 30 s unlock hold<br/>with 800 ms confirmation interval
 
     APP->>LCS: DOOR_SENSOR_CONFIRMATION_TIMEOUT
     LCS-->>APP: REQUEST_DOOR_SENSOR_CONFIRMATION
@@ -769,6 +800,8 @@ sequenceDiagram
             APP->>APP: Locked presentation
         else DENIED
             APP->>LCS: DOOR_POSITION_NOT_CONFIRMED
+            LCS-->>APP: RESTART_UNLOCK_HOLD_TIMEOUT
+            APP->>APP: Start a fresh 30 s interval
             Note over APP,LCS: Recover logical state to ACCESS_UNLOCKED
         else FAILED
             APP->>APP: Controlled-reset cleanup
@@ -776,6 +809,8 @@ sequenceDiagram
 
     else IDLE
         APP->>LCS: DOOR_POSITION_NOT_CONFIRMED
+        LCS-->>APP: RESTART_UNLOCK_HOLD_TIMEOUT
+        APP->>APP: Start a fresh 30 s interval
         Note over APP,LCS: Return to ACCESS_UNLOCKED
 
     else UNKNOWN / query failure
@@ -790,7 +825,42 @@ There are intentionally two current-condition checks before normal relock:
 
 The second check closes the race between logical readiness and physical lock execution.
 
-### 10.5 Normal lock versus force lock
+### 10.5 Door-held-open recovery
+
+If no required door-position event arrives within 30 seconds, App Core consumes the active timeout and dispatches
+`LCS_EVENT_UNLOCK_HOLD_TIMEOUT`. LCS enters `DOOR_HELD_OPEN` and selects `LCS_ACTION_FORCE_ACTUATOR_LOCK`:
+
+```mermaid
+sequenceDiagram
+    participant USER as User
+    participant APP as App Core / Executor
+    participant LCS as Lock Control
+    participant DCS as Door Control
+
+    APP->>LCS: UNLOCK_HOLD_TIMEOUT
+    LCS-->>APP: FORCE_ACTUATOR_LOCK
+    APP->>DCS: DCS_ForceLock()
+    APP->>APP: Timeout feedback + locked presentation
+
+    alt Force-lock execution fails
+        APP->>LCS: CRITICAL_FAULT
+        LCS-->>APP: REQUEST_CONTROLLED_RESET
+    else User requests recovery
+        USER->>APP: Press Exit Button
+        APP->>LCS: EXIT_REQUEST
+        LCS-->>APP: EXIT_REQUEST_UNLOCK
+        APP->>APP: Start fresh 30 s unlock-hold interval
+        APP->>DCS: DCS_RequestUnlock()
+        USER->>USER: Close door
+        Note over APP,LCS: Normal door confirmation<br/>and relock flow resumes
+    end
+```
+
+The forced command removes the sustained unlock request even though the current door position does not permit normal interlocked
+locking. Recovery deliberately requires a new validated Exit Button event; a door-position event alone is not accepted from
+`DOOR_HELD_OPEN`.
+
+### 10.6 Normal lock versus force lock
 
 Normal lock:
 
@@ -816,7 +886,8 @@ DCS_ForceLock()
 LockActuator_Lock()
 ```
 
-`DCS_ForceLock()` intentionally bypasses the normal Door Sensor interlock and is reserved for explicit fail-safe recovery.
+`DCS_ForceLock()` intentionally bypasses the normal Door Sensor interlock and is reserved for explicit state-machine recovery or the
+common fail-safe cleanup path. The door-held-open timeout is one such explicit policy boundary.
 
 It shall not replace normal door-aware relock.
 
@@ -853,6 +924,8 @@ The Executor does **not** inspect private LCS state or reproduce state-machine p
 | `LCS_ACTION_REQUEST_CREDENTIAL_REGISTER_STORAGE` | storage success/failure |
 | `LCS_ACTION_REQUEST_UNLOCK` | normal completion, `UNLOCK_REQUEST_FAILED`, or `CRITICAL_FAULT` |
 | `LCS_ACTION_EXIT_REQUEST_UNLOCK` | normal completion, `UNLOCK_REQUEST_FAILED`, or `CRITICAL_FAULT` |
+| `LCS_ACTION_FORCE_ACTUATOR_LOCK` | normal completion or `CRITICAL_FAULT` |
+| `LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT` | normal completion or `CRITICAL_FAULT` |
 | `LCS_ACTION_REQUEST_DOOR_SENSOR_CONFIRMATION` | `READY_TO_LOCK`, `DOOR_POSITION_NOT_CONFIRMED`, or controlled reset |
 | `LCS_ACTION_RETURN_TO_LOCKED_FROM_GRANTED_ACCESS` | normal completion, `DOOR_POSITION_NOT_CONFIRMED`, or controlled reset |
 | `LCS_ACTION_RETURN_FROM_CREDENTIAL_REGISTER_SESSION_FIRST_BOOT` | controlled reset; no follow-up event |
@@ -875,6 +948,7 @@ The distinction is intentionally preserved because:
 DENIED
     → current physical door condition does not permit locking
     → recover to ACCESS_UNLOCKED
+    → restart 30 s unlock-hold interval
 
 FAILED
     → actuator/dependency execution failure
@@ -966,6 +1040,16 @@ force safe lock
 
 This gives LCS an explicit semantic representation of both recoverable unlock-execution failure and critical safe-state recovery failure.
 
+The unlock-hold timeout has its own explicit actuator recovery:
+
+```text
+UNLOCK_HOLD_TIMEOUT
+    ↓
+DOOR_HELD_OPEN + force actuator lock
+    ├─ success → wait for a new Exit Button request
+    └─ failure → CRITICAL_FAULT → FAULT → controlled reset
+```
+
 ### 13.3 Relock failure classes
 
 The normal relock path preserves the difference between policy denial and execution failure:
@@ -977,6 +1061,7 @@ DCS_LOCK_REQUEST_APPROVED
 DCS_LOCK_REQUEST_DENIED
     → DOOR_POSITION_NOT_CONFIRMED
     → ACCESS_UNLOCKED
+    → restart 30 s unlock-hold interval
 
 DCS_LOCK_REQUEST_FAILED
     → controlled reset
@@ -1094,6 +1179,8 @@ The following constraints describe the current Application Layer as implemented.
 - **Door Sensor and Exit Button events use caller-owned event slots rather than queues.** They are intended for immediate consumption during the serialized update cycle.
 - **Only Exit Button press is mapped to LCS.** Release currently has no product-level semantic mapping.
 - **Only Door Sensor `ACTIVE` is mapped asynchronously to LCS.** `IDLE` is intentionally not treated as `DOOR_POSITION_NOT_CONFIRMED`.
+- **Recoverable unlock failure leaves the already-started unlock-hold timeout active until it expires or another timeout replaces it.**
+  Its eventual event has no transition from `LOCKED` and is therefore ignored by LCS.
 - **First-boot entry timeout policy is incomplete.** The elapsed timeout is consumed, but LCS has no dedicated first-boot timeout transition, so mandatory enrollment remains active without automatic timeout refresh/feedback.
 - **Several non-access terminal actions request normal locking and ignore the exact `DCS_RequestLockStatus_t`.** Those paths do not currently promote a denied/failed normal lock request to a dedicated semantic LCS event.
 - **Periodic DCS update failure is not currently promoted into product fault policy by App Core.**

@@ -202,6 +202,7 @@ The HAL callback path only publishes edge timestamps. Stable-event generation an
 | Setting | Current value |
 | --- | ---: |
 | Credential-entry inactivity | 5,000 ms |
+| Unlock hold awaiting door position | 30,000 ms |
 | Door-position confirmation | 800 ms |
 | Access-denied feedback | 1,500 ms |
 | Lockout | 10,000 ms |
@@ -321,14 +322,22 @@ App Core owns the mutable lifecycle of the currently active timeout.
 | Identifier | Duration | Elapsed LCS event |
 | --- | ---: | --- |
 | `APP_TIMEOUT_CREDENTIAL_ENTRY` | 5,000 ms | `LCS_EVENT_ENTRY_TIMEOUT` |
+| `APP_TIMEOUT_UNLOCK_HOLD` | 30,000 ms | `LCS_EVENT_UNLOCK_HOLD_TIMEOUT` |
 | `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT` | 800 ms | `LCS_EVENT_DOOR_SENSOR_CONFIRMATION_TIMEOUT` |
 | `APP_TIMEOUT_ACCESS_DENIED` | 1,500 ms | `LCS_EVENT_DENIED_ACCESS_TIMEOUT` |
 | `APP_TIMEOUT_LOCKOUT` | 10,000 ms | `LCS_EVENT_LOCKOUT_TIMEOUT` |
 | `APP_TIMEOUT_CRS_SAVED` | 1,500 ms | `LCS_EVENT_CREDENTIAL_REGISTER_DONE` |
 
-The Door Sensor confirmation interval is **not** an unlock-duration timeout.
+The two door-related intervals have different purposes:
 
-The previous fixed authorized-unlock interval has been replaced by the door-aware relock sequence.
+- `APP_TIMEOUT_UNLOCK_HOLD` bounds how long unlocked access may wait for the required door-position event. Both authenticated unlock and
+  request-to-exit unlock start this 30-second interval.
+- `APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT` is the 800-millisecond settling interval after the required door position has already been
+  observed and before App Executor synchronously confirms it for relock.
+
+Starting the confirmation interval replaces the active unlock-hold interval because the application owns one active product timeout.
+If the unlock-hold interval expires first, App Core dispatches `LCS_EVENT_UNLOCK_HOLD_TIMEOUT`; LCS then owns the state transition and
+selects the forced actuator-lock recovery action.
 
 ### Timeout model
 

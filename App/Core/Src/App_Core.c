@@ -63,6 +63,12 @@ static const App_TimeoutDefinition_t App_TimeoutDefinitions[APP_TIMEOUT_COUNT] =
         .ElapsedEvent = LCS_EVENT_ENTRY_TIMEOUT
     },
 
+    [APP_TIMEOUT_UNLOCK_HOLD] =
+    {
+        .DurationMs   = APP_UNLOCK_HOLD_TIMEOUT_MS,
+        .ElapsedEvent = LCS_EVENT_UNLOCK_HOLD_TIMEOUT
+    },
+
     [APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT] =
     {
         .DurationMs   = APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT_MS,

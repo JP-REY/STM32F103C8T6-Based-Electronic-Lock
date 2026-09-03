@@ -71,37 +71,39 @@
  */
 typedef enum
 {
-    LCS_STATE_BOOT = 0U,                             /*< Startup state awaiting the application initialization result.                            */
+    LCS_STATE_BOOT = 0U,                             /*< Startup state awaiting the application initialization result.                                    */
 
-    LCS_STATE_LOCKED,                                /*< Secure idle state awaiting credential entry, registration or exit requests.              */
+    LCS_STATE_LOCKED,                                /*< Secure idle state awaiting credential entry, registration or exit requests.                      */
 
-    LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,       /*< First new credential entry is being collected.                                           */
+    LCS_STATE_CREDENTIAL_REGISTER_FIRST_ENTRY,       /*< First new credential entry is being collected.                                                   */
 
-    LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,     /*< Confirmation entry for the staged credential is being collected.                         */
+    LCS_STATE_CREDENTIAL_REGISTER_CONFIRM_ENTRY,     /*< Confirmation entry for the staged credential is being collected.                                 */
 
-    LCS_STATE_CREDENTIAL_REGISTER_VALIDATING,        /*< First and confirmation credential entries are awaiting comparison.                       */
+    LCS_STATE_CREDENTIAL_REGISTER_VALIDATING,        /*< First and confirmation credential entries are awaiting comparison.                               */
 
-    LCS_STATE_CREDENTIAL_REGISTER_PERSISTING,        /*< Validated credential is awaiting the persistent-storage result.                          */
+    LCS_STATE_CREDENTIAL_REGISTER_PERSISTING,        /*< Validated credential is awaiting the persistent-storage result.                                  */
 
-    LCS_STATE_CREDENTIAL_REGISTER_SUCCESS_FEEDBACK,  /*< Bounded successful-registration feedback is active.                                      */
+    LCS_STATE_CREDENTIAL_REGISTER_SUCCESS_FEEDBACK,  /*< Bounded successful-registration feedback is active.                                              */
 
-    LCS_STATE_CREDENTIAL_SESSION_ACTIVE,             /*< Normal or authorization credential-entry session is active.                              */
+    LCS_STATE_CREDENTIAL_SESSION_ACTIVE,             /*< Normal or authorization credential-entry session is active.                                      */
 
-    LCS_STATE_AUTHENTICATING,                        /*< A completed candidate is awaiting its authentication result.                             */
+    LCS_STATE_AUTHENTICATING,                        /*< A completed candidate is awaiting its authentication result.                                     */
 
-    LCS_STATE_ACCESS_UNLOCKED,                       /*< Access is unlocked and the FSM is awaiting the required door-position condition.         */
+    LCS_STATE_ACCESS_UNLOCKED,                       /*< Access is unlocked and the FSM is awaiting the required door-position condition.                 */
 
-    LCS_STATE_DOOR_SENSOR_CONFIRMATION,              /*< Required door position was observed and the bounded confirmation delay is active.        */
+    LCS_STATE_DOOR_SENSOR_CONFIRMATION,              /*< Required door position was observed and the bounded confirmation delay is active.                */
 
-    LCS_STATE_READY_TO_LOCK,                         /*< Door-control confirmation has been requested and the FSM awaits authorization to relock. */
+    LCS_STATE_READY_TO_LOCK,                         /*< Door-control confirmation has been requested and the FSM awaits authorization to relock.         */
 
-    LCS_STATE_LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE,  /*< Access remains locked while bounded access-denied feedback is active.                    */
+    LCS_STATE_DOOR_HELD_OPEN,                        /*< The door remained open until the unlock-hold interval elapsed and a new exit request is required.*/
+    
+    LCS_STATE_LOCKED_ACCESS_DENIED_FEEDBACK_ACTIVE,  /*< Access remains locked while bounded access-denied feedback is active.                            */
 
-    LCS_STATE_LOCKOUT,                               /*< Credential-entry requests are rejected until the lockout interval expires.               */
+    LCS_STATE_LOCKOUT,                               /*< Credential-entry requests are rejected until the lockout interval expires.                       */
 
-    LCS_STATE_FAULT,                                 /*< A critical failure prevents further normal operation in this runtime.                    */
+    LCS_STATE_FAULT,                                 /*< A critical failure prevents further normal operation in this runtime.                            */
 
-    LCS_STATE_COUNT                                  /*< Number of private state identifiers; not a runtime state.                                */
+    LCS_STATE_COUNT                                  /*< Number of private state identifiers; not a runtime state.                                        */
 
 }LCS_State_t;
 
@@ -396,7 +398,7 @@ static const LCS_Transition_t LCS_Transitions[] =
         .internal_effect = LCS_INTERNAL_EFFECT_CLEAR_PENDING,
         .action          = LCS_ACTION_EXIT_REQUEST_UNLOCK
     },
-
+    
     {
         .source_state    = LCS_STATE_ACCESS_UNLOCKED,
         .event           = LCS_EVENT_DOOR_POSITION_CONFIRMED,
@@ -405,6 +407,36 @@ static const LCS_Transition_t LCS_Transitions[] =
         .target_state    = LCS_STATE_DOOR_SENSOR_CONFIRMATION,
         .internal_effect = LCS_INTERNAL_EFFECT_NONE,
         .action          = LCS_ACTION_BEGIN_DOOR_SENSOR_CONFIRMATION
+    },
+
+    {
+        .source_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .event           = LCS_EVENT_UNLOCK_HOLD_TIMEOUT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_DOOR_HELD_OPEN,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_FORCE_ACTUATOR_LOCK
+    },
+
+    {
+        .source_state    = LCS_STATE_DOOR_HELD_OPEN,
+        .event           = LCS_EVENT_EXIT_REQUEST,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_ACCESS_UNLOCKED,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_EXIT_REQUEST_UNLOCK
+    },
+
+    {
+        .source_state    = LCS_STATE_DOOR_HELD_OPEN,
+        .event           = LCS_EVENT_CRITICAL_FAULT,
+        .guard           = LCS_GUARD_ALWAYS,
+        .pending_op      = LCS_PENDING_NONE,
+        .target_state    = LCS_STATE_FAULT,
+        .internal_effect = LCS_INTERNAL_EFFECT_NONE,
+        .action          = LCS_ACTION_REQUEST_CONTROLLED_RESET
     },
 
     {
@@ -434,7 +466,7 @@ static const LCS_Transition_t LCS_Transitions[] =
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_ACCESS_UNLOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_NONE,
-        .action          = LCS_ACTION_NONE
+        .action          = LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT
     },
 
     {
@@ -444,7 +476,7 @@ static const LCS_Transition_t LCS_Transitions[] =
         .pending_op      = LCS_PENDING_NONE,
         .target_state    = LCS_STATE_ACCESS_UNLOCKED,
         .internal_effect = LCS_INTERNAL_EFFECT_NONE,
-        .action          = LCS_ACTION_NONE
+        .action          = LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT
     },
 
     {
