@@ -654,6 +654,11 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         case LCS_ACTION_REQUEST_UNLOCK:
 
+            if(!App_StartTimeout(APP_TIMEOUT_UNLOCK_HOLD))
+            {
+                return LCS_EVENT_UNLOCK_REQUEST_FAILED;
+            }
+
             if(!App_RequestUnlock())
             {
                 if(!App_ForceLock())
@@ -674,6 +679,11 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
         case LCS_ACTION_EXIT_REQUEST_UNLOCK:
 
+            if(!App_StartTimeout(APP_TIMEOUT_UNLOCK_HOLD))
+            {
+                return LCS_EVENT_UNLOCK_REQUEST_FAILED;
+            }
+
             if(!App_RequestUnlock())
             {
                 if(!App_ForceLock())
@@ -685,6 +695,30 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
             }
 
             (void)SGS_Ring(SGS_RINGTONE_UNLOCKING, current_time_ms);
+
+        break;
+
+        case LCS_ACTION_FORCE_ACTUATOR_LOCK:
+
+            App_CancelTimeout();
+
+            if(!App_ForceLock())
+            {
+                return LCS_EVENT_CRITICAL_FAULT;
+            }
+
+            (void)SGS_Ring(SGS_RINGTONE_ENTRY_TIMEOUT, current_time_ms);
+
+            App_SetLockedPresentation();
+
+        break;
+
+        case LCS_ACTION_RESTART_UNLOCK_HOLD_TIMEOUT:
+
+            if(!App_StartTimeout(APP_TIMEOUT_UNLOCK_HOLD))
+            {
+                return LCS_EVENT_CRITICAL_FAULT;
+            }
 
         break;
 

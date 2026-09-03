@@ -262,6 +262,9 @@ static "C" {
 /** @brief Maximum credential-entry inactivity interval, in milliseconds.                                                         */
 #define APP_CREDENTIAL_ENTRY_TIMEOUT_MS         (5000U)
 
+/** @brief Maximum interval awaiting door-position confirmation after unlock, in milliseconds.                                    */
+#define APP_UNLOCK_HOLD_TIMEOUT_MS              (30000U)
+
 /** @brief Bounded delay after door-position confirmation, in milliseconds.                                                       */
 #define APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT_MS (800U)
 
@@ -314,6 +317,8 @@ typedef enum
 {
     APP_TIMEOUT_CREDENTIAL_ENTRY = 0U,     /*< Credential-entry inactivity interval.                        */
 
+    APP_TIMEOUT_UNLOCK_HOLD,               /*< Post-unlock interval awaiting door-position confirmation.    */
+    
     APP_DOOR_SENSOR_CONFIRMATION_TIMEOUT,  /*< Bounded delay before synchronous door-position confirmation. */
 
     APP_TIMEOUT_ACCESS_DENIED,             /*< Access-denied feedback interval.                             */
