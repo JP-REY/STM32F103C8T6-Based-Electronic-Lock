@@ -61,16 +61,16 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
     # Components
     Libs/Components/Buzzer/Src/Buzzer_Driver.c
-    Libs/Components/DoorSensor/Src/DoorSensor_Driver.c
-    Libs/Components/ExitButton/Src/ExitButton_Driver.c
-    Libs/Components/LCD/Src/LCD_Driver.c
-    Libs/Components/LCD/Src/LCD_PCF8574_BusAdapter.c
-    Libs/Components/LCD/Src/LCD_PWM_BacklightAdapter.c
+    Libs/Components/Door_Sensor/Src/DoorSensor_Driver.c
+    Libs/Components/Exit_Button/Src/ExitButton_Driver.c
+    Libs/Components/Lcd/Src/LCD_Driver.c
+    Libs/Components/Lcd/Src/LCD_PCF8574_BusAdapter.c
+    Libs/Components/Lcd/Src/LCD_PWM_BacklightAdapter.c
     Libs/Components/Led/Src/Led_Driver.c
-    Libs/Components/LockActuator/Src/LockActuator_Driver.c
-    Libs/Components/MatrixKeyboard/Src/MatrixKeyboard_Driver.c
-    Libs/Components/MatrixKeyboard/Src/MatrixKeyboard_GPIO_ScanAdapter.c
-    Libs/Components/PCF8574/Src/PCF8574_Driver.c
+    Libs/Components/Lock_Actuator/Src/LockActuator_Driver.c
+    Libs/Components/Keyboard/Src/MatrixKeyboard_Driver.c
+    Libs/Components/Keyboard/Src/MatrixKeyboard_GPIO_ScanAdapter.c
+    Libs/Components/Io_Expander/Src/PCF8574_Driver.c
 
     # Services
     Libs/Services/Authentication/Src/Authentication_Service.c
@@ -98,13 +98,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
     # Components
     Libs/Components/Buzzer/Inc
-    Libs/Components/DoorSensor/Inc
-    Libs/Components/ExitButton/Inc
-    Libs/Components/LCD/Inc
+    Libs/Components/Door_Sensor/Inc
+    Libs/Components/Exit_Button/Inc
+    Libs/Components/Lcd/Inc
     Libs/Components/Led/Inc
-    Libs/Components/LockActuator/Inc
-    Libs/Components/MatrixKeyboard/Inc
-    Libs/Components/PCF8574/Inc
+    Libs/Components/Lock_Actuator/Inc
+    Libs/Components/Keyboard/Inc
+    Libs/Components/Io_Expander/Inc
 
     # Services
     Libs/Services/Authentication/Inc
