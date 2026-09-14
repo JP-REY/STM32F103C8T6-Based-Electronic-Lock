@@ -24,8 +24,8 @@
  *          by only one serialized execution context at a time.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 17, 2026
+ * @version 1.1.0
+ * @date    Sep 14, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_SERVICES_STATUS_INDICATOR_INC_STATUS_INDICATION_SERVICE_H_
@@ -71,15 +71,23 @@ typedef enum
  */
 typedef enum
 {
-    SIS_INDICATION_LOCKED = 0U,    /*< Stable indication for the normal locked state. */
+    SIS_INDICATION_FIRST_BOOT = 0U,     /*< Continuous blink indication reserved for the first boot.            */
 
-    SIS_INDICATION_ACCESS_GRANTED, /*< Flash feedback after granted access.           */
+    SIS_INDICATION_LOCKED,              /*< Stable indication for the normal locked state.                      */
 
-    SIS_INDICATION_ACCESS_DENIED,  /*< Two-phase pulse feedback after denial.         */
+    SIS_INDICATION_CREDENTIAL_ENTRY,    /*< Stable LED-on indication while an installed credential is entered.  */
 
-    SIS_INDICATION_LOCKOUT_ENTRY,  /*< Accelerating pulses ending in a steady LED.    */
+    SIS_INDICATION_ACCESS_GRANTED,      /*< Flash feedback after granted access.                                */
 
-    SIS_INDICATION_COUNT           /*< Number of patterns and invalid-map boundary.   */
+    SIS_INDICATION_ACCESS_DENIED,       /*< Two-phase pulse feedback after denial.                              */
+
+    SIS_INDICATION_LOCKOUT_ENTRY,       /*< Accelerating pulses ending in a steady LED.                         */
+
+    SIS_INDICATION_ENROLLMENT,          /*< Stable LED-on indication while a new credential is entered.         */
+
+    SIS_INDICATION_ENROLLMENT_SUCCESS,  /*< Flash feedback after a new credential is saved.                     */
+
+    SIS_INDICATION_COUNT                /*< Number of patterns and invalid-map boundary.                        */
 
 }SIS_Indication_t;
 
@@ -112,7 +120,7 @@ typedef struct
 typedef struct
 {
     const SIS_Phase_t* _phases;      /*< Pointer to the first immutable pattern phase. */
-    uint16_t           _phase_count; /*< Number of valid phases in the sequence.        */
+    uint16_t           _phase_count; /*< Number of valid phases in the sequence.       */
 
 }SIS_Pattern_t;
 
