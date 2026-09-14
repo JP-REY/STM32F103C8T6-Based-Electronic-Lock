@@ -8,8 +8,8 @@
  *          unsigned 32-bit timestamp rollover.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 16, 2026
+ * @version 1.1.0
+ * @date    Sep 14, 2026
  **********************************************************************************************************************************/
 
 /**********************************************************************************************************************************
@@ -243,6 +243,69 @@ static const SGS_Phase_t SGS_LockoutPhases[] =
 };
 
 /**
+ * @brief   Rising chime emitted when entry of a new credential begins.
+ *
+ * @details Defines a 70 ms tone at 1800 Hz, 35 ms of silence and a 100 ms
+ *          tone at 2600 Hz, for a total nominal duration of 205 ms.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EnrollmentEntryPhases[] =
+{
+    { .frequency_hz = 1800U, .duration_ms =  70U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  35U, .output_enabled = false },
+    { .frequency_hz = 2600U, .duration_ms = 100U, .output_enabled = true  }
+};
+
+/**
+ * @brief   High-tone acknowledgement emitted before credential confirmation.
+ *
+ * @details Defines one enabled 3200 Hz tone phase with a nominal duration of
+ *          80 ms.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EnrollmentConfirmPhases[] =
+{
+    { .frequency_hz = 3200U, .duration_ms =  80U, .output_enabled = true }
+};
+
+/**
+ * @brief   Rising three-tone chime emitted after a new credential is saved.
+ *
+ * @details Defines 70 ms tones at 1800 Hz and 2400 Hz, separated by 30 ms of
+ *          silence, followed by a 120 ms tone at 3200 Hz. The pattern lasts
+ *          320 ms in total.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EnrollmentSuccessPhases[] =
+{
+    { .frequency_hz = 1800U, .duration_ms =  70U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  30U, .output_enabled = false },
+
+    { .frequency_hz = 2400U, .duration_ms =  70U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  30U, .output_enabled = false },
+
+    { .frequency_hz = 3200U, .duration_ms = 120U, .output_enabled = true  }
+};
+
+/**
+ * @brief   Descending chime emitted when credential confirmation does not match.
+ *
+ * @details Defines an 80 ms tone at 2400 Hz, 40 ms of silence and a 140 ms
+ *          tone at 1500 Hz, for a total nominal duration of 260 ms.
+ *
+ * @note    This pattern uses SGS_PRIORITY_FEEDBACK.
+ */
+static const SGS_Phase_t SGS_EnrollmentMismatchPhases[] =
+{
+    { .frequency_hz = 2400U, .duration_ms =  80U, .output_enabled = true  },
+    { .frequency_hz =    0U, .duration_ms =  40U, .output_enabled = false },
+    { .frequency_hz = 1500U, .duration_ms = 140U, .output_enabled = true  }
+};
+
+/**
  * @brief   Semantic ringtone-to-pattern map.
  *
  * @details Uses SGS_Ringtone_t values as designated indexes so each playable
@@ -308,6 +371,34 @@ static const SGS_Pattern_t SGS_PatternMap[SGS_RINGTONE_COUNT] =
     {
         .phases      = SGS_LockoutPhases,
         .phase_count = SGS_ARRAY_LENGTH(SGS_LockoutPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_ENROLLMENT_ENTRY] =
+    {
+        .phases      = SGS_EnrollmentEntryPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EnrollmentEntryPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_ENROLLMENT_CONFIRM] =
+    {
+        .phases      = SGS_EnrollmentConfirmPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EnrollmentConfirmPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_ENROLLMENT_SUCCESS] =
+    {
+        .phases      = SGS_EnrollmentSuccessPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EnrollmentSuccessPhases),
+        .priority    = SGS_PRIORITY_FEEDBACK
+    },
+
+    [SGS_RINGTONE_ENROLLMENT_MISMATCH] =
+    {
+        .phases      = SGS_EnrollmentMismatchPhases,
+        .phase_count = SGS_ARRAY_LENGTH(SGS_EnrollmentMismatchPhases),
         .priority    = SGS_PRIORITY_FEEDBACK
     }
 };

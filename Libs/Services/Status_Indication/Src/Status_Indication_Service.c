@@ -9,8 +9,8 @@
  *          progresses its effects from the same platform time base.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 17, 2026
+ * @version 1.1.0
+ * @date    Sep 14, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -44,35 +44,65 @@
  *
  */
 
-/** @brief Reserved static-effect interval for the locked indication. */
-#define LOCKED_INDICATION_LED_EFFECT_INTERVAL_MS         ( 0U  )
+/** @brief Flash transition interval used when first credential entry begins.            */
+#define ENROLLMENT_FIRST_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS            ( 40U )
 
-/** @brief Reserved static-effect repeat count for the locked indication. */
-#define LOCKED_INDICATION_LED_EFFECT_REPEATS             ( 0U  )
+/** @brief Flash repetition request used when first credential entry begins.             */
+#define ENROLLMENT_FIRST_ENTRY_INDICATION_LED_EFFECT_REPEATS                ( 5U  )
 
-/** @brief Transition interval used by the access-granted flash effect.   */
-#define ACCESS_GRANTED_INDICATION_LED_EFFECT_INTERVAL_MS ( 55U )
+/** @brief Flash transition interval used when credential confirmation begins.           */
+#define ENROLLMENT_CONFIRM_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS          ( 100U )
 
-/** @brief Repetition request used by the access-granted flash effect.    */
-#define ACCESS_GRANTED_INDICATION_LED_EFFECT_REPEATS     ( 7U )
+/** @brief Flash repetition request used when credential confirmation begins.            */
+#define ENROLLMENT_CONFIRM_ENTRY_INDICATION_LED_EFFECT_REPEATS              ( 2U )
 
-/** @brief Transition interval used by access-denied pulse phases.        */
-#define ACCESS_DENIED_INDICATION_LED_EFFECT_INTERVAL_MS  ( 100U )
+/** @brief Flash transition interval used after a credential-confirmation mismatch.      */
+#define ENROLLMENT_CONFIRM_ENTRY_FAIL_INDICATION_LED_EFFECT_INTERVAL_MS     ( 80U )
 
-/** @brief Repetition request used by access-denied pulse phases.         */
-#define ACCESS_DENIED_INDICATION_LED_EFFECT_REPEATS      ( 1U  )
+/** @brief Flash repetition request used after a credential-confirmation mismatch.       */
+#define ENROLLMENT_CONFIRM_ENTRY_FAIL_INDICATION_LED_EFFECT_REPEATS         ( 3U )
 
-/** @brief Transition interval used by lockout-entry pulse phases.        */
-#define LOCKOUT_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS  ( 100U )
+/** @brief Transition interval used by the credential-saved flash effect.               */
+#define ENROLLMENT_SUCCESS_INDICATION_LED_EFFECT_INTERVAL_MS                ( 80U )
 
-/** @brief Repetition request used by lockout-entry pulse phases.         */
-#define LOCKOUT_ENTRY_INDICATION_LED_EFFECT_REPEATS      ( 1U  )
+/** @brief Repetition request used by the credential-saved flash effect.                */
+#define ENROLLMENT_SUCCESS_INDICATION_LED_EFFECT_REPEATS                    ( 3U )
 
-/** @brief Static-effect interval currently used by the locked phase.     */
-#define LOCKOUT_INDICATION_LED_EFFECT_INTERVAL_MS        ( 0U  )
+/** @brief Flash transition interval used when installed credential entry begins.        */
+#define CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS                  ( 50U  )
 
-/** @brief Static-effect repeat count currently used by the locked phase. */
-#define LOCKOUT_INDICATION_LED_EFFECT_REPEATS            ( 0U  ) 
+/** @brief Flash repetition request used when installed credential entry begins.         */
+#define CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_REPEATS                      ( 10U  )
+
+/** @brief Reserved static-effect interval for the locked indication.                   */
+#define LOCKED_INDICATION_LED_EFFECT_INTERVAL_MS                            ( 0U  )
+
+/** @brief Reserved static-effect repeat count for the locked indication.               */
+#define LOCKED_INDICATION_LED_EFFECT_REPEATS                                ( 0U  )
+
+/** @brief Transition interval used by the access-granted flash effect.                 */
+#define ACCESS_GRANTED_INDICATION_LED_EFFECT_INTERVAL_MS                    ( 55U )
+
+/** @brief Repetition request used by the access-granted flash effect.                  */
+#define ACCESS_GRANTED_INDICATION_LED_EFFECT_REPEATS                        ( 7U )
+
+/** @brief Transition interval used by access-denied pulse phases.                      */
+#define ACCESS_DENIED_INDICATION_LED_EFFECT_INTERVAL_MS                     ( 100U )
+
+/** @brief Repetition request used by access-denied pulse phases.                       */
+#define ACCESS_DENIED_INDICATION_LED_EFFECT_REPEATS                         ( 1U  )
+
+/** @brief Transition interval used by lockout-entry pulse phases.                      */
+#define LOCKOUT_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS                     ( 100U )
+
+/** @brief Repetition request used by lockout-entry pulse phases.                       */
+#define LOCKOUT_ENTRY_INDICATION_LED_EFFECT_REPEATS                         ( 1U  )
+
+/** @brief Static-effect interval currently used by the locked phase.                   */
+#define LOCKOUT_INDICATION_LED_EFFECT_INTERVAL_MS                           ( 0U  )
+
+/** @brief Static-effect repeat count currently used by the locked phase.               */
+#define LOCKOUT_INDICATION_LED_EFFECT_REPEATS                               ( 0U  )
 
 /**********************************************************************************************************************************
  Private Types
@@ -80,6 +110,78 @@
 /**********************************************************************************************************************************
  Private Constants
  **********************************************************************************************************************************/
+/**
+ * @brief   Flash pattern emitted when first entry of a new credential begins.
+ *
+ * @details Starts with the LED on and requests five flash repetitions with a
+ *          40 ms transition interval. The service records a 200 ms phase
+ *          duration, while the LED Driver executes the finite effect.
+ */
+static const SIS_Phase_t SIS_EnrollmentFirstEntryPhases[] =
+{
+    {
+        ._led_state          = LED_STATE_ON,
+        ._effect             = LED_EFFECT_FLASH,
+        ._effect_interval_ms = ENROLLMENT_FIRST_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = ENROLLMENT_FIRST_ENTRY_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 200U
+    }
+};
+
+/**
+ * @brief   Flash pattern emitted when new-credential confirmation begins.
+ *
+ * @details Starts with the LED on and requests two flash repetitions with a
+ *          100 ms transition interval. The service records a 200 ms phase
+ *          duration, while the LED Driver executes the finite effect.
+ */
+static const SIS_Phase_t SIS_EnrollmentConfirmEntryPhases[] =
+{
+    {
+        ._led_state          = LED_STATE_ON,
+        ._effect             = LED_EFFECT_FLASH,
+        ._effect_interval_ms = ENROLLMENT_CONFIRM_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = ENROLLMENT_CONFIRM_ENTRY_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 200U
+    }
+};
+
+/**
+ * @brief   Flash pattern emitted after a credential-confirmation mismatch.
+ *
+ * @details Starts with the LED on and requests three flash repetitions with
+ *          an 80 ms transition interval. The service records a 240 ms phase
+ *          duration, while the LED Driver executes the finite effect.
+ */
+static const SIS_Phase_t SIS_EnrollmentConfirmEntryFailPhases[] =
+{
+    {
+        ._led_state          = LED_STATE_ON,
+        ._effect             = LED_EFFECT_FLASH,
+        ._effect_interval_ms = ENROLLMENT_CONFIRM_ENTRY_FAIL_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = ENROLLMENT_CONFIRM_ENTRY_FAIL_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 240U
+    }
+};
+
+/**
+ * @brief   Flash pattern emitted after a new credential is saved.
+ *
+ * @details Starts from LED off and requests three 80 ms flash repetitions.
+ *          The 480 ms service duration matches the six LED transitions
+ *          performed by the LED Driver before the pattern completes.
+ */
+static const SIS_Phase_t SIS_EnrollmentSuccessPhases[] =
+{
+    {
+        ._led_state          = LED_STATE_OFF,
+        ._effect             = LED_EFFECT_FLASH,
+        ._effect_interval_ms = ENROLLMENT_SUCCESS_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = ENROLLMENT_SUCCESS_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 480U
+    }
+};
+
 /**
  * @brief   Stable LED-off pattern used for the normal locked indication.
  *
@@ -98,7 +200,34 @@ static const SIS_Phase_t SIS_LockedPhases[] =
         ._effect_interval_ms = LOCKED_INDICATION_LED_EFFECT_INTERVAL_MS,
         ._effect_repeats     = LOCKED_INDICATION_LED_EFFECT_REPEATS,
         ._duration_ms        = 0U
+    }
+};
+
+/**
+ * @brief   Flash-then-static pattern used while an installed credential is entered.
+ *
+ * @details Requests a 50 ms flash effect with ten repetitions. After the
+ *          500 ms service phase, the terminal static LED-on phase
+ *          distinguishes credential entry from the normal locked LED-off
+ *          baseline.
+ */
+static const SIS_Phase_t SIS_CredentialEntryPhases[] =
+{
+    {
+        ._led_state          = LED_STATE_ON,
+        ._effect             = LED_EFFECT_FLASH,
+        ._effect_interval_ms = CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 500U
     },
+
+    {
+        ._led_state          = LED_STATE_ON,
+        ._effect             = LED_EFFECT_STATIC,
+        ._effect_interval_ms = CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_INTERVAL_MS,
+        ._effect_repeats     = CREDENTIAL_ENTRY_INDICATION_LED_EFFECT_REPEATS,
+        ._duration_ms        = 0U
+    }
 };
 
  /**
@@ -120,7 +249,7 @@ static const SIS_Phase_t SIS_AccessGrantedPhases[] =
         ._effect_interval_ms = ACCESS_GRANTED_INDICATION_LED_EFFECT_INTERVAL_MS,
         ._effect_repeats     = ACCESS_GRANTED_INDICATION_LED_EFFECT_REPEATS,
         ._duration_ms        = 770U
-    },
+    }
 };
 
 /**
@@ -238,14 +367,20 @@ static const SIS_Phase_t SIS_LockoutEntryPhases[] =
  *
  * @note    SIS_INDICATION_COUNT sizes the array and is not a valid map index.
  */
-static const SIS_Pattern_t SIS_PatternMap[SIS_INDICATION_COUNT] = 
+static const SIS_Pattern_t SIS_PatternMap[SIS_INDICATION_COUNT] =
 {
     [SIS_INDICATION_LOCKED] =
     {
         ._phases      = SIS_LockedPhases,
         ._phase_count = SIS_ARRAY_LENGTH(SIS_LockedPhases)
     },
-    
+
+    [SIS_INDICATION_CREDENTIAL_ENTRY] =
+    {
+        ._phases      = SIS_CredentialEntryPhases,
+        ._phase_count = SIS_ARRAY_LENGTH(SIS_CredentialEntryPhases)
+    },
+
     [SIS_INDICATION_ACCESS_GRANTED] =
     {
         ._phases      = SIS_AccessGrantedPhases,
@@ -262,6 +397,30 @@ static const SIS_Pattern_t SIS_PatternMap[SIS_INDICATION_COUNT] =
     {
         ._phases      = SIS_LockoutEntryPhases,
         ._phase_count = SIS_ARRAY_LENGTH(SIS_LockoutEntryPhases)
+    },
+
+    [SIS_INDICATION_ENROLLMENT_FIRST_ENTRY] =
+    {
+        ._phases      = SIS_EnrollmentFirstEntryPhases,
+        ._phase_count = SIS_ARRAY_LENGTH(SIS_EnrollmentFirstEntryPhases)
+    },
+
+    [SIS_INDICATION_ENROLLMENT_CONFIRM_ENTRY] =
+    {
+        ._phases      = SIS_EnrollmentConfirmEntryPhases,
+        ._phase_count = SIS_ARRAY_LENGTH(SIS_EnrollmentConfirmEntryPhases)
+    },
+
+    [SIS_INDICATION_ENROLLMENT_CONFIRM_ENTRY_FAIL] =
+    {
+        ._phases      = SIS_EnrollmentConfirmEntryFailPhases,
+        ._phase_count = SIS_ARRAY_LENGTH(SIS_EnrollmentConfirmEntryFailPhases)
+    },
+
+    [SIS_INDICATION_ENROLLMENT_SUCCESS] =
+    {
+        ._phases      = SIS_EnrollmentSuccessPhases,
+        ._phase_count = SIS_ARRAY_LENGTH(SIS_EnrollmentSuccessPhases)
     }
 };
 

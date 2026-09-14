@@ -29,8 +29,8 @@
  *          execution context at a time.
  *
  * @author  Joao Pedro Rey
- * @version 1.0.0
- * @date    Aug 16, 2026
+ * @version 1.1.0
+ * @date    Sep 14, 2026
  **********************************************************************************************************************************/
 
 #ifndef LIBS_SERVICES_SOUND_GENERATOR_INC_SOUND_GENERATOR_SERVICE_H_
@@ -80,30 +80,37 @@ typedef enum
  */
 typedef enum
 {
-    SGS_RINGTONE_KEYPRESS,          /*< Short acknowledgement for an accepted keypress. */
+    SGS_RINGTONE_KEYPRESS,              /*< Short acknowledgement for an accepted keypress.                     */
 
-    SGS_RINGTONE_ENTRY_INCOMPLETE,  /*< Short feedback for an entry incomplete.         */
+    SGS_RINGTONE_ENTRY_INCOMPLETE,      /*< Short feedback for an entry incomplete.                             */
 
-    SGS_RINGTONE_ENTRY_TIMEOUT,     /*< Short feedback for an entry timeout.            */
+    SGS_RINGTONE_ENTRY_TIMEOUT,         /*< Short feedback for an entry timeout.                                */
 
-    SGS_RINGTONE_ACCESS_GRANTED,    /*< Rising feedback pattern for granted access.     */
+    SGS_RINGTONE_ACCESS_GRANTED,        /*< Rising feedback pattern for granted access.                         */
 
-    SGS_RINGTONE_LOCKING,           /*< Descending feedback pattern for door locking.   */
+    SGS_RINGTONE_LOCKING,               /*< Descending feedback pattern for door locking.                       */
 
-    SGS_RINGTONE_UNLOCKING,         /*< Rising feedback pattern for door unlocking.     */
+    SGS_RINGTONE_UNLOCKING,             /*< Rising feedback pattern for door unlocking.                         */
 
-    SGS_RINGTONE_ERROR,             /*< Descending feedback pattern for an error.       */
+    SGS_RINGTONE_ERROR,                 /*< Descending feedback pattern for an error.                           */
 
-    SGS_RINGTONE_LOCKOUT,           /*< Feedback pattern for lockout entry.             */
+    SGS_RINGTONE_LOCKOUT,               /*< Feedback pattern for lockout entry.                                 */
 
-    SGS_RINGTONE_COUNT              /*< Number of patterns and invalid ringtone marker. */
+    SGS_RINGTONE_ENROLLMENT_ENTRY,      /*< Rising chime when entry of a new credential begins.                 */
+
+    SGS_RINGTONE_ENROLLMENT_CONFIRM,    /*< High-tone acknowledgement before confirming a new credential.       */
+
+    SGS_RINGTONE_ENROLLMENT_SUCCESS,    /*< Rising three-tone chime after a new credential is saved.            */
+
+    SGS_RINGTONE_ENROLLMENT_MISMATCH,   /*< Descending chime when credential confirmation does not match.       */
+
+    SGS_RINGTONE_COUNT                  /*< Number of patterns and invalid ringtone marker.                     */
 
 }SGS_Ringtone_t;
 
 /**********************************************************************************************************************************
  Data
  **********************************************************************************************************************************/
-
 /**********************************************************************************************************************************
  Function Prototypes
  **********************************************************************************************************************************/
