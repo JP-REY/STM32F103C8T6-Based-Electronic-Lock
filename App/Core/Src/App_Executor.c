@@ -20,8 +20,8 @@
  * @note    Execution is synchronous, serialized and non-reentrant. App Core is the only intended caller.
  *
  * @author  Joao Pedro Rey
- * @version 1.1.0
- * @date    Aug 30, 2026
+ * @version 1.2.0
+ * @date    Sep 14, 2026
  **********************************************************************************************************************************/
 /**********************************************************************************************************************************
  Includes
@@ -56,7 +56,7 @@ static DCS_RequestLockStatus_t App_RequestLock(void);
 /** @brief Requests actuator unlock after a finite unlock timeout has been established. */
 static bool App_RequestUnlock(void);
 
-/** @brief */
+/** @brief Forces the actuator locked through DCS, bypassing door-position validation. */
 static bool App_ForceLock(void);
 
 /*---------------------------------------------------------------------------------------------------------------------------------
@@ -275,15 +275,15 @@ static void App_SetCRSAuthPresentation(void)
 /**
  * @brief   Presents a newly opened credential-register first-entry session.
  *
- * @details Starts the enrollment-entry ringtone, selects the steady enrollment LED indication, enables the backlight, requests the
- *          fixed Update PIN prompt and clears retained mask progress before the proposed credential is collected.
+ * @details Starts the enrollment-entry ringtone, selects the first-entry flash indication, enables the backlight, requests the fixed
+ *          Update PIN prompt and clears retained mask progress before the proposed credential is collected.
  */
 static void App_SetCRSFirstEntryPresentation(void)
 {
     uint32_t current_time_ms = Platform_GetMillis();
 
     (void)SGS_Ring(SGS_RINGTONE_ENROLLMENT_ENTRY, current_time_ms);
-    (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_ENROLLMENT);
+    (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_ENROLLMENT_FIRST_ENTRY);
     (void)LCD_BacklightOn(App_Instance->Lcd);
     (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_FIRST_ENTRY);
     (void)DRS_SetEnteredDigits(0U);
@@ -293,12 +293,12 @@ static void App_SetCRSFirstEntryPresentation(void)
 /**
  * @brief   Presents a newly opened credential-register confirmation-entry session.
  *
- * @details Selects the steady enrollment LED indication, enables the backlight, requests the fixed Confirm PIN prompt and clears
+ * @details Selects the confirmation-entry flash indication, enables the backlight, requests the fixed Confirm PIN prompt and clears
  *          retained mask progress while CRS preserves the staged first entry. The caller emits any confirmation-feedback ringtone.
  */
 static void App_SetCRSConfirmEntryPresentation(void)
 {
-    (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_ENROLLMENT);
+    (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_ENROLLMENT_CONFIRM_ENTRY);
     (void)LCD_BacklightOn(App_Instance->Lcd);
     (void)DRS_SetScreen(DRS_SCREEN_CREDENTIAL_REGISTER_CONFIRM_ENTRY);
     (void)DRS_SetEnteredDigits(0U);
@@ -526,6 +526,8 @@ LCS_Event_t App_ExecuteAction(LCS_Action_t Action)
 
                 return LCS_EVENT_CREDENTIAL_CANCELLED;
             }
+
+            (void)SIS_SetIndication(App_Instance->Lock_Status_Indication, SIS_INDICATION_CREDENTIAL_ENTRY);
 
             App_SetCRSAuthPresentation();
 

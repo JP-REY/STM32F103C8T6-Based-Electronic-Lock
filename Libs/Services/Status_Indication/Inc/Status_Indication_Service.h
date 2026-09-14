@@ -71,23 +71,25 @@ typedef enum
  */
 typedef enum
 {
-    SIS_INDICATION_FIRST_BOOT = 0U,     /*< Continuous blink indication reserved for the first boot.            */
+    SIS_INDICATION_LOCKED = 0U,                     /*< Stable indication for the normal locked state.                      */
 
-    SIS_INDICATION_LOCKED,              /*< Stable indication for the normal locked state.                      */
+    SIS_INDICATION_CREDENTIAL_ENTRY,                /*< Flash feedback followed by stable LED-on for credential entry.      */
 
-    SIS_INDICATION_CREDENTIAL_ENTRY,    /*< Stable LED-on indication while an installed credential is entered.  */
+    SIS_INDICATION_ACCESS_GRANTED,                  /*< Flash feedback after granted access.                                */
 
-    SIS_INDICATION_ACCESS_GRANTED,      /*< Flash feedback after granted access.                                */
+    SIS_INDICATION_ACCESS_DENIED,                   /*< Two-phase pulse feedback after denial.                              */
 
-    SIS_INDICATION_ACCESS_DENIED,       /*< Two-phase pulse feedback after denial.                              */
+    SIS_INDICATION_LOCKOUT_ENTRY,                   /*< Accelerating pulses ending in a steady LED.                         */
 
-    SIS_INDICATION_LOCKOUT_ENTRY,       /*< Accelerating pulses ending in a steady LED.                         */
+    SIS_INDICATION_ENROLLMENT_FIRST_ENTRY,          /*< Flash feedback when entry of a new credential begins.               */
 
-    SIS_INDICATION_ENROLLMENT,          /*< Stable LED-on indication while a new credential is entered.         */
+    SIS_INDICATION_ENROLLMENT_CONFIRM_ENTRY,        /*< Flash feedback when confirmation of a new credential begins.        */
 
-    SIS_INDICATION_ENROLLMENT_SUCCESS,  /*< Flash feedback after a new credential is saved.                     */
+    SIS_INDICATION_ENROLLMENT_CONFIRM_ENTRY_FAIL,   /*< Flash feedback when credential confirmation does not match.         */
 
-    SIS_INDICATION_COUNT                /*< Number of patterns and invalid-map boundary.                        */
+    SIS_INDICATION_ENROLLMENT_SUCCESS,              /*< Flash feedback after a new credential is saved.                     */
+
+    SIS_INDICATION_COUNT                            /*< Number of patterns and invalid-map boundary.                        */
 
 }SIS_Indication_t;
 
